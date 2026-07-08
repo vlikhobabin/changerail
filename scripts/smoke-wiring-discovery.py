@@ -15,10 +15,32 @@ from typing import Iterable
 
 
 SCHEMA = "opsx.wiring-discovery-smoke.v1"
-SKILLS = ("opsx-explore", "opsx-ff")
+SKILLS = (
+    "opsx-explore",
+    "opsx-ff",
+    "opsx-do",
+    "opsx-review",
+    "opsx-pub",
+    "opsx-deliver",
+    "openspec-apply-change",
+    "openspec-archive-change",
+    "openspec-bulk-archive-change",
+    "openspec-continue-change",
+    "openspec-explore",
+    "openspec-ff-change",
+    "openspec-new-change",
+    "openspec-onboard",
+    "openspec-propose",
+    "openspec-sync-specs",
+    "openspec-verify-change",
+)
 COMMANDS = {
     "explore": "opsx-explore",
     "ff": "opsx-ff",
+    "do": "opsx-do",
+    "review": "opsx-review",
+    "pub": "opsx-pub",
+    "deliver": "opsx-deliver",
 }
 FORBIDDEN_CONSUMER_ROOT_SKILLS = re.compile(r"(^|[\s`'\"])(\./)?skills/")
 

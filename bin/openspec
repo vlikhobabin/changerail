@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+openspec_version="${OPENSPEC_VERSION:-1.3.0}"
+
+cd "${OPENSPEC_WORKDIR:-$PWD}"
+exec env OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}" \
+  npx -y "@fission-ai/openspec@${openspec_version}" "$@"

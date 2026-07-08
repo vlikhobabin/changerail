@@ -5,9 +5,9 @@ OpenSpec-артефакты, доска задач, проверяемый deliv
 toolchain для Codex CLI и Claude Code.
 
 Проект находится на ранней стадии выделения в самостоятельный открытый
-репозиторий. Текущий фокус - аккуратно зафиксировать архитектуру, правила
-публичного репозитория, будущий bootstrap нового проекта и план миграции
-проектов-потребителей на единый OPSX source of truth.
+репозиторий. Текущий фокус - закрепить минимальный source of truth, затем
+добавить bootstrap нового проекта, verify-project и drift gate для
+проектов-потребителей.
 
 ## Зачем нужен OPSX
 
@@ -72,7 +72,7 @@ OPSX проектируется как отдельный системный sou
       +----------------+----------------+
       |                |                |
       v                v                v
-/opt/app-a       /opt/app-b       /opt/service-c
+/opt/example-a   /opt/example-b   /opt/example-project
 ```
 
 ## Текущий статус
@@ -83,14 +83,20 @@ OPSX проектируется как отдельный системный sou
 - базовый `README.md`;
 - `AGENTS.shared.md` с начальной общей методологией OPSX для AI-агентов;
 - минимальную OpenSpec-доску для dogfooding развития самого OPSX;
-- минимальный generic skill surface: `opsx-explore`, `opsx-ff`;
-- начальные Claude wrappers: `/opsx:explore`, `/opsx:ff`;
+- generic OPSX lifecycle skills: `opsx-explore`, `opsx-ff`, `opsx-do`,
+  `opsx-review`, `opsx-pub`, `opsx-deliver`;
+- OpenSpec lifecycle skills `openspec-*` для proposal/spec/tasks, apply,
+  verify, sync и archive;
+- Claude wrappers `/opsx:explore`, `/opsx:ff`, `/opsx:do`, `/opsx:review`,
+  `/opsx:pub`, `/opsx:deliver`;
+- `bin/openspec` с pin версии OpenSpec CLI;
+- schemas `opsx.review-verdict.v1`, `opsx.delivery-manifest.v1`,
+  `opsx.evidence-index.v1` и helper `bin/opsx-review-verdict`;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
 Планируемые следующие части:
 
-- оставшиеся OPSX/OpenSpec lifecycle skills и slash-команды;
 - `bin/bootstrap-project`;
 - `bin/verify-project`;
 - `templates/project/`;
@@ -174,6 +180,8 @@ cd /opt/opsx
 Основной документ текущего этапа:
 
 - [OPSX как единый source of truth разработки](docs/opsx-source-of-truth-architecture.md)
+- [OpenSpec lifecycle source](docs/openspec-lifecycle.md)
+- [OPSX contracts](docs/opsx-contracts.md)
 
 ## Безопасность публичного репозитория
 
@@ -194,20 +202,17 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 
 ## Roadmap
 
-Текущая точка: OPSX находится между Фазой 1 и Фазой 2. Архитектура,
-dogfooding, `AGENTS.shared.md`, минимальные `opsx-explore`/`opsx-ff` и
-wiring discovery smoke уже реализованы. Полный lifecycle, bootstrap, verify,
-drift gate и миграция потребителей еще впереди.
+Текущая точка: Фаза 1 минимального source of truth реализована в рабочем
+дереве: generic lifecycle skills, OpenSpec lifecycle skills, wrapper
+`bin/openspec`, schemas и review-verdict helper присутствуют. Bootstrap,
+verify-project, drift gate и миграция потребителей еще впереди.
 
 Ближайшие шаги:
 
-1. Завершить минимальный source of truth: перенести `opsx-do`,
-   `opsx-review`, `opsx-pub`, `opsx-deliver`, `openspec-*` skills, schemas и
-   helper-ы.
-2. Реализовать `bootstrap-project`.
-3. Реализовать `verify-project`.
-4. Добавить drift gate для workspace consumers.
-5. Переключить существующие legacy consumers на `/opt/opsx`.
-6. Подключить новые проекты через adoption/bootstrap flow.
-7. Подготовить первый стабильный release: semver, changelog, compatibility
+1. Реализовать `bootstrap-project`.
+2. Реализовать `verify-project`.
+3. Добавить drift gate для workspace consumers.
+4. Переключить существующие legacy consumers на `/opt/opsx`.
+5. Подключить новые проекты через adoption/bootstrap flow.
+6. Подготовить первый стабильный release: semver, changelog, compatibility
    notes и CI.

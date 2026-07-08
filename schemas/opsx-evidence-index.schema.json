@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsx.local/schemas/opsx-evidence-index.schema.json",
+  "title": "OPSX evidence index",
+  "type": "object",
+  "required": [
+    "schema",
+    "updated_at",
+    "workspace",
+    "scope",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "opsx.evidence-index.v1"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "card_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "card_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "trace_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidenceEntry"
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trace_payload_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/outputPath"
+          }
+        },
+        "manifest_update": {
+          "$ref": "#/$defs/outputPath"
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "evidenceEntry": {
+      "type": "object",
+      "required": ["path", "role", "storage", "phase"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": [
+            "raw_output",
+            "curated_summary",
+            "verification_matrix",
+            "delivery_manifest",
+            "trace_payload_reference",
+            "retrospective_input",
+            "archive_result"
+          ]
+        },
+        "storage": {
+          "enum": ["committable", "runtime", "external"]
+        },
+        "phase": {
+          "enum": ["ff", "do", "pub", "manual"]
+        },
+        "change": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "outputPath": {
+      "type": "object",
+      "required": ["path", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["trace_payload", "manifest_update", "evidence_index"]
+        }
+      }
+    }
+  }
+}

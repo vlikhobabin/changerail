@@ -18,17 +18,18 @@ The project is currently in bootstrap stage. The tracked public surface is:
 - root `README.md`;
 - reusable OPSX methodology in `AGENTS.shared.md`;
 - self-hosted OpenSpec dogfooding structure under `openspec/`;
-- initial generic OPSX skills under `skills/`;
-- initial Claude command wrappers under `claude/commands/opsx/`;
+- generic OPSX lifecycle skills and OpenSpec lifecycle skills under `skills/`;
+- Claude command wrappers under `claude/commands/opsx/`;
+- OPSX contract schemas under `schemas/`;
+- helper wrappers `bin/openspec` and `bin/opsx-review-verdict`;
 - MIT `LICENSE`;
 - public Codex configuration under `.codex/config.toml`;
+- repo-local Codex skill symlinks under `.codex/skills/`;
 - MCP baseline config under `.mcp.json`;
 - repo-scoped Codex launcher `bin/codex`.
 
 Planned public surface:
 
-- remaining OPSX and OpenSpec lifecycle skills;
-- remaining Claude Code slash command wrappers;
 - `templates/project/` for project bootstrap templates;
 - `bin/bootstrap-project` and `bin/verify-project`;
 - drift/smoke checks under `scripts/`.
@@ -41,8 +42,9 @@ Planned public surface:
   such as `internal/`.
 - Never commit `.env`, keys, tokens, dumps, logs, traces, local databases,
   screenshots, runtime reports or agent session state.
-- Do not commit Codex runtime files from `.codex/` other than
-  `.codex/config.toml`.
+- Do not commit Codex runtime files from `.codex/`. Public `.codex/config.toml`
+  and repo-local `.codex/skills/*` symlinks are the only intended tracked
+  Codex files.
 - Do not commit `.claude/settings.local.json` or local MCP overrides.
 - Before commit, run a public-surface scan for private names and paths relevant
   to the current machine.

@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsx.local/schemas/opsx-delivery-manifest.schema.json",
+  "title": "OPSX delivery manifest",
+  "type": "object",
+  "required": [
+    "schema",
+    "workspace",
+    "card",
+    "changes",
+    "committable_paths",
+    "excluded_runtime_paths",
+    "preexisting_dirty",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "opsx.delivery-manifest.v1"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "card": {
+      "type": "object",
+      "required": ["id", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/change"
+      }
+    },
+    "committable_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/manifestPath"
+      }
+    },
+    "excluded_runtime_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/runtimePath"
+      }
+    },
+    "preexisting_dirty": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dirtyPath"
+      }
+    },
+    "hunk_evidence_paths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/runtimePath"
+      }
+    },
+    "runtime_checkpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/runtimeCheckpoint"
+      }
+    },
+    "runtime_pause_reasons": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/runtimePauseReason"
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "publish": {
+      "$ref": "#/$defs/publishResult"
+    }
+  },
+  "$defs": {
+    "publishResult": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": ["pending", "staged", "committed", "pushed", "skipped", "failed"]
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pushed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "committed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "change": {
+      "type": "object",
+      "required": ["slug", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "state": {
+          "enum": ["planned", "active", "archived", "skipped"]
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "active_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "archive_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "manifestPath": {
+      "type": "object",
+      "required": ["path", "kind", "phase"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Descriptive label for the committable path; not validated as a fixed set. Common values: board, openspec_change, openspec_archive, openspec_spec, spec, skill, schema, source, test, docs, config, script, ci, board_followup, other."
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Descriptive OPSX phase that produced this path; not validated as a fixed set. Common values: ff, do, pub, manual, archive, all."
+        },
+        "change": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "runtimePath": {
+      "type": "object",
+      "required": ["path", "kind", "phase"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Descriptive label for the excluded runtime path; not validated as a fixed set. Common values: trace, manifest, temp_patch, artifact, evidence, tmp, logs, runtime_log, runtime_screenshot, codex_runtime, other."
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Descriptive OPSX phase that produced this path; not validated as a fixed set. Common values: ff, do, pub, manual, archive, all."
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "dirtyPath": {
+      "type": "object",
+      "required": ["path", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "enum": ["git-status-short", "manual"]
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "runtimeCheckpoint": {
+      "type": "object",
+      "required": ["id", "boundary", "state"],
+      "allOf": [
+        {
+          "$comment": "next_action is required only while the checkpoint is pending; completed/resumed checkpoints have none.",
+          "if": {
+            "properties": {
+              "state": {
+                "enum": ["planned", "paused"]
+              }
+            }
+          },
+          "then": {
+            "required": ["next_action"]
+          }
+        }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "change": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "boundary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "enum": ["planned", "completed", "paused", "resumed"]
+        },
+        "evidence_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "next_action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "runtimePauseReason": {
+      "type": "object",
+      "required": ["id", "category", "summary", "next_action"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checkpoint_id": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "category": {
+          "enum": [
+            "planned_checkpoint",
+            "safety_pause",
+            "provider_tool_failure",
+            "workspace_validation_failure",
+            "operator_stop",
+            "card_size_design_failure"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "next_action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "owner_path": {
+          "type": "string"
+        },
+        "evidence_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "residual_risk": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

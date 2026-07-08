@@ -7,8 +7,9 @@ dogfooding `/opt/opsx`.
 
 ## Requirements
 ### Requirement: Consumer wiring contract
-OPSX MUST define how consumer projects expose OPSX skills and command wrappers
-without requiring undocumented root paths.
+OPSX MUST define how consumer projects expose OPSX skills, OpenSpec lifecycle
+skills, command wrappers and helper wrappers without requiring undocumented
+root paths.
 
 #### Scenario: Consumer project wires Claude surface
 - **WHEN** a consumer project follows OPSX wiring
@@ -17,8 +18,13 @@ without requiring undocumented root paths.
 
 #### Scenario: Consumer project wires Codex surface
 - **WHEN** a consumer project follows OPSX wiring
-- **THEN** Codex skills resolve from `.codex/skills/opsx-*` entries without
-  committing Codex runtime state
+- **THEN** Codex skills resolve from `.codex/skills/opsx-*` and
+  `.codex/skills/openspec-*` entries without committing Codex runtime state
+
+#### Scenario: Consumer project wires OpenSpec wrapper
+- **WHEN** a consumer project follows OPSX wiring
+- **THEN** `bin/openspec` can resolve to the OPSX wrapper while project-local
+  OpenSpec artifacts remain in the consumer repository
 
 ### Requirement: Repo-local dogfooding wiring
 OPSX MUST define repo-local dogfooding wiring for `/opt/opsx` without symlinks
