@@ -1,0 +1,71 @@
+name: OPSX CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify OPSX release gates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js for OpenSpec wrapper
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: OpenSpec validation
+        run: ./bin/openspec validate --all --strict
+
+      - name: Docs and config baseline
+        run: |
+          python3 -m json.tool .mcp.json
+          python3 - <<'PY'
+          import tomllib
+          for path in (".codex/config.toml",):
+              with open(path, "rb") as f:
+                  tomllib.load(f)
+          print("TOML_OK")
+          PY
+          git diff --check
+
+      - name: Python syntax checks
+        run: |
+          python3 -m py_compile \
+            bin/bootstrap-project \
+            bin/verify-project \
+            scripts/opsx_review_verdict.py \
+            scripts/smoke-bootstrap-project.py \
+            scripts/smoke-drift.py \
+            scripts/smoke-release-ci.py \
+            scripts/smoke-verify-project.py \
+            scripts/smoke-wiring-discovery.py
+
+      - name: CI contract smoke
+        run: python3 scripts/smoke-release-ci.py
+
+      - name: Wiring discovery smoke
+        run: python3 scripts/smoke-wiring-discovery.py
+
+      - name: Verify-project smoke
+        run: python3 scripts/smoke-verify-project.py
+
+      - name: Bootstrap smoke
+        run: python3 scripts/smoke-bootstrap-project.py
+
+      - name: Drift smoke with generated fixture
+        run: |
+          rm -rf .runtime/opsx/ci-drift
+          ./bin/bootstrap-project .runtime/opsx/ci-drift/example-project \
+            --name example-project \
+            --kind generic
+          python3 scripts/smoke-drift.py \
+            --project .runtime/opsx/ci-drift/example-project

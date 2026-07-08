@@ -96,13 +96,16 @@ OPSX проектируется как отдельный системный sou
 - `bin/verify-project` как red/green gate для consumer wiring/config;
 - `bin/bootstrap-project` для создания generic consumer project;
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
+- `VERSION`, `CHANGELOG.md`, compatibility notes и migration guide для
+  release discipline;
+- `.github/workflows/opsx-ci.yml` и `scripts/smoke-release-ci.py` для
+  release CI gate;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
 Планируемые следующие части:
 
-- миграция и adoption flow для существующих/новых consumer projects;
-- release discipline: semver, changelog, compatibility notes и CI.
+- миграция и adoption flow для существующих/новых consumer projects.
 
 ## Планируемая структура
 
@@ -194,6 +197,9 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 - [OPSX как единый source of truth разработки](docs/opsx-source-of-truth-architecture.md)
 - [OpenSpec lifecycle source](docs/openspec-lifecycle.md)
 - [OPSX contracts](docs/opsx-contracts.md)
+- [Release discipline](docs/release-discipline.md)
+- [Compatibility notes](docs/compatibility.md)
+- [Migration guide](docs/migration-guide.md)
 
 ## Безопасность публичного репозитория
 
@@ -217,12 +223,12 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 Текущая точка: Фазы 1-3 реализованы в рабочем дереве: generic lifecycle
 skills, OpenSpec lifecycle skills, wrapper `bin/openspec`, schemas,
 review-verdict helper, project templates, `bin/verify-project`,
-`bin/bootstrap-project` и `scripts/smoke-drift.py` присутствуют. Миграция
+`bin/bootstrap-project`, `scripts/smoke-drift.py`, semver/changelog,
+compatibility notes, migration guide и release CI присутствуют. Миграция
 потребителей еще впереди.
 
 Ближайшие шаги:
 
 1. Переключить существующие legacy consumers на `/opt/opsx`.
 2. Подключить новые проекты через adoption/bootstrap flow.
-3. Подготовить первый стабильный release: semver, changelog, compatibility
-   notes и CI.
+3. Подготовить первый stable release после миграции/adoption feedback.

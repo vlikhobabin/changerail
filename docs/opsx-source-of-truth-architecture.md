@@ -460,13 +460,13 @@ workspace используют единый pipeline через `/opt/opsx`": о
 
 Результат: все нужные проекты используют один OPSX toolchain.
 
-### Фаза 6. Версионирование и релизная дисциплина - not started
+### Фаза 6. Версионирование и релизная дисциплина - implemented
 
-- [ ] Ввести semver.
-- [ ] Описать changelog.
-- [ ] Добавить compatibility notes для Codex CLI, Claude Code и OpenSpec CLI.
-- [ ] Добавить migration notes между версиями.
-- [ ] Настроить CI для templates, bootstrap, verify и drift.
+- [x] Ввести semver.
+- [x] Описать changelog.
+- [x] Добавить compatibility notes для Codex CLI, Claude Code и OpenSpec CLI.
+- [x] Добавить migration notes между версиями.
+- [x] Настроить CI для templates, bootstrap, verify и drift.
 
 Результат: OPSX становится самостоятельной поддерживаемой технологией.
 
