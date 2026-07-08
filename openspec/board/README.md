@@ -42,5 +42,7 @@
 5. Записать результат, проверки и archive paths.
 6. После independent review и publish перенести карточку в `4.done/`.
 
-До появления собственных `opsx-*` skills в этом репозитории карточки и changes
-поддерживаются прямыми правками с baseline verification из `AGENTS.md`.
+Минимальный собственный OPSX surface уже начинается с `opsx-explore` и
+`opsx-ff`. Пока delivery/review/publish skills не перенесены, реализация,
+archive и publish выполняются прямыми правками с baseline verification из
+`AGENTS.md` либо через явно доступный project-local workflow.

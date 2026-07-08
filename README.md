@@ -83,13 +83,14 @@ OPSX проектируется как отдельный системный sou
 - базовый `README.md`;
 - `AGENTS.shared.md` с начальной общей методологией OPSX для AI-агентов;
 - минимальную OpenSpec-доску для dogfooding развития самого OPSX;
+- минимальный generic skill surface: `opsx-explore`, `opsx-ff`;
+- начальные Claude wrappers: `/opsx:explore`, `/opsx:ff`;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
 Планируемые следующие части:
 
-- `skills/` с OPSX и OpenSpec lifecycle skills;
-- `claude/commands/opsx/` с slash-командами;
+- оставшиеся OPSX/OpenSpec lifecycle skills и slash-команды;
 - `bin/bootstrap-project`;
 - `bin/verify-project`;
 - `templates/project/`;

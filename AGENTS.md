@@ -18,6 +18,8 @@ The project is currently in bootstrap stage. The tracked public surface is:
 - root `README.md`;
 - reusable OPSX methodology in `AGENTS.shared.md`;
 - self-hosted OpenSpec dogfooding structure under `openspec/`;
+- initial generic OPSX skills under `skills/`;
+- initial Claude command wrappers under `claude/commands/opsx/`;
 - MIT `LICENSE`;
 - public Codex configuration under `.codex/config.toml`;
 - MCP baseline config under `.mcp.json`;
@@ -25,8 +27,8 @@ The project is currently in bootstrap stage. The tracked public surface is:
 
 Planned public surface:
 
-- `skills/` for OPSX and OpenSpec lifecycle skills;
-- `claude/commands/opsx/` for Claude Code slash commands;
+- remaining OPSX and OpenSpec lifecycle skills;
+- remaining Claude Code slash command wrappers;
 - `templates/project/` for project bootstrap templates;
 - `bin/bootstrap-project` and `bin/verify-project`;
 - drift/smoke checks under `scripts/`.
@@ -79,6 +81,9 @@ untrusted content.
 - Keep public docs and OPSX-owned OpenSpec artifacts in Russian for now;
   English docs will be added later. Technical identifiers, commands, paths and
   schema-required OpenSpec keywords may stay in English.
+- Agent runtime contracts under `skills/` and `claude/commands/opsx/` may use
+  English because their frontmatter, trigger descriptions and instructions are
+  consumed directly by coding agents.
 - Keep `AGENTS.shared.md` generic and reusable; keep this root `AGENTS.md`
   specific to the OPSX repository.
 - Keep generic OPSX core separate from future domain-specific extensions.
