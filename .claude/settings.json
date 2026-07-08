@@ -1,0 +1,31 @@
+{
+  "env": {
+    "MCP_TIMEOUT": "90000"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__context7__*",
+      "mcp__filesystem__*",
+      "Agent(*)",
+      "TodoWrite(*)",
+      "TodoRead(*)",
+      "NotebookRead(*)",
+      "NotebookEdit(*)"
+    ],
+    "deny": [
+      "Bash(*DROP DATABASE*)",
+      "Bash(*DROP SCHEMA*)",
+      "Bash(*dropdb *)",
+      "Bash(*git push*--force*)",
+      "Bash(*git push*-f *)"
+    ]
+  }
+}

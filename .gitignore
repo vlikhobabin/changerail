@@ -1,0 +1,105 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+secrets/
+.secrets/
+
+# Agent and tool runtime state
+.runtime/
+.artifacts/
+.ai/
+# CODEX_HOME may point at <repo>/.codex. Keep live runtime/auth/session state
+# out of git, but allow the public project config to be versioned.
+.codex/*
+!.codex/config.toml
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/
+.claude/settings.local.json
+.claude/local/
+.mcp.local.json
+claude-trace-context.json
+
+# Logs, traces, dumps and local reports
+*.log
+*.trace
+*.har
+*.dump
+*.dmp
+*.pcap
+*.pcapng
+logs/
+traces/
+coverage/
+htmlcov/
+allure-results/
+allure-report/
+junit.xml
+
+# Databases and local state stores
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.qdrant/
+*.postgres/
+
+# Archives and backups that may contain local data
+*.bak
+*.backup
+*.orig
+*.rej
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# Dependency and build output
+node_modules/
+dist/
+build/
+out/
+.next/
+.vite/
+.turbo/
+target/
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Editor, OS and local workspace files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local-only notes and scratch space
+local/
+scratch/
+tmp/
+temp/
+internal/
+customer-data/
