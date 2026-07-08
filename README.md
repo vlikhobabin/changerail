@@ -194,12 +194,20 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 
 ## Roadmap
 
+Текущая точка: OPSX находится между Фазой 1 и Фазой 2. Архитектура,
+dogfooding, `AGENTS.shared.md`, минимальные `opsx-explore`/`opsx-ff` и
+wiring discovery smoke уже реализованы. Полный lifecycle, bootstrap, verify,
+drift gate и миграция потребителей еще впереди.
+
 Ближайшие шаги:
 
-1. Зафиксировать публичную архитектуру и правила репозитория.
-2. Добавить `AGENTS.shared.md` и начать dogfooding через OpenSpec-доску.
-3. Перенести минимальный набор OPSX skills и команд в generic-форме.
-4. Реализовать `bootstrap-project`.
-5. Реализовать `verify-project`.
-6. Добавить smoke/drift-проверки.
-7. Подготовить первый стабильный release.
+1. Завершить минимальный source of truth: перенести `opsx-do`,
+   `opsx-review`, `opsx-pub`, `opsx-deliver`, `openspec-*` skills, schemas и
+   helper-ы.
+2. Реализовать `bootstrap-project`.
+3. Реализовать `verify-project`.
+4. Добавить drift gate для workspace consumers.
+5. Переключить существующие legacy consumers на `/opt/opsx`.
+6. Подключить новые проекты через adoption/bootstrap flow.
+7. Подготовить первый стабильный release: semver, changelog, compatibility
+   notes и CI.

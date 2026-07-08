@@ -344,89 +344,143 @@ roots и показать:
 
 ## 12. Дорожная карта реализации OPSX
 
-### Фаза 0. Зафиксировать решение
+Статус актуализирован: 2026-07-08.
 
-- Создать `/opt/opsx/docs`.
-- Добавить архитектурный документ.
-- Создать публичный GitHub-репозиторий.
-- Добавить `.gitignore`, `README.md` и `LICENSE`.
+Текущая точка: OPSX находится между Фазой 1 и Фазой 2. Архитектурное решение,
+dogfooding через OpenSpec, shared methodology, минимальная поверхность
+`opsx-explore`/`opsx-ff` и discovery-smoke уже есть. Полный lifecycle
+`do -> review -> pub`, bootstrap, verify, drift-gate и массовая миграция
+потребителей еще не завершены.
+
+Операционная оценка готовности к целевому состоянию "выбранные проекты
+workspace используют единый pipeline через `/opt/opsx`": около 20%. Эта оценка
+не является release-метрикой; точную картину по конкретной машине должен
+показывать будущий drift report, а публичная документация фиксирует только
+generic-классы потребителей.
+
+### Фаза 0. Зафиксировать решение - done
+
+- [x] Создать `/opt/opsx/docs`.
+- [x] Добавить архитектурный документ.
+- [x] Создать публичный GitHub-репозиторий.
+- [x] Добавить `.gitignore`, `README.md` и `LICENSE`.
 
 Результат: есть место и зафиксированное архитектурное решение.
 
-### Фаза 1. Собрать минимальный source of truth
+### Фаза 1. Собрать минимальный source of truth - in progress
 
-- Добавить generic `opsx-*` skills.
-- Добавить `openspec-*` lifecycle skills.
-- Добавить Claude `/opsx:*` command wrappers.
-- Добавить wrapper `openspec`.
-- Добавить helper review-verdict.
-- Добавить `schemas/` с контрактами review-verdict, delivery-manifest,
+Готово:
+
+- [x] Добавить `AGENTS.shared.md`.
+- [x] Добавить минимальные generic skills `opsx-explore` и `opsx-ff`.
+- [x] Добавить Claude wrappers `/opsx:explore` и `/opsx:ff`.
+- [x] Добавить repo-local wiring для dogfooding Codex и Claude.
+- [x] Добавить discovery-smoke для repo-local и consumer-example wiring.
+
+Осталось:
+
+- [ ] Добавить generic lifecycle skills `opsx-do`, `opsx-review`,
+  `opsx-pub` и `opsx-deliver`.
+- [ ] Добавить `openspec-*` lifecycle skills.
+- [ ] Добавить wrapper `bin/openspec`.
+- [ ] Добавить helper review-verdict.
+- [ ] Добавить `schemas/` с контрактами review-verdict, delivery-manifest,
   evidence-index в namespace `opsx.*`.
-- Добавить `AGENTS.shared.md`.
-- Генерализовать каждый переносимый skill: убрать machine-specific
+- [ ] Генерализовать каждый переносимый skill: убрать machine-specific
   fallback-пути и упоминания legacy-workspace (см. Path-neutrality),
   перевести контрактные id на `opsx.*`, зафиксировать язык публичной
   документации.
-- Проверить лицензию и происхождение переносимых upstream `openspec-*`
+- [ ] Проверить лицензию и происхождение переносимых upstream `openspec-*`
   skills; зафиксировать политику синка с развитием OpenSpec CLI.
 
-Результат: OPSX может быть источником symlink-ов для новых проектов.
+Результат фазы: OPSX может быть источником symlink-ов для новых проектов и
+миграции существующих consumers.
 
-### Фаза 2. Bootstrap и templates
+### Фаза 2. Bootstrap и templates - not started
 
-- Создать `templates/project`.
-- Описать placeholders для project path, project name, project kind.
-- Реализовать `bin/bootstrap-project`.
-- Реализовать `bin/verify-project`.
-- Добавить smoke-проект в `.runtime` для проверки bootstrap.
+- [ ] Создать `templates/project`.
+- [ ] Описать placeholders для project path, project name, project kind.
+- [ ] Реализовать `bin/bootstrap-project`.
+- [ ] Реализовать `bin/verify-project`.
+- [ ] Добавить smoke-проект в `.runtime` для проверки bootstrap.
 
 Результат: новый проект можно создать одной командой.
 
-### Фаза 3. Drift gate
+### Фаза 3. Drift gate - partially started
 
-- Реализовать `scripts/smoke-drift.py`.
-- Добавить список include/exclude проектов.
-- Проверить configured workspace roots.
-- Добавить machine-readable output для CI.
+Готово:
+
+- [x] Добавить discovery-smoke для минимальной поверхности
+  `opsx-explore`/`opsx-ff`.
+
+Осталось:
+
+- [ ] Реализовать `scripts/smoke-drift.py`.
+- [ ] Добавить список include/exclude проектов.
+- [ ] Проверить configured workspace roots.
+- [ ] Добавить machine-readable output для CI.
+- [ ] Показывать consumer-классы: OPSX source, legacy source, broken wiring,
+  disconnected и explicitly excluded.
 
 Результат: можно видеть, какие проекты соответствуют OPSX source of truth.
 
-### Фаза 4. Миграция существующих потребителей
+### Фаза 4. Миграция существующих потребителей - not started
 
-- Найти проекты, где workflow уже частично настроен локально.
-- Переключить их skills/commands на OPSX — для workspace с развернутой сетью
-  потребителей предпочтительно через агрегатор (см. раздел 8): одно
-  изменение в доменном источнике вместо правки каждого потребителя.
-- Перевести drift-gate legacy-источника: его канонические проверки должны
-  либо указывать на OPSX, либо проверять агрегатор-симлинки на OPSX — иначе
-  после переключения gate уйдет в красное.
-- Решить владение OpenSpec-спеками и тестами generic skills: перенести в
+- [ ] Найти проекты, где workflow уже частично настроен локально.
+- [ ] Переключить их skills/commands на OPSX. Для workspace с развернутой
+  сетью потребителей предпочтительно использовать агрегатор (см. раздел 8):
+  одно изменение в доменном источнике вместо правки каждого потребителя.
+- [ ] Перевести drift-gate legacy-источника: его канонические проверки должны
+  либо указывать на OPSX, либо проверять агрегатор-симлинки на OPSX.
+- [ ] Решить владение OpenSpec-спеками и тестами generic skills: перенести в
   OPSX или зафиксировать переходное двойное владение с явным сроком.
-- Обновить локальные docs, чтобы они ссылались на OPSX как внешний workflow
+- [ ] Обновить локальные docs, чтобы они ссылались на OPSX как внешний workflow
   layer; пометить legacy bootstrap-runbook как superseded ссылкой на
   `bootstrap-project`.
-- Убрать старые локальные копии, если они больше не нужны.
+- [ ] Убрать старые локальные копии, если они больше не нужны.
 
 Результат: существующие проекты становятся consumers OPSX.
 
-### Фаза 5. Подключение новых проектов
+### Фаза 5. Подключение новых проектов - not started
 
-- Проинвентаризировать workspace roots.
-- Выбрать проекты для подключения к OPSX.
-- Для каждого проекта запустить adoption flow.
-- Для проектов, которые не должны использовать OPSX, добавить явный exclude.
+- [ ] Проинвентаризировать workspace roots.
+- [ ] Выбрать проекты для подключения к OPSX.
+- [ ] Для каждого проекта запустить adoption flow.
+- [ ] Для проектов, которые не должны использовать OPSX, добавить явный exclude.
 
 Результат: все нужные проекты используют один OPSX toolchain.
 
-### Фаза 6. Версионирование и релизная дисциплина
+### Фаза 6. Версионирование и релизная дисциплина - not started
 
-- Ввести semver.
-- Описать changelog.
-- Добавить compatibility notes для Codex CLI, Claude Code и OpenSpec CLI.
-- Добавить migration notes между версиями.
-- Настроить CI для templates, bootstrap, verify и drift.
+- [ ] Ввести semver.
+- [ ] Описать changelog.
+- [ ] Добавить compatibility notes для Codex CLI, Claude Code и OpenSpec CLI.
+- [ ] Добавить migration notes между версиями.
+- [ ] Настроить CI для templates, bootstrap, verify и drift.
 
 Результат: OPSX становится самостоятельной поддерживаемой технологией.
+
+### Индекс шагов реализации и карточки доски
+
+Оставшиеся работы разложены в упорядоченную последовательность story-level
+шагов. Каждый шаг соответствует одноименной карточке в `openspec/board/` и
+проходит обычные board gates (`1.backlog -> 2.todo -> 3.inprogress -> 4.done`).
+Порядок отражает зависимости: контракты и helper-ы нужны `verify-project`,
+`verify-project` нужен `bootstrap-project`, drift gate переиспользует
+verify-проверки, миграция и adoption идут после зеленого drift gate.
+
+| # | Шаг / карточка | Фаза | Scope (кратко) | Depends on |
+| --- | --- | --- | --- | --- |
+| 1 | `01-finish-minimal-source-of-truth` | 1 | lifecycle skills `do/review/pub/deliver`, `openspec-*` skills, `bin/openspec`, schemas `opsx.*`, review-verdict helper, генерализация | — |
+| 2 | `02-bootstrap-and-templates` | 2 | `templates/project`, `bin/bootstrap-project`, `bin/verify-project`, smoke-проект | 1 |
+| 3 | `03-drift-gate` | 3 | `scripts/smoke-drift.py`, include/exclude, machine-readable output, consumer-классы | 2 |
+| 4 | `04-migrate-existing-consumers` | 4 | переключить первый aggregator/legacy consumers на OPSX, перевести legacy drift-gate | 2, 3 |
+| 5 | `05-adopt-new-projects` | 5 | adoption flow для новых проектов, explicit exclude | 2, 4 |
+| 6 | `06-release-discipline` | 6 | semver, changelog, compatibility/migration notes, CI | 2, 3 |
+
+Триаж каждой карточки и декомпозиция в apply-ready OpenSpec changes выполняются
+через `opsx-ff`. Machine-local inventory для шагов 4–5 (реальные пути, список
+проектов, порядок миграции) остается в `internal/`, а не в карточках.
 
 ## 13. Дорожная карта миграции существующих проектов
 
