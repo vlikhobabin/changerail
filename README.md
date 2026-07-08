@@ -92,14 +92,14 @@ OPSX проектируется как отдельный системный sou
 - `bin/openspec` с pin версии OpenSpec CLI;
 - schemas `opsx.review-verdict.v1`, `opsx.delivery-manifest.v1`,
   `opsx.evidence-index.v1` и helper `bin/opsx-review-verdict`;
+- `templates/project/` для generated project files и OpenSpec skeleton;
+- `bin/verify-project` как red/green gate для consumer wiring/config;
+- `bin/bootstrap-project` для создания generic consumer project;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
 Планируемые следующие части:
 
-- `bin/bootstrap-project`;
-- `bin/verify-project`;
-- `templates/project/`;
 - drift/smoke-проверки.
 
 ## Планируемая структура
@@ -123,15 +123,14 @@ opsx/
 
 ## Быстрый старт
 
-Пока bootstrap еще не реализован, рекомендуемый способ установки для
-экспериментов:
+Установите OPSX source of truth:
 
 ```bash
 git clone https://github.com/vlikhobabin/opsx.git /opt/opsx
 cd /opt/opsx
 ```
 
-После появления bootstrap целевая команда будет выглядеть примерно так:
+Создайте generic consumer project:
 
 ```bash
 /opt/opsx/bin/bootstrap-project /opt/example-project \
@@ -139,13 +138,13 @@ cd /opt/opsx
   --kind generic
 ```
 
-Затем:
+После генерации bootstrap запускает тот же verifier.
+
+Повторная проверка:
 
 ```bash
 /opt/opsx/bin/verify-project /opt/example-project
 ```
-
-Интерфейс bootstrap пока проектируется и может измениться.
 
 ## Для пользователей
 
@@ -204,15 +203,14 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 
 Текущая точка: Фаза 1 минимального source of truth реализована в рабочем
 дереве: generic lifecycle skills, OpenSpec lifecycle skills, wrapper
-`bin/openspec`, schemas и review-verdict helper присутствуют. Bootstrap,
-verify-project, drift gate и миграция потребителей еще впереди.
+`bin/openspec`, schemas, review-verdict helper, project templates,
+`bin/verify-project` и `bin/bootstrap-project` присутствуют. Drift gate и
+миграция потребителей еще впереди.
 
 Ближайшие шаги:
 
-1. Реализовать `bootstrap-project`.
-2. Реализовать `verify-project`.
-3. Добавить drift gate для workspace consumers.
-4. Переключить существующие legacy consumers на `/opt/opsx`.
-5. Подключить новые проекты через adoption/bootstrap flow.
-6. Подготовить первый стабильный release: semver, changelog, compatibility
+1. Добавить drift gate для workspace consumers.
+2. Переключить существующие legacy consumers на `/opt/opsx`.
+3. Подключить новые проекты через adoption/bootstrap flow.
+4. Подготовить первый стабильный release: semver, changelog, compatibility
    notes и CI.

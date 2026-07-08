@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+
+
+REQUIRED_IGNORES = (
+    ".runtime/",
+    ".artifacts/",
+    ".ai/",
+    ".codex/tmp/",
+    ".codex/auth.json",
+    ".codex/sessions/",
+    ".claude/settings.local.json",
+)
+FORBIDDEN_TRACKED_PREFIXES = (
+    ".runtime/",
+    ".artifacts/",
+    ".ai/",
+    ".codex/tmp/",
+    ".codex/sessions/",
+    ".claude/local/",
+    "logs/",
+    "traces/",
+)
+FORBIDDEN_TRACKED_EXACT = {
+    ".codex/auth.json",
+    ".claude/settings.local.json",
+    ".mcp.local.json",
+    "claude-trace-context.json",
+}
+SCHEMAS = (
+    "opsx-review-verdict.schema.json",
+    "opsx-delivery-manifest.schema.json",
+    "opsx-evidence-index.schema.json",
+)
+
+
+@dataclass
+class Check:
+    name: str
+    ok: bool
+    message: str
+
+
+def is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def print_check(check: Check) -> None:
+    status = "PASS" if check.ok else "FAIL"
+    print(f"{status} {check.name}: {check.message}")
+
+
+def skill_names(opsx_root: Path) -> list[str]:
+    skills_root = opsx_root / "skills"
+    if not skills_root.is_dir():
+        return []
+    return sorted(
+        path.name
+        for path in skills_root.iterdir()
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    )
+
+
+def expected_rel(expected: Path, opsx_root: Path) -> Path:
+    try:
+        return expected.resolve(strict=False).relative_to(opsx_root.resolve(strict=False))
+    except ValueError:
+        return Path(expected.name)
+
+
+def accepted_target(resolved: Path, expected: Path, opsx_root: Path, aggregator_root: Path | None) -> tuple[bool, str]:
+    expected_resolved = expected.resolve(strict=False)
+    if resolved == expected_resolved:
+        return True, f"resolves to {expected_resolved}"
+    if is_relative_to(resolved, opsx_root):
+        return False, f"resolves under OPSX but expected {expected_resolved}, got {resolved}"
+    if aggregator_root is not None and is_relative_to(resolved, aggregator_root):
+        rel = expected_rel(expected, opsx_root)
+        try:
+            agg_rel = resolved.relative_to(aggregator_root)
+        except ValueError:
+            agg_rel = Path()
+        if agg_rel == rel:
+            return True, f"resolves through aggregator {aggregator_root}"
+        return False, f"aggregator path {resolved} does not match expected relative path {rel}"
+    return False, f"resolves outside OPSX source: {resolved}"
+
+
+def check_symlink(project: Path, rel_path: str, expected: Path, opsx_root: Path, aggregator_root: Path | None) -> Check:
+    path = project / rel_path
+    if not path.exists() and not path.is_symlink():
+        return Check(rel_path, False, "missing")
+    if not path.is_symlink():
+        return Check(rel_path, False, "exists but is not a symlink")
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        return Check(rel_path, False, f"broken symlink: {exc}")
+    ok, message = accepted_target(resolved, expected, opsx_root, aggregator_root)
+    return Check(rel_path, ok, message)
+
+
+def path_args_cover_root(args: Iterable[object], project: Path) -> bool:
+    root = project.resolve()
+    for value in args:
+        if not isinstance(value, str):
+            continue
+        if not value.startswith("/"):
+            continue
+        try:
+            if Path(value).resolve(strict=False) == root:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def check_mcp(project: Path) -> Check:
+    path = project / ".mcp.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return Check(".mcp.json", False, f"cannot read: {exc}")
+    except json.JSONDecodeError as exc:
+        return Check(".mcp.json", False, f"invalid JSON: {exc}")
+    server = data.get("mcpServers", {}).get("filesystem", {})
+    args = server.get("args", [])
+    if not isinstance(args, list):
+        return Check(".mcp.json", False, "filesystem args must be an array")
+    if not path_args_cover_root(args, project):
+        return Check(".mcp.json", False, "filesystem scope does not cover project root")
+    return Check(".mcp.json", True, "filesystem scope covers project root")
+
+
+def check_codex(project: Path) -> Check:
+    path = project / ".codex" / "config.toml"
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return Check(".codex/config.toml", False, f"cannot read: {exc}")
+    except tomllib.TOMLDecodeError as exc:
+        return Check(".codex/config.toml", False, f"invalid TOML: {exc}")
+
+    project_key = str(project.resolve())
+    projects = data.get("projects", {})
+    if project_key not in projects:
+        return Check(".codex/config.toml", False, f"missing trusted project entry {project_key}")
+    filesystem = data.get("mcp_servers", {}).get("filesystem", {})
+    args = filesystem.get("args", [])
+    if not isinstance(args, list):
+        return Check(".codex/config.toml", False, "filesystem args must be an array")
+    if not path_args_cover_root(args, project):
+        return Check(".codex/config.toml", False, "filesystem MCP scope does not cover project root")
+    return Check(".codex/config.toml", True, "trusted project and filesystem scope cover project root")
+
+
+def check_openspec_config(project: Path) -> Check:
+    path = project / "openspec" / "config.yaml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return Check("openspec/config.yaml", False, f"cannot read: {exc}")
+    if "schema:" not in text:
+        return Check("openspec/config.yaml", False, "missing schema key")
+    return Check("openspec/config.yaml", True, "config exists and declares schema")
+
+
+def check_openspec_validate(project: Path) -> Check:
+    wrapper = project / "bin" / "openspec"
+    if not wrapper.exists():
+        return Check("bin/openspec validate --all --strict", False, "bin/openspec missing")
+    result = subprocess.run(
+        [str(wrapper), "validate", "--all", "--strict", "--no-interactive"],
+        cwd=project,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env={**os.environ, "OPENSPEC_WORKDIR": str(project)},
+        timeout=120,
+    )
+    if result.returncode != 0:
+        return Check("bin/openspec validate --all --strict", False, result.stdout.strip() or "failed")
+    return Check("bin/openspec validate --all --strict", True, "OpenSpec validation passed")
+
+
+def check_schemas_and_helper(project: Path, opsx_root: Path, aggregator_root: Path | None) -> list[Check]:
+    checks = [
+        check_symlink(
+            project,
+            "bin/opsx-review-verdict",
+            opsx_root / "bin" / "opsx-review-verdict",
+            opsx_root,
+            aggregator_root,
+        )
+    ]
+    for schema in SCHEMAS:
+        path = opsx_root / "schemas" / schema
+        checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from OPSX root" if path.is_file() else "missing"))
+    return checks
+
+
+def check_gitignore(project: Path) -> Check:
+    path = project / ".gitignore"
+    try:
+        lines = {
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    except OSError as exc:
+        return Check(".gitignore runtime/auth policy", False, f"cannot read .gitignore: {exc}")
+    missing = [pattern for pattern in REQUIRED_IGNORES if pattern not in lines]
+    if missing:
+        return Check(".gitignore runtime/auth policy", False, f"missing ignore patterns: {', '.join(missing)}")
+    return Check(".gitignore runtime/auth policy", True, "required runtime/auth paths are ignored")
+
+
+def check_tracked_runtime(project: Path) -> Check:
+    probe = subprocess.run(
+        ["git", "-C", str(project), "rev-parse", "--is-inside-work-tree"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if probe.returncode != 0:
+        return Check("tracked runtime/auth files", True, "project is not a git repository yet")
+    result = subprocess.run(
+        ["git", "-C", str(project), "ls-files", "-z"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        return Check("tracked runtime/auth files", False, result.stderr.decode("utf-8", "replace").strip())
+    offenders: list[str] = []
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", "replace")
+        if rel in FORBIDDEN_TRACKED_EXACT or any(rel.startswith(prefix) for prefix in FORBIDDEN_TRACKED_PREFIXES):
+            offenders.append(rel)
+    if offenders:
+        return Check("tracked runtime/auth files", False, "tracked forbidden paths: " + ", ".join(offenders))
+    return Check("tracked runtime/auth files", True, "no tracked runtime/auth files")
+
+
+def build_checks(project: Path, opsx_root: Path, aggregator_root: Path | None) -> list[Check]:
+    skills = skill_names(opsx_root)
+    checks: list[Check] = [
+        Check("project root", project.is_dir(), str(project)),
+        check_symlink(project, ".claude/skills", opsx_root / "skills", opsx_root, aggregator_root),
+        check_symlink(project, ".claude/commands/opsx", opsx_root / "claude" / "commands" / "opsx", opsx_root, aggregator_root),
+        check_symlink(project, "bin/openspec", opsx_root / "bin" / "openspec", opsx_root, aggregator_root),
+    ]
+    for skill in skills:
+        checks.append(
+            check_symlink(
+                project,
+                f".codex/skills/{skill}",
+                opsx_root / "skills" / skill,
+                opsx_root,
+                aggregator_root,
+            )
+        )
+    checks.extend(check_schemas_and_helper(project, opsx_root, aggregator_root))
+    checks.extend(
+        [
+            check_mcp(project),
+            check_codex(project),
+            check_openspec_config(project),
+            check_openspec_validate(project),
+            check_gitignore(project),
+            check_tracked_runtime(project),
+        ]
+    )
+    return checks
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Verify an OPSX consumer project.")
+    parser.add_argument("path", type=Path, help="Consumer project path.")
+    parser.add_argument("--opsx-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--aggregator-root", type=Path, default=None)
+    parser.add_argument("--json", action="store_true", help="Emit JSON report.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    project = args.path.resolve()
+    opsx_root = args.opsx_root.resolve()
+    aggregator_root = args.aggregator_root.resolve() if args.aggregator_root else None
+    checks = build_checks(project, opsx_root, aggregator_root)
+    failed = [check for check in checks if not check.ok]
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "project": str(project),
+                    "opsx_root": str(opsx_root),
+                    "aggregator_root": str(aggregator_root) if aggregator_root else None,
+                    "summary": {
+                        "status": "fail" if failed else "pass",
+                        "total": len(checks),
+                        "passed": len(checks) - len(failed),
+                        "failed": len(failed),
+                    },
+                    "checks": [check.__dict__ for check in checks],
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+    else:
+        for check in checks:
+            print_check(check)
+        print(f"summary: {'fail' if failed else 'pass'} ({len(checks) - len(failed)}/{len(checks)} passed)")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

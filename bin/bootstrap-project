@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+SPECIAL_OUTPUTS = {
+    Path("gitignore.tpl"): Path(".gitignore"),
+    Path("mcp.json.tpl"): Path(".mcp.json"),
+    Path("codex-config.toml.tpl"): Path(".codex/config.toml"),
+}
+
+
+class BootstrapError(RuntimeError):
+    pass
+
+
+def repo_root_from_bin() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def skill_names(opsx_root: Path) -> list[str]:
+    skills_root = opsx_root / "skills"
+    return sorted(
+        path.name
+        for path in skills_root.iterdir()
+        if path.is_dir() and (path / "SKILL.md").is_file()
+    )
+
+
+def render_text(text: str, *, project: Path, project_name: str, project_kind: str, opsx_root: Path) -> str:
+    replacements = {
+        "{{PROJECT_PATH}}": str(project),
+        "{{PROJECT_NAME}}": project_name,
+        "{{PROJECT_KIND}}": project_kind,
+        "{{OPSX_ROOT}}": str(opsx_root),
+        "{{OPSX_SHARED_AGENTS}}": (opsx_root / "AGENTS.shared.md").read_text(encoding="utf-8"),
+    }
+    for token, value in replacements.items():
+        text = text.replace(token, value)
+    return text
+
+
+def output_path_for(rel: Path) -> Path | None:
+    if rel == Path("README.md"):
+        return None
+    if rel in SPECIAL_OUTPUTS:
+        return SPECIAL_OUTPUTS[rel]
+    if rel.name.endswith(".tpl"):
+        return rel.with_name(rel.name[: -len(".tpl")])
+    return rel
+
+
+def collect_plan(template_root: Path, target: Path) -> list[tuple[str, Path, Path | None]]:
+    plan: list[tuple[str, Path, Path | None]] = []
+    for source in sorted(template_root.rglob("*")):
+        if source.is_dir():
+            continue
+        rel = source.relative_to(template_root)
+        out_rel = output_path_for(rel)
+        if out_rel is None:
+            continue
+        plan.append(("render" if source.name.endswith(".tpl") else "copy", target / out_rel, source))
+    return plan
+
+
+def symlink_plan(opsx_root: Path, target: Path) -> list[tuple[Path, Path]]:
+    links = [
+        (opsx_root / "skills", target / ".claude" / "skills"),
+        (opsx_root / "claude" / "commands" / "opsx", target / ".claude" / "commands" / "opsx"),
+        (opsx_root / "bin" / "openspec", target / "bin" / "openspec"),
+        (opsx_root / "bin" / "opsx-review-verdict", target / "bin" / "opsx-review-verdict"),
+    ]
+    links.extend((opsx_root / "skills" / skill, target / ".codex" / "skills" / skill) for skill in skill_names(opsx_root))
+    return links
+
+
+def ensure_target(target: Path, *, backup_existing: bool, dry_run: bool) -> Path | None:
+    if not target.exists():
+        if not dry_run:
+            target.mkdir(parents=True)
+        return None
+    if not target.is_dir():
+        raise BootstrapError(f"target exists and is not a directory: {target}")
+    if not any(target.iterdir()):
+        return None
+    if not backup_existing:
+        raise BootstrapError(f"target exists and is not empty: {target}")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = target.with_name(f"{target.name}.backup-{stamp}-{secrets.token_hex(3)}")
+    if backup.exists():
+        raise BootstrapError(f"backup target already exists: {backup}")
+    if not dry_run:
+        shutil.move(str(target), str(backup))
+        target.mkdir(parents=True)
+    return backup
+
+
+def write_templates(
+    *,
+    template_root: Path,
+    target: Path,
+    project_name: str,
+    project_kind: str,
+    opsx_root: Path,
+) -> None:
+    for action, destination, source in collect_plan(template_root, target):
+        assert source is not None
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if action == "render":
+            destination.write_text(
+                render_text(
+                    source.read_text(encoding="utf-8"),
+                    project=target,
+                    project_name=project_name,
+                    project_kind=project_kind,
+                    opsx_root=opsx_root,
+                ),
+                encoding="utf-8",
+            )
+        else:
+            shutil.copy2(source, destination)
+
+
+def create_symlink(target: Path, link_path: Path) -> None:
+    link_path.parent.mkdir(parents=True, exist_ok=True)
+    if link_path.is_symlink() or link_path.exists():
+        if link_path.is_dir() and not link_path.is_symlink():
+            shutil.rmtree(link_path)
+        else:
+            link_path.unlink()
+    os.symlink(target, link_path)
+
+
+def create_symlinks(opsx_root: Path, target: Path) -> None:
+    for source, link_path in symlink_plan(opsx_root, target):
+        create_symlink(source, link_path)
+
+
+def run_verify(opsx_root: Path, target: Path) -> None:
+    verify = opsx_root / "bin" / "verify-project"
+    result = subprocess.run(
+        [str(verify), str(target)],
+        cwd=opsx_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        env={**os.environ, "OPENSPEC_TELEMETRY": "0"},
+        timeout=180,
+    )
+    print(result.stdout, end="")
+    if result.returncode != 0:
+        raise BootstrapError(f"verify-project failed for {target}")
+
+
+def print_plan(template_root: Path, opsx_root: Path, target: Path, *, backup: Path | None, skip_verify: bool) -> None:
+    if backup is not None:
+        print(f"PLAN backup {target} -> {backup}")
+    for action, destination, source in collect_plan(template_root, target):
+        print(f"PLAN {action} {source} -> {destination}")
+    for source, link_path in symlink_plan(opsx_root, target):
+        print(f"PLAN symlink {link_path} -> {source}")
+    if not skip_verify:
+        print(f"PLAN verify {opsx_root / 'bin' / 'verify-project'} {target}")
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Bootstrap a new OPSX consumer project.")
+    parser.add_argument("path", type=Path, help="Target project path.")
+    parser.add_argument("--name", default=None, help="Project name. Defaults to target directory name.")
+    parser.add_argument("--kind", default="generic", help="Project kind placeholder. Defaults to generic.")
+    parser.add_argument("--opsx-root", type=Path, default=repo_root_from_bin())
+    parser.add_argument("--dry-run", action="store_true", help="Print planned actions without writing files.")
+    parser.add_argument("--backup-existing", action="store_true", help="Move an existing non-empty target aside first.")
+    parser.add_argument("--skip-verify", action="store_true", help="Generate files without running verify-project.")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    opsx_root = args.opsx_root.resolve()
+    template_root = opsx_root / "templates" / "project"
+    target = args.path.resolve()
+    project_name = args.name or target.name
+
+    try:
+        if not template_root.is_dir():
+            raise BootstrapError(f"template root missing: {template_root}")
+        backup = ensure_target(target, backup_existing=args.backup_existing, dry_run=args.dry_run)
+        if args.dry_run:
+            print_plan(template_root, opsx_root, target, backup=backup, skip_verify=args.skip_verify)
+            print("dry-run: no files were written")
+            return 0
+
+        write_templates(
+            template_root=template_root,
+            target=target,
+            project_name=project_name,
+            project_kind=args.kind,
+            opsx_root=opsx_root,
+        )
+        create_symlinks(opsx_root, target)
+        if not args.skip_verify:
+            run_verify(opsx_root, target)
+        print(f"bootstrapped: {target}")
+        if backup is not None:
+            print(f"backup: {backup}")
+        print("next: git init")
+        print("next: git add AGENTS.md CLAUDE.md .gitignore .mcp.json .codex/config.toml .codex/skills .claude bin openspec")
+        print("next: git commit -m 'Bootstrap OPSX project'")
+        print("next: add a remote when the project is ready to publish")
+        return 0
+    except BootstrapError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

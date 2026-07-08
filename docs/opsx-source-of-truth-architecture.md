@@ -308,6 +308,15 @@ Bootstrap должен:
 6. Запустить `verify-project`.
 7. Напечатать следующие шаги: `git init`, первый commit, подключение remote.
 
+Шаблоны project-local файлов находятся в `templates/project/`. Bootstrap
+рендерит `*.tpl` файлы с placeholders для project path, project name,
+project kind и OPSX root, копирует OpenSpec skeleton и создает symlink-и на
+OPSX-owned surfaces.
+
+Текущая реализация `bin/bootstrap-project` поддерживает `--dry-run`,
+`--backup-existing`, `--skip-verify` для диагностики и по умолчанию запускает
+`bin/verify-project` после генерации.
+
 ## 11. Verification и drift
 
 `/opt/opsx/bin/verify-project <path>` должен проверять:
@@ -332,6 +341,11 @@ Bootstrap должен:
 
 Каждая проверка — красно-зеленая (exit-код), не «напечатать и посмотреть»:
 verify-project — это gate, а не отчет.
+
+Текущая реализация `bin/verify-project` выполняет gate локально: печатает
+`PASS`/`FAIL` для каждой проверки, поддерживает `--opsx-root` и
+`--aggregator-root`, запускает project-local `bin/openspec validate --all
+--strict` и возвращает non-zero exit при любом failed check.
 
 `/opt/opsx/scripts/smoke-drift.py` должен уметь пройти по configured workspace
 roots и показать:
