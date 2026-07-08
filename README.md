@@ -95,12 +95,14 @@ OPSX проектируется как отдельный системный sou
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как red/green gate для consumer wiring/config;
 - `bin/bootstrap-project` для создания generic consumer project;
+- `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
 Планируемые следующие части:
 
-- drift/smoke-проверки.
+- миграция и adoption flow для существующих/новых consumer projects;
+- release discipline: semver, changelog, compatibility notes и CI.
 
 ## Планируемая структура
 
@@ -145,6 +147,17 @@ cd /opt/opsx
 ```bash
 /opt/opsx/bin/verify-project /opt/example-project
 ```
+
+Проверка drift по workspace inventory:
+
+```bash
+python3 /opt/opsx/scripts/smoke-drift.py \
+  --config /opt/opsx/internal/opsx-drift.json
+```
+
+Файл inventory держите в ignored `internal/` или генерируйте в CI. Он может
+содержать `workspace_roots`, `projects`, `exclude` и `legacy_roots`; публичные
+документы OPSX используют только generic examples.
 
 ## Для пользователей
 
@@ -201,16 +214,15 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 
 ## Roadmap
 
-Текущая точка: Фаза 1 минимального source of truth реализована в рабочем
-дереве: generic lifecycle skills, OpenSpec lifecycle skills, wrapper
-`bin/openspec`, schemas, review-verdict helper, project templates,
-`bin/verify-project` и `bin/bootstrap-project` присутствуют. Drift gate и
-миграция потребителей еще впереди.
+Текущая точка: Фазы 1-3 реализованы в рабочем дереве: generic lifecycle
+skills, OpenSpec lifecycle skills, wrapper `bin/openspec`, schemas,
+review-verdict helper, project templates, `bin/verify-project`,
+`bin/bootstrap-project` и `scripts/smoke-drift.py` присутствуют. Миграция
+потребителей еще впереди.
 
 Ближайшие шаги:
 
-1. Добавить drift gate для workspace consumers.
-2. Переключить существующие legacy consumers на `/opt/opsx`.
-3. Подключить новые проекты через adoption/bootstrap flow.
-4. Подготовить первый стабильный release: semver, changelog, compatibility
+1. Переключить существующие legacy consumers на `/opt/opsx`.
+2. Подключить новые проекты через adoption/bootstrap flow.
+3. Подготовить первый стабильный release: semver, changelog, compatibility
    notes и CI.

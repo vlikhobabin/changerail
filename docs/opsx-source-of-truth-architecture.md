@@ -347,30 +347,30 @@ verify-project — это gate, а не отчет.
 `--aggregator-root`, запускает project-local `bin/openspec validate --all
 --strict` и возвращает non-zero exit при любом failed check.
 
-`/opt/opsx/scripts/smoke-drift.py` должен уметь пройти по configured workspace
-roots и показать:
+Текущая реализация `/opt/opsx/scripts/smoke-drift.py` проходит по configured
+workspace roots или explicit projects из operator-provided config/CLI input,
+пишет JSON report `opsx.drift-gate.v1` в ignored runtime space и показывает:
 
 - какие проекты подключены к OPSX;
 - какие проекты используют legacy source of truth;
 - где symlink-и сломаны;
-- где shared methodology drift-нула;
 - какие проекты не участвуют в OPSX и явно исключены.
 
 ## 12. Дорожная карта реализации OPSX
 
 Статус актуализирован: 2026-07-08.
 
-Текущая точка: минимальный source of truth Фазы 1 собран в рабочем дереве.
-Архитектурное решение, dogfooding через OpenSpec, shared methodology,
-generic lifecycle skills, OpenSpec lifecycle skills, contract schemas,
-review-verdict helper и discovery-smoke уже есть. Bootstrap, verify,
-drift-gate и массовая миграция потребителей еще не завершены.
+Текущая точка: Фазы 1-3 собраны в рабочем дереве. Архитектурное решение,
+dogfooding через OpenSpec, shared methodology, generic lifecycle skills,
+OpenSpec lifecycle skills, contract schemas, review-verdict helper,
+discovery-smoke, bootstrap, verify-project и drift-gate уже есть. Массовая
+миграция потребителей еще не завершена.
 
 Операционная оценка готовности к целевому состоянию "выбранные проекты
-workspace используют единый pipeline через `/opt/opsx`": около 20%. Эта оценка
+workspace используют единый pipeline через `/opt/opsx`": около 35%. Эта оценка
 не является release-метрикой; точную картину по конкретной машине должен
-показывать будущий drift report, а публичная документация фиксирует только
-generic-классы потребителей.
+показывать operator-provided drift report, а публичная документация фиксирует
+только generic-классы потребителей.
 
 ### Фаза 0. Зафиксировать решение - done
 
@@ -407,30 +407,29 @@ generic-классы потребителей.
 Результат фазы: OPSX может быть источником symlink-ов для новых проектов и
 миграции существующих consumers.
 
-### Фаза 2. Bootstrap и templates - not started
+### Фаза 2. Bootstrap и templates - done
 
-- [ ] Создать `templates/project`.
-- [ ] Описать placeholders для project path, project name, project kind.
-- [ ] Реализовать `bin/bootstrap-project`.
-- [ ] Реализовать `bin/verify-project`.
-- [ ] Добавить smoke-проект в `.runtime` для проверки bootstrap.
+- [x] Создать `templates/project`.
+- [x] Описать placeholders для project path, project name, project kind.
+- [x] Реализовать `bin/bootstrap-project`.
+- [x] Реализовать `bin/verify-project`.
+- [x] Добавить smoke-проект в `.runtime` для проверки bootstrap.
 
 Результат: новый проект можно создать одной командой.
 
-### Фаза 3. Drift gate - partially started
+### Фаза 3. Drift gate - done
 
 Готово:
 
 - [x] Добавить discovery-smoke для минимальной поверхности
   `opsx-explore`/`opsx-ff`.
-
-Осталось:
-
-- [ ] Реализовать `scripts/smoke-drift.py`.
-- [ ] Добавить список include/exclude проектов.
-- [ ] Проверить configured workspace roots.
-- [ ] Добавить machine-readable output для CI.
-- [ ] Показывать consumer-классы: OPSX source, legacy source, broken wiring,
+- [x] Реализовать `scripts/smoke-drift.py`.
+- [x] Добавить список include/exclude проектов через operator-provided config
+  или CLI flags; machine-local inventory остается в ignored `internal/`.
+- [x] Проверить configured workspace roots shallow scan.
+- [x] Добавить machine-readable output для CI с schema
+  `opsx.drift-gate.v1`.
+- [x] Показывать consumer-классы: OPSX source, legacy source, broken wiring,
   disconnected и explicitly excluded.
 
 Результат: можно видеть, какие проекты соответствуют OPSX source of truth.
