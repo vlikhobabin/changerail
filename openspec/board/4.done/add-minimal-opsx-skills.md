@@ -1,13 +1,13 @@
 # Перенести минимальные generic OPSX skills
 
 ## Status
-3.inprogress
+4.done
 
 ## Owner
 Codex
 
 ## OpenSpec Stage
-implemented
+archived
 
 ## Source
 - OPSX roadmap phase 1.
@@ -41,12 +41,15 @@ path-neutral и не должен включать domain-specific trace, manife
 - passed: public-surface scan for private paths and workspace names
 - passed: targeted review regression checks for Claude skill lookup, conditional
   delivery handoff and board README wording
+- passed: `openspec archive add-minimal-opsx-skills --yes`
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-07-08-add-minimal-opsx-skills/`
+- `openspec/specs/opsx-skill-surface/spec.md`
 
 ## Related
-- `openspec/changes/add-minimal-opsx-skills/`
+- `openspec/changes/archive/2026-07-08-add-minimal-opsx-skills/`
+- `openspec/specs/opsx-skill-surface/spec.md`
 - `skills/opsx-explore/SKILL.md`
 - `skills/opsx-ff/SKILL.md`
 - `claude/commands/opsx/explore.md`
@@ -54,10 +57,12 @@ path-neutral и не должен включать domain-specific trace, manife
 
 ## Result
 Implemented minimal generic skill and Claude command source files for
-`opsx-explore` and `opsx-ff`.
+`opsx-explore` and `opsx-ff`; archived the OpenSpec change into main spec
+`opsx-skill-surface`.
 
 ## Next
-- Review the generic skill surface before archive/commit.
+- Start wiring/discovery smoke planning for consumer and repo-local skill/command
+  discovery.
 
 ## Change 1: `add-minimal-opsx-skills`
 
@@ -92,3 +97,4 @@ Claude command wrappers.
 - 2026-07-08T09:40:00Z card created and minimal generic skill surface implemented.
 - 2026-07-08T09:50:00Z verification completed for generic skill surface.
 - 2026-07-08T10:00:00Z fixed review findings: Claude skill lookup path, conditional delivery handoff and stale board README language.
+- 2026-07-08T10:15:00Z change archived, main spec created and card moved to `4.done`.
