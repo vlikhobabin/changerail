@@ -81,12 +81,13 @@ OPSX проектируется как отдельный системный sou
 
 - публичную архитектурную запись;
 - базовый `README.md`;
+- `AGENTS.shared.md` с начальной общей методологией OPSX для AI-агентов;
+- минимальную OpenSpec-доску для dogfooding развития самого OPSX;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
 Планируемые следующие части:
 
-- `AGENTS.shared.md` с общей методологией для AI-агентов;
 - `skills/` с OPSX и OpenSpec lifecycle skills;
 - `claude/commands/opsx/` с slash-командами;
 - `bin/bootstrap-project`;
@@ -195,7 +196,7 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 Ближайшие шаги:
 
 1. Зафиксировать публичную архитектуру и правила репозитория.
-2. Добавить `AGENTS.shared.md`.
+2. Добавить `AGENTS.shared.md` и начать dogfooding через OpenSpec-доску.
 3. Перенести минимальный набор OPSX skills и команд в generic-форме.
 4. Реализовать `bootstrap-project`.
 5. Реализовать `verify-project`.

@@ -1,0 +1,33 @@
+schema: spec-driven
+
+context: |
+  Repository: /opt/opsx, public source of truth для OPSX workflow и toolchain
+  AI-assisted разработки с OpenSpec artifacts.
+
+  OPSX владеет reusable methodology, agent skills, Claude slash commands,
+  bootstrap templates, verification gates и drift checks. Consumer projects
+  остаются отдельными git repositories и сохраняют собственный source code,
+  OpenSpec board, project rules, MCP scope и runtime policy.
+
+  Репозиторий публичен по умолчанию. Не добавляйте private workspace names,
+  customer data, secrets, local traces, credentials, runtime reports или
+  machine-specific state в tracked files.
+
+rules:
+  proposal:
+    - Указывать, влияет ли change на methodology, agent skills, slash commands, templates, bootstrap, verification или docs.
+    - Держать примеры generic: использовать /opt/opsx, /opt/example-project, /opt/example-a и /opt/example-b.
+    - Явно описывать public-surface и consumer-project impact.
+    - Держать domain-specific extensions вне generic OPSX core, если change явно не нацелен на extension boundary.
+  specs:
+    - Писать requirements как observable OPSX behavior для agents, maintainers или bootstrapped consumer projects.
+    - Использовать namespace opsx.* для новых wire contracts.
+    - Включать fail-closed behavior для review, publish, verification и drift gates.
+  design:
+    - Ссылаться на affected docs, skills, commands, schemas, templates, launchers или scripts.
+    - Объяснять source-of-truth, symlink и generated-file choices, когда они влияют на consumer projects.
+    - Предпочитать generic core behavior вместо workspace-specific assumptions.
+  tasks:
+    - Включать docs или artifact updates и конкретные verification commands.
+    - Включать public-surface scans, когда файлы могут раскрыть local paths или private names.
+    - Держать tasks достаточно малыми, чтобы их можно было проверить перед отметкой complete.
