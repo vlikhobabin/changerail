@@ -1,5 +1,11 @@
-## ADDED Requirements
+# opsx-wiring-discovery Specification
 
+## Purpose
+Зафиксировать проверяемый wiring/discovery contract для подключения OPSX
+skills и Claude command wrappers в проектах-потребителях и в repo-local
+dogfooding `/opt/opsx`.
+
+## Requirements
 ### Requirement: Consumer wiring contract
 OPSX MUST define how consumer projects expose OPSX skills and command wrappers
 without requiring undocumented root paths.
@@ -31,10 +37,11 @@ discoverable through the documented Claude and Codex wiring surfaces.
 - **WHEN** wiring smoke is executed
 - **THEN** a JSON report is written under ignored runtime space with schema
   `opsx.wiring-discovery-smoke.v1`
-- **AND** the report records repo-local and consumer-example checks for Claude
-  command/skill discovery and Codex skill discovery
+- **AND** the report records aggregate `runs[]` for repo-local and
+  consumer-example checks across Claude command/skill discovery and Codex skill
+  discovery
 - **AND** each check records name, path, expected target, resolved target,
-  status and message
+  status, message, mode and surface
 
 ### Requirement: Smoke pass criteria
 OPSX MUST define deterministic pass/fail criteria for wiring discovery smoke.

@@ -3,8 +3,8 @@
 The architecture defines consumer wiring through symlinks to `/opt/opsx`, while
 the minimal skill surface now provides source files for `opsx-explore` and
 `opsx-ff`. A previous review found that command wrappers can accidentally assume
-a root `skills/` path that does not exist in consumer repositories. The next
-implementation should make discovery assumptions executable and testable.
+a root `skills/` path that does not exist in consumer repositories. This
+delivery pass makes discovery assumptions executable and testable.
 
 ## Goals / Non-Goals
 
@@ -16,11 +16,10 @@ implementation should make discovery assumptions executable and testable.
 - Keep all examples public-safe and generic.
 
 **Non-Goals:**
-- Do not create symlinks in this planning change.
-- Do not add scripts in this planning change.
 - Do not add `opsx-do`, `opsx-review`, `opsx-pub` or `opsx-deliver`.
 - Do not commit local `.claude/settings.local.json`, runtime state or machine
   inventory.
+- Do not create machine-local absolute symlink-и or tracked runtime reports.
 
 ## Decisions
 
@@ -45,12 +44,13 @@ implementation should make discovery assumptions executable and testable.
   without committing runtime output.
 - Committable evidence for smoke support is limited to docs/scripts and sample
   schemas. Runtime evidence is ignored and referenced only from summaries.
-- The implementation pass should add:
+- The delivery pass adds:
   - `docs/wiring-discovery.md` describing consumer and repo-local wiring.
   - `scripts/smoke-wiring-discovery.py` for deterministic filesystem/discovery
     checks.
-  - Optional template notes only if they are needed to keep future
-    `templates/project` consistent.
+  - repo-local relative symlink-и for `.claude/skills`,
+    `.claude/commands/opsx`, `.codex/skills/opsx-explore` and
+    `.codex/skills/opsx-ff`.
 
 ## Evidence Contract
 
@@ -60,16 +60,27 @@ The implementation smoke MUST produce a JSON report in ignored runtime space:
 .runtime/opsx/wiring-smoke/<run-id>/report.json
 ```
 
-Minimum report fields:
+The report is aggregate because a normal smoke run covers both modes and both
+surfaces. Minimum top-level report fields:
 
 - `schema`: `opsx.wiring-discovery-smoke.v1`
 - `run_id`
 - `opsx_root`
-- `mode`: `repo-local` or `consumer-example`
-- `surface`: `claude` or `codex`
+- `report_kind`: `aggregate`
+- `modes[]`: includes `repo-local` and `consumer-example` for a full run
+- `surfaces[]`: includes `claude` and `codex` for a full run
+- `summary`
+- `runs[]`
 - `checks[]`
 
-Each `checks[]` entry MUST include:
+Each `runs[]` entry MUST include:
+
+- `mode`: `repo-local` or `consumer-example`
+- `surface`: `claude` or `codex`
+- `summary`
+- `checks[]`
+
+Each `checks[]` entry, whether top-level aggregate or per-run, MUST include:
 
 - `name`
 - `path`
@@ -77,6 +88,8 @@ Each `checks[]` entry MUST include:
 - `resolved_target`
 - `status`: `pass` or `fail`
 - `message`
+- `mode`
+- `surface`
 
 Minimum pass criteria:
 
