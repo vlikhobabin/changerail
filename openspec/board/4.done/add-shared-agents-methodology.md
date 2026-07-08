@@ -1,13 +1,13 @@
 # Добавить общую OPSX-методологию для агентов
 
 ## Status
-3.inprogress
+4.done
 
 ## Owner
 Codex
 
 ## OpenSpec Stage
-apply-ready
+archived
 
 ## Source
 - OPSX bootstrap planning session от 2026-07-08.
@@ -41,22 +41,25 @@ OpenSpec-доску репозитория как dogfooding surface.
 - passed: `git status --short --ignored`
 - passed: public-surface scan for private paths and workspace names relevant to
   this machine
+- passed: `openspec archive add-shared-agents-methodology --yes`
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-07-08-add-shared-agents-methodology/`
+- `openspec/specs/opsx-agent-methodology/spec.md`
 
 ## Related
-- `openspec/changes/add-shared-agents-methodology/`
+- `openspec/changes/archive/2026-07-08-add-shared-agents-methodology/`
+- `openspec/specs/opsx-agent-methodology/spec.md`
 - `AGENTS.shared.md`
 
 ## Result
 Реализован `AGENTS.shared.md`, инициализирован OPSX dogfooding OpenSpec
-skeleton и добавлены первые change artifacts.
+skeleton, добавлены первые change artifacts и опубликован main spec
+`opsx-agent-methodology`.
 
 ## Next
-- Повторить independent review / publish flow по запросу.
-- Архивировать OpenSpec change после подтверждения review policy для bootstrap
-  stage.
+- Начать следующий roadmap change: перенос минимального generic OPSX skill
+  surface, начиная с `opsx-explore` и `opsx-ff`.
 
 ## Change 1: `add-shared-agents-methodology`
 
@@ -86,3 +89,4 @@ source для OPSX consumers.
 - 2026-07-08T09:00:00Z card created during OPSX dogfooding bootstrap.
 - 2026-07-08T09:10:00Z реализована shared methodology и завершена baseline verification.
 - 2026-07-08T09:20:00Z исправлены No-Go findings: public surface, language policy и untracked whitespace evidence.
+- 2026-07-08T09:30:00Z change archived, main spec created and card moved to `4.done`.
