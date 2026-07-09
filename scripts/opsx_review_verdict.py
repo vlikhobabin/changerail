@@ -10,8 +10,9 @@ current working tree. This helper provides:
   (blocker findings force `no-go`; `no-go` requires a blocker or a failed
   acceptance criterion), with optional `--check-fresh` freshness comparison;
 - `fingerprint --workspace <root>`: deterministic sha256 fingerprint over
-  `git status --porcelain` and `git diff HEAD`, shared by the reviewer that
-  embeds it and every consumer that re-checks it.
+  `git status --porcelain`, `git diff HEAD` and untracked non-ignored file
+  content, shared by the reviewer that embeds it and every consumer that
+  re-checks it.
 
 Exit codes follow the shared OPSX helper convention: 0 valid, 1 validation
 failed, 2 input error.
@@ -22,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -50,6 +52,7 @@ TOP_LEVEL_KEYS = {
     "evidence_audit",
     "notes",
 }
+READ_CHUNK_SIZE = 1024 * 1024
 
 
 class VerdictError(Exception):
@@ -186,6 +189,53 @@ def _git_output(workspace: Path, args: list[str]) -> str:
     return result.stdout
 
 
+def _git_output_bytes(workspace: Path, args: list[str]) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(workspace), *args],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (
+            result.stderr.decode("utf-8", errors="replace").strip()
+            or result.stdout.decode("utf-8", errors="replace").strip()
+            or "git command failed"
+        )
+        raise VerdictError(f"git {' '.join(args)}: {detail}", exit_code=2)
+    return result.stdout
+
+
+def _hash_untracked_files(digest: Any, workspace: Path) -> None:
+    output = _git_output_bytes(workspace, ["ls-files", "--others", "--exclude-standard", "-z"])
+    paths = sorted(path for path in output.split(b"\x00") if path)
+    for raw_path in paths:
+        path = workspace / os.fsdecode(raw_path)
+        digest.update(b"untracked:path\x00")
+        digest.update(raw_path)
+        digest.update(b"\x00")
+        try:
+            if path.is_symlink():
+                digest.update(b"untracked:symlink\x00")
+                digest.update(os.fsencode(os.readlink(path)))
+                digest.update(b"\x00")
+                continue
+            if not path.is_file():
+                digest.update(b"untracked:missing-or-non-regular\x00")
+                continue
+            digest.update(b"untracked:file\x00")
+            with path.open("rb") as handle:
+                while True:
+                    chunk = handle.read(READ_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+            digest.update(b"\x00")
+        except FileNotFoundError:
+            digest.update(b"untracked:missing\x00")
+        except OSError as exc:
+            raise VerdictError(f"untracked file cannot be read: {path}: {exc}", exit_code=2) from exc
+
+
 def compute_fingerprint(workspace: Path) -> dict[str, str]:
     if not workspace.is_dir():
         raise VerdictError(f"workspace directory cannot be read: {workspace}", exit_code=2)
@@ -196,6 +246,8 @@ def compute_fingerprint(workspace: Path) -> dict[str, str]:
     digest.update(status.encode("utf-8"))
     digest.update(b"\x00")
     digest.update(diff.encode("utf-8"))
+    digest.update(b"\x00")
+    _hash_untracked_files(digest, workspace)
     return {
         "workspace": str(workspace),
         "head_commit": head_commit,

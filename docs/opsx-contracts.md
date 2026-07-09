@@ -33,8 +33,9 @@ Review verdict является runtime-файлом:
 
 - валиден по shape и cross-field правилам;
 - имеет `result: go`;
-- fresh относительно текущего `HEAD`, `git status --porcelain` и
-  `git diff HEAD --no-color`.
+- fresh относительно текущего `HEAD`, `git status --porcelain`,
+  `git diff HEAD --no-color` и содержимого untracked non-ignored файлов,
+  перечисленных через `git ls-files --others --exclude-standard`.
 
 Helper:
 
@@ -53,6 +54,10 @@ bin/opsx-review-verdict validate \
 ```
 
 Exit codes: `0` valid, `1` validation failed, `2` input error.
+
+Ignored paths не входят в freshness fingerprint. Поэтому запись verdict под
+`.runtime/opsx/reviews/` не инвалидирует сам verdict, но изменение содержимого
+нового untracked deliverable-файла делает verdict stale.
 
 ## Delivery Manifest
 

@@ -49,11 +49,13 @@ A verdict certifies one exact working-tree state. Compute the fingerprint with:
 python3 scripts/opsx_review_verdict.py fingerprint --workspace <repo-root>
 ```
 
-The helper hashes `git status --porcelain` and `git diff HEAD --no-color`.
-Ignored runtime state does not affect the fingerprint, so writing the verdict
-file itself does not invalidate it. Contents of newly added untracked files are
-visible to the fingerprint only through `git status`; reviewers must still read
-the files.
+The helper hashes `git status --porcelain`, `git diff HEAD --no-color`, and the
+deterministic list and contents of untracked non-ignored files from
+`git ls-files --others --exclude-standard`. Ignored runtime state does not
+affect the fingerprint, so writing the verdict file itself does not invalidate
+it. Reviewers must still read newly added files as defense-in-depth; the
+fingerprint only proves that the reviewed bytes have not changed since the
+verdict was written.
 
 ## Semantics
 
