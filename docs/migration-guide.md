@@ -4,6 +4,35 @@
 быть public-safe: только generic paths, без private workspace names,
 credentials, traces или machine-local inventory.
 
+## Unreleased
+
+### What Changed
+
+- Pinned OpenSpec CLI bumped `1.3.0` -> `1.3.1`. `skills/openspec-*` were
+  refreshed with `openspec update` (all lifecycle skills preserved; sharper
+  `contextFiles` guidance in apply-change/verify-change). Not breaking.
+
+### Required Actions
+
+For consumers whose `bin/openspec` symlinks into `/opt/opsx`: none — they pick
+up `1.3.1` automatically. Re-run verification to confirm:
+
+```bash
+/opt/opsx/bin/verify-project /opt/example-project
+```
+
+Consumers that keep a local `openspec-*` copy (not a symlink into OPSX) can
+refresh it to `1.3.1` with `openspec update` in that project, or switch to the
+OPSX symlink to track the pin centrally.
+
+### Rollback
+
+Override the pin for one command without changing the wrapper:
+
+```bash
+OPENSPEC_VERSION=1.3.0 /opt/opsx/bin/openspec validate --all --strict
+```
+
 ## 0.1.0
 
 Initial public baseline.

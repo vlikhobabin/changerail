@@ -14,7 +14,9 @@ changes помечаются префиксом `BREAKING:`.
   `add-release-ci-gate`.
 
 ### Changed
-- none
+- Bumped pinned OpenSpec CLI `1.3.0` -> `1.3.1` in `bin/openspec` and refreshed
+  `skills/openspec-*` via `openspec update` (sharper `contextFiles` guidance in
+  apply-change/verify-change). Updated compatibility and lifecycle docs.
 
 ### Fixed
 - none
