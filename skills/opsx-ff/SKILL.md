@@ -64,7 +64,8 @@ If no card path is provided and it cannot be inferred, ask for it.
 - Keep changes scoped to the board card and `openspec/changes/<change>/`
   artifacts.
 - Prefer small implementation-sized changes with clear boundaries and
-  dependencies.
+  dependencies. A typical card decomposes into about 2-5 such changes; if it
+  needs many more, it is likely two cards.
 - Stop if the story cannot be decomposed without product or architecture
   clarification.
 - Do not launch nested agent CLIs or background batches unless the user

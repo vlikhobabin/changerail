@@ -75,6 +75,23 @@ OPSX проектируется как отдельный системный sou
 /opt/example-a   /opt/example-b   /opt/example-project
 ```
 
+## Как это работает
+
+Работа идёт через доску карточек в проекте (`openspec/board/`):
+`1.backlog -> 2.todo -> 3.inprogress -> 4.done -> 5.canceled`. Одна карточка =
+один markdown-файл; принятая карточка дробится на **2–5 небольших apply-ready
+changes**, каждый со своими OpenSpec-артефактами в `openspec/changes/<slug>/`.
+
+Карточка проходит пайплайн `explore -> ff -> do -> review -> pub`. Роли
+разведены по сессиям: **оркестратор** ведёт карточку по стадиям, **воркер**
+реализует changes, а **review — обязательно отдельный свежий контекст** (не та
+сессия, что писала код). Review выдаёт машинно-проверяемый **go/no-go verdict**,
+который возвращается оркестратору: `go` -> `pub`, `no-go` -> fix-директива
+воркеру и новый цикл. Publish работает fail-closed — без свежего `go`-вердикта
+публикации нет.
+
+Подробный разбор с диаграммой — в [Как это работает](docs/how-it-works.md).
+
 ## Текущий статус
 
 На данный момент репозиторий содержит:
@@ -194,6 +211,7 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 
 Основной документ текущего этапа:
 
+- [Как это работает](docs/how-it-works.md)
 - [OPSX как единый source of truth разработки](docs/opsx-source-of-truth-architecture.md)
 - [OpenSpec lifecycle source](docs/openspec-lifecycle.md)
 - [OPSX contracts](docs/opsx-contracts.md)
