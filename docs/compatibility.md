@@ -56,7 +56,7 @@ Status: pinned wrapper.
 OPSX resolves OpenSpec through `bin/openspec`. The wrapper uses:
 
 ```text
-@fission-ai/openspec@1.3.0
+@fission-ai/openspec@1.3.1
 ```
 
 Operators may override the pin for diagnostics only:

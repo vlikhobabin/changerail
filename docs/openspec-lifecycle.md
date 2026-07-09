@@ -24,8 +24,8 @@ OpenSpec actions для proposal/spec/tasks, apply, verify, sync и archive.
 
 ## Source And License
 
-Начальная версия `skills/openspec-*` импортирована из generated OpenSpec skill
-surface для OpenSpec CLI `1.3.0`.
+Текущая версия `skills/openspec-*` синхронизирована с generated OpenSpec skill
+surface для OpenSpec CLI `1.3.1`.
 
 Frontmatter каждого импортированного skill сохраняет provenance:
 
@@ -35,7 +35,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.3.0"
+  generatedBy: "1.3.1"
 ```
 
 Политика синка: обновление этих skills выполняется отдельным OPSX change,
@@ -53,7 +53,7 @@ metadata:
 Default pin:
 
 ```text
-@fission-ai/openspec@1.3.0
+@fission-ai/openspec@1.3.1
 ```
 
 Для контролируемой локальной проверки можно временно переопределить версию:
