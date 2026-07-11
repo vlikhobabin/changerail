@@ -18,8 +18,8 @@
 
 - `1.backlog -> 2.todo`: scope истории принят к проработке.
 - `2.todo -> 3.inprogress`: ordered change plan и OpenSpec artifacts готовы.
-- `3.inprogress -> 4.done`: planned changes реализованы, проверены и
-  зафиксированы в карточке.
+- `3.inprogress -> 4.done`: independent review вернул fresh `go`, publish
+  опубликовал scoped payload, и карточка финализирована post-publish metadata.
 - `* -> 5.canceled`: принято явное решение не продолжать.
 
 ## Card Rules
@@ -38,9 +38,12 @@
 1. Создать или уточнить карточку в `1.backlog/`.
 2. После triage перенести карточку в `2.todo/` и описать ordered change plan.
 3. Когда artifacts готовы, перенести карточку в `3.inprogress/`.
-4. Реализовать changes через OPSX/OpenSpec flow.
-5. Записать результат, проверки и archive paths.
-6. После independent review и publish перенести карточку в `4.done/`.
+4. Реализовать changes через OPSX/OpenSpec flow, записать результат, проверки
+   и archive paths, оставив review-gated карточку в `3.inprogress/`.
+5. Провести independent review; на `no-go` исправлять только scoped blocker и
+   запрашивать свежий review.
+6. После fresh `go` выполнить publish и перенести карточку в `4.done/` только
+   как deterministic post-publish finalization.
 
 Минимальный собственный OPSX surface уже начинается с `opsx-explore` и
 `opsx-ff`. Пока delivery/review/publish skills не перенесены, реализация,

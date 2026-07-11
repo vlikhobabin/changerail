@@ -106,3 +106,33 @@ while preserving phase safety stops and scoped publish behavior.
 - **WHEN** an operator requires external review instead of self-launched review
 - **THEN** `opsx-deliver` stops at the review gate and prints the review and
   resume commands without publishing
+
+### Requirement: Delivery skills preserve review-gated lifecycle
+OPSX lifecycle skills MUST keep implementation, independent review and publish
+as separate gates with explicit card-state responsibilities.
+
+#### Scenario: Delivery hands off without done move
+- **WHEN** `opsx-do` completes and archives all card-owned changes
+- **THEN** it records verification and archive evidence but does not move the
+  card to `4.done`
+
+#### Scenario: Publish performs final board transition
+- **WHEN** `opsx-pub` has a fresh valid `go` verdict and publishes the scoped
+  payload
+- **THEN** it performs only the documented board finalization needed to mark the
+  story done
+
+### Requirement: Delivery and review audit mandatory verification
+`opsx-do` MUST collect mandatory verification from local rules and artifacts,
+and `opsx-review` MUST audit whether mandatory verification claims are backed by
+concrete evidence.
+
+#### Scenario: Delivery hands off evidence
+- **WHEN** `opsx-do` completes a change with mandatory checks
+- **THEN** the card, tasks or delivery manifest contains command/outcome
+  evidence for those checks
+
+#### Scenario: Review finds an unbacked mandatory claim
+- **WHEN** `opsx-review` sees a mandatory verification claim without concrete
+  command/outcome evidence
+- **THEN** it records a finding instead of treating the claim as proven

@@ -40,7 +40,7 @@ explore -> ff -> do -> review -> pub
 - `do` - реализовать changes, проверить их, синхронизировать specs и
   подготовить результат.
 - `review` - выполнить независимый fresh-context аудит перед публикацией.
-- `pub` - проверить verdict, обновить документацию, сделать scoped commit и
+- `pub` - проверить verdict и docs в reviewed payload, сделать scoped commit и
   опубликовать результат.
 - `deliver` - выполнить полный supervised flow для одной карточки или пачки
   карточек.

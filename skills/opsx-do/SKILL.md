@@ -139,13 +139,22 @@ git diff --check
 ```
 
 Also run focused checks required by `tasks.md`, `design.md`,
-`openspec/config.yaml`, `AGENTS.md` or affected code. For docs/config-only
-changes, `openspec validate` plus whitespace/config parsing checks are normally
-sufficient.
+`openspec/config.yaml`, `AGENTS.md` or affected code. Build the mandatory
+verification floor from project-declared sources: `AGENTS.md`,
+`openspec/config.yaml`, OpenSpec `tasks.md`/`design.md` and the affected
+toolchain. Formatter, strict typing and clean/ambient environment matrices are
+mandatory only when those sources declare them or the changed surface requires
+them. For docs/config-only changes, `openspec validate` plus whitespace/config
+parsing checks are normally sufficient.
 
 Every verification claim recorded in the card, tasks or manifest must name the
 executed command and observed outcome. Keep raw logs in ignored runtime state
 when needed; do not commit local runtime evidence.
+
+For added or changed tests, record why the test observes the intended behavior
+source and would fail if the claimed regression were present. For docs-only,
+config-only or otherwise non-test-firstable work, record why RED evidence is
+not applicable instead of claiming a failure that was not run.
 
 ### 4. Fix And Reverify
 
@@ -193,8 +202,10 @@ Record archive paths in the card and delivery manifest.
 
 If the input is an OPSX board card, keep status fields, verification notes,
 archive paths, result, next step and log consistent with local board
-conventions. Move the card only when the board docs make the destination
-unambiguous.
+conventions. For review-gated cards, `opsx-do` MUST leave the story in
+`3.inprogress` after implementation, verification, spec sync and archive. Do
+not move the card to `4.done`; that is a deterministic post-publish
+finalization responsibility of `opsx-pub`.
 
 ## Safety Stops
 

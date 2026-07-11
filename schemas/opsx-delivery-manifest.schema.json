@@ -178,6 +178,47 @@
     "manifestPath": {
       "type": "object",
       "required": ["path", "kind", "phase"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "rename"
+              }
+            },
+            "required": ["operation"]
+          },
+          "then": {
+            "required": ["source_path", "target_path"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "delete"
+              }
+            },
+            "required": ["operation"]
+          },
+          "then": {
+            "required": ["source_path"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": ["add", "modify"]
+              }
+            },
+            "required": ["operation"]
+          },
+          "then": {
+            "required": ["target_path"]
+          }
+        }
+      ],
       "additionalProperties": false,
       "properties": {
         "path": {
@@ -196,6 +237,17 @@
         },
         "change": {
           "type": "string"
+        },
+        "operation": {
+          "enum": ["add", "modify", "delete", "rename", "unknown"]
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_path": {
+          "type": "string",
+          "minLength": 1
         },
         "reason": {
           "type": "string"

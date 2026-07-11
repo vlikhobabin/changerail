@@ -33,8 +33,14 @@ explore -> ff -> do -> review -> pub
 - `do`: реализовать каждый planned change, проверить его, синхронизировать specs
   и подготовить результат.
 - `review`: выполнить независимый fresh-context аудит перед публикацией.
-- `pub`: обновить docs, создать scoped commit и опубликовать результат.
+- `pub`: проверить fresh verdict, подтвердить docs в reviewed payload, создать
+  scoped commit и опубликовать результат.
 - `deliver`: выполнить supervised full flow для одной карточки или ordered batch.
+
+Для non-interactive supervised запусков OPSX может использовать tracked runner,
+который пишет machine-readable status/run record в ignored runtime state.
+Supervisor должен наблюдать structured status, а не `pgrep` или свободный
+текст лога. Per-run model/effort overrides не должны менять repository defaults.
 
 Не объединяйте `review` с `do`. Review gate нужен потому, что контекст, который
 планировал и реализовывал изменение, недостаточно независим для финального
@@ -61,6 +67,12 @@ quality gate.
 Каждая секция ссылается на свой каталог
 `openspec/changes/<change-slug>/` и фиксирует, зачем нужен change, чего он
 должен достичь, зависимости и verification expectations.
+
+Для review-gated карточек `opsx-do` завершает implementation payload:
+реализует changes, выполняет verification, синхронизирует specs и архивирует
+card-owned OpenSpec changes. Сама story при этом остается в `3.inprogress`,
+пока independent review и publish не пройдут успешно. Переход в `4.done` -
+детерминированная post-publish финализация, а не часть `do`.
 
 ## Жизненный цикл OpenSpec
 
@@ -108,6 +120,12 @@ Fast-forward planning превращает board card в apply-ready changes. Х
 релевантный project context: `openspec/config.yaml`, `AGENTS.md`, board rules,
 target card и change artifacts.
 
+Обязательный verification floor собирается из project-declared sources:
+`AGENTS.md`, `openspec/config.yaml`, `tasks.md`, `design.md` и затронутого
+toolchain. Generic OPSX не делает formatter, strict typing или clean/ambient
+environment matrix обязательными для всех проектов, если они не объявлены
+локальными правилами или не следуют из измененного surface.
+
 Implementation не завершена, пока verification не запущена и результат не
 записан. Для docs/config-only changes обычный baseline:
 
@@ -123,6 +141,19 @@ git diff --check
 Project-specific tests или smoke checks также должны выполняться, если их
 требуют local instructions, tasks или affected code.
 
+Архивация card-owned OpenSpec changes происходит до review: reviewer должен
+видеть полный delivery payload, включая archive paths и synced specs. Любое
+содержательное изменение code/docs/specs/schemas/scripts/tests после свежего
+`go` делает verdict stale и требует re-review. Publish может записывать только
+документированную детерминированную board metadata после commit/push.
+
+Каждая verification claim должна называть выполненную команду и observed
+outcome. Если raw output сохраняется, он остается в ignored runtime evidence, а
+карточка или manifest ссылается на путь и краткое резюме. Для измененных тестов
+delivery фиксирует, почему тест способен упасть при заявленном регрессе и
+наблюдает нужный источник поведения. Для docs-only/config-only changes можно
+записать, почему RED evidence неприменима.
+
 ## Review Gate
 
 Review gate независим от implementation session. Он аудитит:
@@ -137,6 +168,15 @@ Reviewer производит go/no-go verdict и не исправляет мо
 ревьюит. Publish должен fail closed, если verdict отсутствует, stale или
 negative.
 
+Reviewer также проверяет, что обязательный project-declared verification floor
+имеет concrete command/outcome evidence. Unbacked mandatory claims, weakened
+tests и тесты, которые не наблюдают заявленное поведение, должны становиться
+findings, а не молчаливым pass.
+
+Review-cycle history сохраняется как ignored runtime evidence отдельно от
+latest canonical verdict. Это позволяет видеть цепочку `no-go -> fix ->
+re-review -> go` в метриках, не меняя fail-closed publish gate.
+
 ## Publish
 
 Publishing scoped к завершенной карточке. Перед commit или push:
@@ -144,11 +184,17 @@ Publishing scoped к завершенной карточке. Перед commit 
 - проверьте `git status` и final diff;
 - исключите runtime state, traces, logs, credentials и local reports;
 - подтвердите, что OpenSpec validation и required project checks зеленые;
-- обновите user-facing docs, если behavior или workflow изменился;
+- подтвердите, что user-facing docs для измененного behavior или workflow уже
+  входят в reviewed payload;
 - commit only files, которые относятся к named card.
 
 Commit и push выполняются только по явной просьбе operator или invoked publish
 workflow.
+
+Для review-gated flow durable docs и source edits должны входить в reviewed
+payload до verdict. Если publish обнаруживает, что нужны содержательные edits,
+он останавливается до staging и возвращает карточку в delivery/review loop.
+После успешного publish карточка финализируется в `4.done` по board protocol.
 
 ## Evidence
 
@@ -159,6 +205,10 @@ reports, retained smoke artifacts, review verdicts и explicit manual checks,
 Ignored runtime evidence может упоминаться в cards или manifests, но не должно
 попадать в commit. Не храните secrets, credentials, customer data, full source
 payloads или large logs в tracked evidence.
+
+Метрики должны читаться из structured run records и review-cycle evidence, а не
+из свободного текста логов. Отсутствующие optional значения, например token
+usage, отображаются явно как unknown.
 
 ## Public Safety
 

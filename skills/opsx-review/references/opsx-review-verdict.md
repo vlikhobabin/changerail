@@ -19,6 +19,15 @@ that is part of the review-gated flow must not proceed without a verdict that
 is valid, `result: go`, and fresh against the current working tree. Never
 commit the verdict file; record the summary in the card `Log` instead.
 
+Review-cycle history may be retained as separate ignored runtime evidence:
+
+```text
+.runtime/opsx/reviews/<card-id>.history.json
+```
+
+This history does not replace the canonical verdict. Publish validates only the
+latest `.runtime/opsx/reviews/<card-id>.json` verdict.
+
 ## Producing And Validating
 
 Only a fresh reviewer context may write a verdict. The implementing session
@@ -69,3 +78,6 @@ verdict was written.
   follow-up when not fixed.
 - `review_cycle`: `1` for the first review, incremented after fix cycles.
 - The helper accepts only `opsx.review-verdict.v1`.
+- Review-cycle history retains prior cycle finding details or immutable verdict
+  snapshot paths for metrics and audit after a later cycle writes the latest
+  canonical `go` verdict.

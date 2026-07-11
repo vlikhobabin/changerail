@@ -114,7 +114,9 @@ archived, and validation required by `opsx-ff` has passed.
 
 Run the `opsx-do` workflow for the re-resolved card. Continue only when planned
 card-owned changes are implemented, verified, synced and archived, and the
-delivery manifest/card state is updated.
+delivery manifest/card state is updated. For review-gated cards, the delivery
+phase must leave the card in `3.inprogress`; moving to `4.done` belongs to the
+post-publish finalization step.
 
 ### 3. Review
 

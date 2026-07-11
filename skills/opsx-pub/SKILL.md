@@ -1,6 +1,6 @@
 ---
 name: opsx-pub
-description: Run the final OPSX publish loop for a reviewed board card: validate review verdict, update docs when needed, create a scoped commit and push unless disabled.
+description: Run the final OPSX publish loop for a reviewed board card: validate review verdict, confirm reviewed docs, create a scoped commit and push unless disabled.
 ---
 
 # OPSX Pub
@@ -94,11 +94,14 @@ Build a publish scope from manifest `committable_paths`, archive paths, synced
 specs, card state, docs and changed files. Exclude runtime paths and unrelated
 active OpenSpec changes.
 
-### 2. Documentation Pass
+### 2. Documentation Check
 
-Update durable docs only when the delivered behavior changed user-facing
-commands, workflow, contracts or setup. Prefer existing docs. If no docs need
-updates, record that reason in the card or final summary.
+Confirm durable docs that changed user-facing commands, workflow, contracts or
+setup are already part of the reviewed payload. Prefer existing docs. For
+review-gated cards, do not make substantive code, docs, specs, schema, script
+or test edits after a fresh `go` verdict; stop and send the card back through
+delivery/review if such edits are required. If no docs need updates, record
+that reason in the card or final summary.
 
 ### 3. Final Verification
 
@@ -139,8 +142,10 @@ card summary and local commit style.
 ### 5. Card Sync
 
 After a successful commit, update the card with result, commit hash, push
-status and log entry when local board conventions require it. If this creates a
-new card-only diff before push, amend only the card with explicit staging.
+status, log entry and the documented `4.done` board move when local board
+conventions require it. This post-publish card metadata is deterministic
+finalization, not a substantive change to the reviewed payload. If this creates
+a new card-only diff before push, amend only the card with explicit staging.
 
 ### 6. Push
 

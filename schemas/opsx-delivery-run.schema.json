@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://opsx.local/schemas/opsx-delivery-run.schema.json",
+  "title": "OPSX delivery run",
+  "type": "object",
+  "required": [
+    "schema",
+    "run_id",
+    "updated_at",
+    "workspace",
+    "card",
+    "phase",
+    "result",
+    "timestamps",
+    "command",
+    "usage"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "opsx.delivery-run.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "head_commit": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "card": {
+      "type": "object",
+      "required": ["id", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "phase": {
+      "enum": ["preflight", "delivery", "terminal"]
+    },
+    "result": {
+      "enum": ["RUNNING", "DELIVERED", "NO-GO", "BLOCKED"]
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["started_at"],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": ["argv", "launcher", "stdin", "json"],
+      "additionalProperties": false,
+      "properties": {
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "launcher": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reasoning_effort": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stdin": {
+          "const": "closed"
+        },
+        "json": {
+          "type": "boolean"
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exit_code": {
+          "type": "integer"
+        }
+      }
+    },
+    "terminal_outcome": {
+      "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
+    },
+    "commit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "preflight": {
+      "type": "object",
+      "required": ["checks"],
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/check"
+          }
+        }
+      }
+    },
+    "logs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stdout": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stderr": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "required": ["available"],
+      "additionalProperties": false,
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": ["name", "status", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["pass", "fail", "skip"]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

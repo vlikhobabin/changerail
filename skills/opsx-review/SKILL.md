@@ -15,8 +15,9 @@ $opsx-review <card-path>  # fresh-context review verdict
 $opsx-pub <card-path>     # publish only after go
 ```
 
-The reviewer produces evidence, not fixes. Its only write is the verdict file
-under `.runtime/opsx/reviews/`.
+The reviewer produces evidence, not fixes. Its writes are ignored runtime
+review evidence under `.runtime/opsx/reviews/`: the latest canonical verdict and
+optional review-cycle history. It must not modify reviewed payload files.
 
 ## Independence Requirement
 
@@ -53,6 +54,21 @@ path is:
 The canonical schema id is `opsx.review-verdict.v1`. Use
 `scripts/opsx_review_verdict.py` when present, otherwise the linked
 `bin/opsx-review-verdict` helper, to compute and validate verdicts.
+
+When retaining review-cycle evidence, keep the latest canonical verdict at:
+
+```text
+.runtime/opsx/reviews/<card-id>.json
+```
+
+Store cycle history separately, for example:
+
+```text
+.runtime/opsx/reviews/<card-id>.history.json
+```
+
+History must not replace the canonical verdict used by publish freshness
+validation.
 
 ## Inputs
 
@@ -96,6 +112,13 @@ For every verification claim in the card, archived tasks and manifest:
 Fill one `acceptance` entry per card acceptance criterion. Generic assurance is
 not evidence.
 
+Audit the mandatory verification floor declared by `AGENTS.md`,
+`openspec/config.yaml`, archived `tasks.md`/`design.md` and the affected
+toolchain. Missing command/outcome evidence for a mandatory check is an
+evidence finding. Formatter, strict typing and environment-matrix checks are
+mandatory only when those sources declare them or the changed surface makes
+them necessary.
+
 ### 3. Diff Review
 
 Read the full working-tree diff for the claimed publish scope:
@@ -112,7 +135,9 @@ handling and public-safety risks.
 
 For added or changed tests, answer whether they would fail if the behavior were
 broken. Flag missing coverage, tautological assertions, weakened tests and
-missing RED evidence where the project required test-first work.
+missing RED evidence where the project required test-first work. Treat an
+explicit docs-only/config-only RED-not-applicable note as evidence to audit,
+not as an automatic failure.
 
 ### 5. Write And Validate Verdict
 
@@ -130,6 +155,10 @@ Set `result` to `no-go` when any blocker exists or any acceptance criterion is
 python3 scripts/opsx_review_verdict.py validate \
   ".runtime/opsx/reviews/<card-id>.json" --json
 ```
+
+When the workspace provides a review-cycle history contract, append or update a
+runtime history summary for the cycle without editing the reviewed payload. Keep
+previous `no-go` cycles available for metrics even after a later `go`.
 
 ## Safety Stops
 
