@@ -4,10 +4,10 @@ OPSX - открытая технология организации разраб
 OpenSpec-артефакты, доска задач, проверяемый delivery pipeline и общий
 toolchain для Codex CLI и Claude Code.
 
-Проект находится на ранней стадии выделения в самостоятельный открытый
-репозиторий. Текущий фокус - закрепить минимальный source of truth, затем
-добавить bootstrap нового проекта, verify-project и drift gate для
-проектов-потребителей.
+Минимальный public source of truth, bootstrap/verification, drift gate,
+migration/adoption и release discipline уже реализованы. Текущий фокус -
+укрепить delivery pipeline для повторяемой эксплуатации и подготовить stable
+release на основе практического feedback.
 
 ## Зачем нужен OPSX
 
@@ -120,11 +120,14 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
 
-Планируемые следующие части:
+Следующие направления:
 
-- миграция и adoption flow для существующих/новых consumer projects.
+- однозначный lifecycle delivery/review/pub и полный publish scope;
+- generic runner operations, структурированный runtime status и метрики;
+- первый stable release после проверки operational hardening на consumer
+  projects.
 
-## Планируемая структура
+## Структура репозитория
 
 ```text
 opsx/
@@ -209,7 +212,7 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 
 ## Документация
 
-Основной документ текущего этапа:
+Основные документы:
 
 - [Как это работает](docs/how-it-works.md)
 - [OPSX как единый source of truth разработки](docs/opsx-source-of-truth-architecture.md)
@@ -238,15 +241,17 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 
 ## Roadmap
 
-Текущая точка: Фазы 1-3 реализованы в рабочем дереве: generic lifecycle
-skills, OpenSpec lifecycle skills, wrapper `bin/openspec`, schemas,
-review-verdict helper, project templates, `bin/verify-project`,
-`bin/bootstrap-project`, `scripts/smoke-drift.py`, semver/changelog,
-compatibility notes, migration guide и release CI присутствуют. Миграция
-потребителей еще впереди.
+Текущая точка: bootstrap-фазы 1-6 завершены. Репозиторий содержит generic
+lifecycle и OpenSpec skills, contracts/helpers, bootstrap/templates,
+verification и drift gates, release CI и документацию. Подтвержденные
+consumer-проекты мигрированы или подключены через adoption flow; проекты вне
+OPSX явно исключены из workspace drift inventory.
 
 Ближайшие шаги:
 
-1. Переключить существующие legacy consumers на `/opt/opsx`.
-2. Подключить новые проекты через adoption/bootstrap flow.
-3. Подготовить первый stable release после миграции/adoption feedback.
+1. Укрепить delivery lifecycle, verification floor и publish scope по активной
+   board card `harden-delivery-operations`.
+2. Добавить public-safe runner operations, structured status и delivery
+   observability без зависимости от machine-local runtime.
+3. Подготовить первый stable release после operational feedback и проверки
+   compatibility на consumer projects.
