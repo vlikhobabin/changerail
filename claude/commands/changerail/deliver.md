@@ -14,6 +14,8 @@ Arguments: $ARGUMENTS
 
 Reminders from the skill contract:
 
+- Treat this command as the supervised orchestrator for the requested card or
+  bounded queue.
 - Process one card at a time through `ff -> do -> review -> pub`.
 - Preserve phase safety stops and scoped publish behavior.
 - Review must come from a fresh context; the implementing session must not

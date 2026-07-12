@@ -47,6 +47,29 @@ namespaces продолжают использовать `changerail`.
 Supervisor должен наблюдать structured status, а не `pgrep` или свободный
 текст лога. Per-run model/effort overrides не должны менять repository defaults.
 
+## Supervised Roles
+
+ChangeRail различает операционные роли:
+
+- Оркестратор ведет карточку или bounded queue через стадии, выбирает следующую
+  карточку, следит за safety stops, читает verdict и решает, нужен ли fix,
+  re-review или publish.
+- Delivery worker реализует один card-owned change или одну карточку,
+  выполняет verification, синхронизирует specs, архивирует changes и готовит
+  evidence/manifest для review.
+- Reviewer работает в fresh context, который не планировал и не реализовывал
+  reviewed payload, аудитит scope/evidence/acceptance и пишет go/no-go verdict
+  в ignored runtime state.
+
+Для небольших single-card работ оркестратор и delivery worker могут быть одной
+сессией. Reviewer не может быть совмещен с planning/implementation context. Если
+fresh reviewer недоступен или не может правдиво подтвердить независимость,
+pipeline останавливается на review gate до внешнего review.
+
+Для очередей и roadmap-серий оркестратор обрабатывает карточки по одной,
+останавливается на первом safety stop и периодически актуализирует оставшуюся
+очередь с учетом уже опубликованных карточек.
+
 Не объединяйте `review` с `do`. Review gate нужен потому, что контекст, который
 планировал и реализовывал изменение, недостаточно независим для финального
 quality gate.

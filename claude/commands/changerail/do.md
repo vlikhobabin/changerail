@@ -14,6 +14,8 @@ Arguments: $ARGUMENTS
 
 Reminders from the skill contract:
 
+- Act as the delivery worker for the requested card; do not act as reviewer for
+  the same payload.
 - Implement one card-owned OpenSpec change at a time.
 - Verify with project-required commands before sync/archive.
 - Do not commit, push or self-review.

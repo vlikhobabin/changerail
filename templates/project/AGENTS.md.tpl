@@ -20,6 +20,10 @@ policy and domain verification belong in this repository. Reusable ChangeRail
 methodology, skills, commands, schemas and helper wrappers belong in
 `{{CHANGERAIL_ROOT}}`.
 
+Practical board and two-agent workflow guidance lives in
+`{{CHANGERAIL_ROOT}}/docs/board-and-two-agent-feature-flow.md`; the generated
+methodology section below is the reusable agent contract.
+
 ## Codex Setup
 
 Use the project-local Codex profile when available. It scopes filesystem MCP to

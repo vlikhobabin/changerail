@@ -15,5 +15,6 @@ Arguments: $ARGUMENTS
 Reminders from the skill contract:
 
 - Run only from a fresh context that did not plan or implement the card.
+- Include `reviewer.independence` attestation in the verdict.
 - Write only `.runtime/changerail/reviews/<card-id>.json`.
 - Do not fix reviewed files, commit or push.

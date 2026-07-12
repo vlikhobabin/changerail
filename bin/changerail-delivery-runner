@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run ChangeRail delivery non-interactively and write structured runtime status."""
+"""Run one ChangeRail delivery card non-interactively and write structured runtime status."""
 
 from __future__ import annotations
 
@@ -378,7 +378,7 @@ def command_run(args: argparse.Namespace) -> int:
 
 def add_common(parser: argparse.ArgumentParser) -> None:
     root = repo_root_from_script()
-    parser.add_argument("card", help="repository-relative board card path")
+    parser.add_argument("card", help="single repository-relative board card path")
     parser.add_argument("--workspace", type=Path)
     parser.add_argument("--runtime-root", type=Path)
     parser.add_argument("--run-id", default=utc_run_id())

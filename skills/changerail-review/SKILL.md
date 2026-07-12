@@ -30,6 +30,16 @@ This skill must run in a context that did not plan or implement the card:
 If the current session produced any diff under review, stop immediately and
 report a self-review violation instead of writing a verdict.
 
+Every verdict must include `reviewer.independence` attestation:
+
+- `fresh_context: true`
+- `did_not_plan_or_implement: true`
+- non-empty `basis` describing why the reviewer can truthfully make that claim
+
+The helper validates this attestation as a publish-gate contract. It is not a
+cryptographic proof of identity; if the reviewer cannot truthfully attest
+independence, stop instead of writing a verdict.
+
 ## Project Context
 
 Resolve the repository root from the current working directory or

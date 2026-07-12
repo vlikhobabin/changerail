@@ -61,12 +61,17 @@ If no path is provided and it cannot be inferred, ask for it.
 
 ## Operating Mode
 
-- Work in the foreground as the active agent.
+- Work in the foreground as the supervised orchestrator for the requested card
+  or bounded queue.
+- For single-card work, the active session may also perform the delivery worker
+  role unless the operator delegates implementation.
 - Process one card at a time, completing `ff -> do -> review -> pub` before
   selecting the next card.
 - Do not use subagents unless the user explicitly asks for delegated work. The
   review phase is the one exception: it must be a fresh context, never the
   implementing session.
+- If a fresh reviewer cannot be launched, validated or truthfully attested, stop
+  with safety stop `awaiting external review`.
 - Preserve phase safety stops, manifest handling, evidence expectations and
   scoped publish rules.
 - Never run `git add .`, `git commit -a`, force-push, reset or checkout

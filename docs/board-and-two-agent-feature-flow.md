@@ -185,7 +185,7 @@ ff -> do -> review -> pub
 | Роль | Ответственность |
 | --- | --- |
 | Оркестратор | держит roadmap и очередь карточек, решает что запускать дальше, смотрит safety stops, принимает операторские решения |
-| Delivery worker / runner | выполняет `deliver` по конкретной карточке или ограниченной очереди, пишет evidence и runtime status |
+| Delivery worker / runner | выполняет `deliver` по конкретной карточке; для очереди оркестратор запускает карточки последовательно и читает evidence/runtime status |
 
 Но есть третья обязательная граница: **review verdict должен быть fresh context**,
 который не планировал и не реализовывал payload. Оркестратор может
@@ -199,7 +199,7 @@ ff -> do -> review -> pub
 roadmap/cards
     |
     v
-оркестратор выбирает следующую карточку или batch
+оркестратор выбирает следующую карточку или bounded queue
     |
     v
 delivery worker запускает deliver / runner
@@ -215,10 +215,10 @@ fresh reviewer пишет go/no-go verdict
 нужен fresh re-review. Старый `go` нельзя использовать после содержательных
 изменений code/docs/specs/scripts/tests.
 
-## Batch runner и очередь карточек
+## Batch delivery и очередь карточек
 
 `$chrl-deliver` может принимать одну карточку или колонку/очередь. Контракт
-важен: даже при batch запуске ChangeRail обрабатывает **одну карточку зараз**,
+важен: даже при batch запуске ChangeRail обрабатывает **одну карточку за раз**,
 полностью проходя `ff -> do -> review -> pub`, и только потом берет
 следующую.
 
@@ -227,6 +227,11 @@ fresh reviewer пишет go/no-go verdict
 ```bash
 bin/changerail-delivery-runner run openspec/board/2.todo/example-card.md
 ```
+
+Tracked runner является single-card launcher: один `run` оборачивает один
+`$changerail-deliver <card>` и пишет status для одной карточки. Для пакетной
+работы оркестратор вызывает runner последовательно по карточкам или использует
+`$chrl-deliver` для bounded queue без отдельного runner-а.
 
 Runner пишет structured status под:
 

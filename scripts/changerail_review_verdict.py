@@ -8,7 +8,8 @@ current working tree. This helper provides:
 
 - `validate <verdict.json>`: schema-shape plus consistency validation
   (blocker findings force `no-go`; `no-go` requires a blocker or a failed
-  acceptance criterion), with optional `--check-fresh` freshness comparison;
+  acceptance criterion; reviewer independence attestation is required), with
+  optional `--check-fresh` freshness comparison;
 - `fingerprint --workspace <root>`: deterministic sha256 fingerprint over
   `git status --porcelain`, `git diff HEAD` and untracked non-ignored file
   content, shared by the reviewer that embeds it and every consumer that
@@ -102,9 +103,21 @@ def _validate_verdict(data: Any) -> list[str]:
 
     reviewer = data.get("reviewer")
     if not isinstance(reviewer, dict):
-        errors.append("reviewer must be an object with kind")
-    elif reviewer.get("kind") not in REVIEWER_KINDS:
-        errors.append(f"reviewer.kind must be one of: {', '.join(REVIEWER_KINDS)}")
+        errors.append("reviewer must be an object with kind and independence")
+    else:
+        if reviewer.get("kind") not in REVIEWER_KINDS:
+            errors.append(f"reviewer.kind must be one of: {', '.join(REVIEWER_KINDS)}")
+        independence = reviewer.get("independence")
+        if not isinstance(independence, dict):
+            errors.append("reviewer.independence must be an object")
+        else:
+            if independence.get("fresh_context") is not True:
+                errors.append("reviewer.independence.fresh_context must be true")
+            if independence.get("did_not_plan_or_implement") is not True:
+                errors.append("reviewer.independence.did_not_plan_or_implement must be true")
+            basis = independence.get("basis")
+            if not isinstance(basis, str) or not basis.strip():
+                errors.append("reviewer.independence.basis must be a non-empty string")
 
     result = data.get("result")
     if result not in RESULTS:

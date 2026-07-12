@@ -33,6 +33,25 @@ latest `.runtime/changerail/reviews/<card-id>.json` verdict.
 Only a fresh reviewer context may write a verdict. The implementing session
 must never write its own verdict.
 
+Each verdict MUST include an independence attestation:
+
+```json
+"reviewer": {
+  "kind": "codex-exec",
+  "session": "optional session id",
+  "model": "optional model id",
+  "independence": {
+    "fresh_context": true,
+    "did_not_plan_or_implement": true,
+    "basis": "fresh reviewer session launched only for this review"
+  }
+}
+```
+
+The validator checks that `fresh_context` and `did_not_plan_or_implement` are
+true and that `basis` is non-empty. This is a machine-checkable attestation and
+freshness gate, not proof of real-world identity or full memory isolation.
+
 Validate a verdict with the local helper:
 
 ```bash

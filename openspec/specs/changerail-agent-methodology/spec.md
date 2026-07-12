@@ -174,3 +174,56 @@ ChangeRail public methodology and user-facing docs MUST present `chrl-*` and
   alias implementation
 - **THEN** they continue to use `changerail` naming
 - **AND** no new `chrl` runtime namespace is introduced
+
+### Requirement: Board docs align with lifecycle surface
+ChangeRail board documentation MUST describe the currently available lifecycle
+surface and MUST NOT retain obsolete statements that delivery, review or
+publish skills are unavailable when those skills are part of the public surface.
+
+#### Scenario: Agent reads the root board README
+- **WHEN** an agent reads `openspec/board/README.md`
+- **THEN** the README describes `changerail-ff`, `changerail-do`,
+  `changerail-review`, `changerail-pub` and `changerail-deliver` as available
+  lifecycle surfaces
+- **AND** it keeps the review-gated `3.inprogress -> 4.done` boundary aligned
+  with shared methodology
+
+### Requirement: Orchestrator, worker and reviewer role model
+Shared methodology MUST define the operational roles used by supervised
+ChangeRail delivery: orchestrator, delivery worker and independent reviewer.
+
+#### Scenario: Agent reads shared methodology
+- **WHEN** an agent reads `AGENTS.shared.md`
+- **THEN** it can identify which context is responsible for choosing cards,
+  running or supervising delivery, fixing scoped blockers and requesting
+  review
+- **AND** it can identify that the reviewer context is separate from the
+  planning and implementation context
+
+### Requirement: Role co-location boundaries
+Shared methodology MUST state when orchestrator and delivery worker may be the
+same session and when they should be separate, while preserving independent
+review as a mandatory separate context.
+
+#### Scenario: Small single-card task is delivered
+- **WHEN** a card is small enough for the active supervised session to run
+  delivery directly
+- **THEN** the methodology permits orchestrator and delivery worker to be the
+  same session
+- **AND** still requires a fresh reviewer context before publish
+
+#### Scenario: Fresh reviewer is unavailable
+- **WHEN** delivery reaches review and no fresh reviewer context is available
+- **THEN** the workflow stops at the review gate instead of publishing
+
+### Requirement: Batch guidance separates deliver and runner responsibilities
+ChangeRail methodology MUST distinguish between the lifecycle skill that can
+process an ordered card queue and the tracked runner that supervises one
+non-interactive card invocation.
+
+#### Scenario: Operator plans a bounded batch
+- **WHEN** an operator wants to process multiple cards
+- **THEN** methodology explains that `$changerail-deliver <board-column>` owns
+  one-card-at-a-time queue ordering
+- **AND** `bin/changerail-delivery-runner run <card>` is documented as the
+  single-card structured-status launcher

@@ -45,7 +45,8 @@
 6. После fresh `go` выполнить publish и перенести карточку в `4.done/` только
    как deterministic post-publish finalization.
 
-Минимальный собственный ChangeRail surface уже начинается с `changerail-explore` и
-`changerail-ff`. Пока delivery/review/publish skills не перенесены, реализация,
-archive и publish выполняются прямыми правками с baseline verification из
-`AGENTS.md` либо через явно доступный project-local workflow.
+Актуальный ChangeRail surface включает `changerail-explore`, `changerail-ff`,
+`changerail-do`, `changerail-review`, `changerail-pub`, `changerail-deliver` и
+короткие `$chrl-*` / `/chrl:*` aliases. Роли оркестратора, delivery worker и
+fresh reviewer закреплены в `AGENTS.shared.md`; практический workflow описан в
+`docs/board-and-two-agent-feature-flow.md`.

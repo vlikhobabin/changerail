@@ -91,11 +91,16 @@ ignored runtime state, а карточка, tasks или manifest содержа
 ## Non-interactive runner и status
 
 Для длительных supervised запусков ChangeRail предоставляет tracked helper
-`bin/changerail-delivery-runner`. Он запускает `$changerail-deliver <card>` через
-repo-scoped `bin/codex`, закрывает stdin child-процесса и пишет
+`bin/changerail-delivery-runner`. Это single-card launcher: он запускает
+`$changerail-deliver <card>` через repo-scoped `bin/codex`, закрывает stdin
+child-процесса и пишет
 `.runtime/changerail/delivery-runs/<run-id>/status.json` с contract
 `changerail.delivery-run.v1`. Supervisor наблюдает этот status record, а не `pgrep`
 или свободный текст лога.
+
+Очередь карточек остается ответственностью `$changerail-deliver` или внешнего
+оркестратора, который вызывает runner отдельно для каждой карточки. Один runner
+run пишет status для одной карточки.
 
 Per-run model и reasoning effort передаются штатными Codex CLI overrides и не
 меняют repository defaults:
@@ -166,7 +171,8 @@ CSV mode предназначен для внешней аналитики; от
 - **Review** — **обязательно отдельный, свежий контекст**, а не та сессия, что
   реализовывала. Она аудитит diff против карточки и OpenSpec-scope, покрытие
   acceptance, evidence и public-safety-риски, и выдаёт машинно-проверяемый
-  **go/no-go verdict** (контракт `changerail.review-verdict.v1`).
+  **go/no-go verdict** (контракт `changerail.review-verdict.v1`) с
+  `reviewer.independence` attestation.
 - **Возврат к оркестратору**: verdict возвращается оркестратору. `go` →
   оркестратор запускает `pub`. `no-go` → оркестратор передаёт воркеру
   fix-директиву, и цикл `do → review` повторяется, пока не будет свежего `go`.

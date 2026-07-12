@@ -19,6 +19,11 @@ $changerail-pub <card-path>     # scoped commit and push
 `changerail-do` works in the foreground as the implementing session. It does not
 review itself, commit, push or publish.
 
+In the supervised role model this skill is the delivery worker. The delivery
+worker may be the same active session as the orchestrator for small or
+single-card work, but it must never act as the independent reviewer for the
+payload it planned or implemented.
+
 ## Project Context
 
 Resolve the repository root from the current working directory or

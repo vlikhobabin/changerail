@@ -62,7 +62,7 @@
     },
     "reviewer": {
       "type": "object",
-      "required": ["kind"],
+      "required": ["kind", "independence"],
       "additionalProperties": false,
       "properties": {
         "kind": {
@@ -78,6 +78,27 @@
         },
         "model": {
           "type": "string"
+        },
+        "independence": {
+          "type": "object",
+          "required": [
+            "fresh_context",
+            "did_not_plan_or_implement",
+            "basis"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "fresh_context": {
+              "const": true
+            },
+            "did_not_plan_or_implement": {
+              "const": true
+            },
+            "basis": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },

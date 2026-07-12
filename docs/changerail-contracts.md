@@ -37,6 +37,8 @@ Review verdict является runtime-файлом:
 
 - валиден по shape и cross-field правилам;
 - имеет `result: go`;
+- содержит `reviewer.independence` attestation с `fresh_context: true`,
+  `did_not_plan_or_implement: true` и непустым `basis`;
 - fresh относительно текущего `HEAD`, `git status --porcelain`,
   `git diff HEAD --no-color` и содержимого untracked non-ignored файлов,
   перечисленных через `git ls-files --others --exclude-standard`.
@@ -62,6 +64,11 @@ Exit codes: `0` valid, `1` validation failed, `2` input error.
 Ignored paths не входят в freshness fingerprint. Поэтому запись verdict под
 `.runtime/changerail/reviews/` не инвалидирует сам verdict, но изменение содержимого
 нового untracked deliverable-файла делает verdict stale.
+
+Independence attestation является проверяемым контрактом и операторским
+заявлением reviewer-а. Helper проверяет наличие и истинность полей, но не может
+криптографически доказать личность reviewer-а или полную изоляцию памяти за
+пределами freshness fingerprint.
 
 ## Delivery Manifest
 
