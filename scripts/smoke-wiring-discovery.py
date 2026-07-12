@@ -22,6 +22,12 @@ SKILLS = (
     "changerail-review",
     "changerail-pub",
     "changerail-deliver",
+    "chrl-explore",
+    "chrl-ff",
+    "chrl-do",
+    "chrl-review",
+    "chrl-pub",
+    "chrl-deliver",
     "openspec-apply-change",
     "openspec-archive-change",
     "openspec-bulk-archive-change",
@@ -41,6 +47,14 @@ COMMANDS = {
     "review": "changerail-review",
     "pub": "changerail-pub",
     "deliver": "changerail-deliver",
+}
+SHORT_COMMANDS = {
+    "explore": "chrl-explore",
+    "ff": "chrl-ff",
+    "do": "chrl-do",
+    "review": "chrl-review",
+    "pub": "chrl-pub",
+    "deliver": "chrl-deliver",
 }
 FORBIDDEN_CONSUMER_ROOT_SKILLS = re.compile(r"(^|[\s`'\"])(\./)?skills/")
 
@@ -193,6 +207,7 @@ def check_command_wrapper(
     *,
     command_file: Path,
     command_name: str,
+    command_namespace: str,
     expected_skill: str,
     expected_source: Path,
     mode: str,
@@ -210,18 +225,21 @@ def check_command_wrapper(
             failures.append(f"command wrapper cannot be read: {exc}")
 
     if text:
-        slash = f"/changerail:{command_name}"
+        invocation = f"/{command_namespace}:{command_name}"
+        canonical = f"/changerail:{command_name}"
         if expected_skill not in text:
             failures.append(f"wrapper does not mention {expected_skill}")
-        if slash not in text:
-            failures.append(f"wrapper does not mention {slash}")
+        if invocation not in text:
+            failures.append(f"wrapper does not mention {invocation}")
+        if canonical not in text:
+            failures.append(f"wrapper does not mention {canonical}")
         if FORBIDDEN_CONSUMER_ROOT_SKILLS.search(text):
             failures.append("wrapper references a consumer-root skills/ path")
 
     status = "fail" if failures else "pass"
     message = "; ".join(failures) if failures else "wrapper references expected skill without root skills/ path"
     return Check(
-        name=f"claude {mode} /changerail:{command_name} wrapper contract",
+        name=f"claude {mode} /{command_namespace}:{command_name} wrapper contract",
         path=str(command_file),
         expected_target=str(expected_source),
         resolved_target=str(resolved or ""),
@@ -250,6 +268,7 @@ def create_consumer_example(run_dir: Path, changerail_root: Path) -> Path:
 
     symlink_force(changerail_root / "skills", project / ".claude" / "skills")
     symlink_force(changerail_root / "claude" / "commands" / "changerail", project / ".claude" / "commands" / "changerail")
+    symlink_force(changerail_root / "claude" / "commands" / "chrl", project / ".claude" / "commands" / "chrl")
     for skill in SKILLS:
         symlink_force(changerail_root / "skills" / skill, project / ".codex" / "skills" / skill)
     return project
@@ -267,7 +286,6 @@ def claude_checks(mode: str, base: Path, changerail_root: Path) -> list[Check]:
     checks: list[Check] = []
     require_relative = mode == "repo-local"
     skills_dir = base / ".claude" / "skills"
-    commands_dir = base / ".claude" / "commands" / "changerail"
     checks.append(
         check_symlink(
             name=f"claude {mode} skills directory",
@@ -279,34 +297,38 @@ def claude_checks(mode: str, base: Path, changerail_root: Path) -> list[Check]:
             require_relative_link=require_relative,
         )
     )
-    checks.append(
-        check_symlink(
-            name=f"claude {mode} commands directory",
-            path=commands_dir,
-            expected_target=changerail_root / "claude" / "commands" / "changerail",
-            changerail_root=changerail_root,
-            mode=mode,
-            surface="claude",
-            require_relative_link=require_relative,
+    command_sets = (("changerail", COMMANDS), ("chrl", SHORT_COMMANDS))
+    for namespace, commands in command_sets:
+        commands_dir = base / ".claude" / "commands" / namespace
+        checks.append(
+            check_symlink(
+                name=f"claude {mode} {namespace} commands directory",
+                path=commands_dir,
+                expected_target=changerail_root / "claude" / "commands" / namespace,
+                changerail_root=changerail_root,
+                mode=mode,
+                surface="claude",
+                require_relative_link=require_relative,
+            )
         )
-    )
+        for command_name, skill in commands.items():
+            checks.append(
+                check_command_wrapper(
+                    command_file=commands_dir / f"{command_name}.md",
+                    command_name=command_name,
+                    command_namespace=namespace,
+                    expected_skill=skill,
+                    expected_source=changerail_root / "claude" / "commands" / namespace / f"{command_name}.md",
+                    mode=mode,
+                    surface="claude",
+                )
+            )
     for skill in SKILLS:
         checks.append(
             check_skill_contract(
                 skill_path=skills_dir / skill,
                 expected_name=skill,
                 expected_source=changerail_root / "skills" / skill,
-                mode=mode,
-                surface="claude",
-            )
-        )
-    for command_name, skill in COMMANDS.items():
-        checks.append(
-            check_command_wrapper(
-                command_file=commands_dir / f"{command_name}.md",
-                command_name=command_name,
-                expected_skill=skill,
-                expected_source=changerail_root / "claude" / "commands" / "changerail" / f"{command_name}.md",
                 mode=mode,
                 surface="claude",
             )

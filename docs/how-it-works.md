@@ -63,7 +63,9 @@ Independent review проверяет именно этот полный payload
 | `pub` | проверить verdict/docs, scoped commit, публикация |
 | `deliver` | supervised full-flow для одной карточки или упорядоченной очереди |
 
-Для Codex это skills `$changerail-*`; для Claude Code — команды `/changerail:*`.
+Для ежедневной работы это skills `$chrl-*` в Codex и команды `/chrl:*` в Claude
+Code. Длинные `$changerail-*` и `/changerail:*` остаются canonical/reference
+names для contracts, docs и troubleshooting.
 
 Durable docs/source edits должны быть частью reviewed payload до `go`. Если
 после `go` требуется содержательное изменение, verdict считается stale и
@@ -177,7 +179,8 @@ Publish работает **fail-closed**: без валидного свежег
 1. Подключить проект: `bin/bootstrap-project` (или adopt существующего
    потребителя).
 2. Проверить сцепку: `bin/verify-project` — red/green gate.
-3. Завести карточку на доске и вести её через `$changerail-*` / `/changerail:*`.
+3. Завести карточку на доске и вести её через `$chrl-*` / `/chrl:*`; для
+   reference/debugging использовать canonical `$changerail-*` / `/changerail:*`.
 4. Публиковать только scoped и только после `go`-вердикта.
 
 ## Дальше

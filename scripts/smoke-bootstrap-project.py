@@ -98,6 +98,10 @@ def check_dry_run(changerail_root: Path, run_dir: Path) -> Check:
         return Check("dry-run no-write", "fail", result.stdout.strip())
     if project.exists():
         return Check("dry-run no-write", "fail", f"target was created: {project}")
+    expected = (".claude/commands/chrl", ".codex/skills/chrl-do")
+    missing = [needle for needle in expected if needle not in result.stdout]
+    if missing:
+        return Check("dry-run no-write", "fail", "dry-run omitted alias wiring: " + ", ".join(missing))
     return Check("dry-run no-write", "pass", "dry-run printed plan and left no target")
 
 

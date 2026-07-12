@@ -283,6 +283,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
         Check("project root", project.is_dir(), str(project)),
         check_symlink(project, ".claude/skills", changerail_root / "skills", changerail_root, aggregator_root),
         check_symlink(project, ".claude/commands/changerail", changerail_root / "claude" / "commands" / "changerail", changerail_root, aggregator_root),
+        check_symlink(project, ".claude/commands/chrl", changerail_root / "claude" / "commands" / "chrl", changerail_root, aggregator_root),
         check_symlink(project, "bin/openspec", changerail_root / "bin" / "openspec", changerail_root, aggregator_root),
     ]
     for skill in skills:

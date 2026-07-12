@@ -100,6 +100,7 @@ def create_fixture(project: Path, changerail_root: Path) -> None:
 
     symlink_force(changerail_root / "skills", project / ".claude" / "skills")
     symlink_force(changerail_root / "claude" / "commands" / "changerail", project / ".claude" / "commands" / "changerail")
+    symlink_force(changerail_root / "claude" / "commands" / "chrl", project / ".claude" / "commands" / "chrl")
     for skill in skill_names(changerail_root):
         symlink_force(changerail_root / "skills" / skill, project / ".codex" / "skills" / skill)
     symlink_force(changerail_root / "bin" / "openspec", project / "bin" / "openspec")
@@ -160,6 +161,19 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "stale OPSX wiring fails",
             "pass" if stale.returncode != 0 and "stale OPSX wiring" in stale.stdout else "fail",
             stale.stdout.strip(),
+        )
+    )
+
+    missing_chrl_project = run_dir / "bad-missing-chrl-alias"
+    shutil.copytree(good_project, missing_chrl_project, symlinks=True)
+    (missing_chrl_project / ".codex" / "skills" / "chrl-do").unlink()
+    (missing_chrl_project / ".claude" / "commands" / "chrl").unlink()
+    missing_chrl = run([str(changerail_root / "bin" / "verify-project"), str(missing_chrl_project)], changerail_root)
+    checks.append(
+        Check(
+            "missing chrl alias fails",
+            "pass" if missing_chrl.returncode != 0 and "chrl" in missing_chrl.stdout else "fail",
+            missing_chrl.stdout.strip(),
         )
     )
 

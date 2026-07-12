@@ -75,6 +75,7 @@ def symlink_plan(changerail_root: Path, target: Path) -> list[tuple[Path, Path]]
     links = [
         (changerail_root / "skills", target / ".claude" / "skills"),
         (changerail_root / "claude" / "commands" / "changerail", target / ".claude" / "commands" / "changerail"),
+        (changerail_root / "claude" / "commands" / "chrl", target / ".claude" / "commands" / "chrl"),
         (changerail_root / "bin" / "openspec", target / "bin" / "openspec"),
         (changerail_root / "bin" / "changerail-review-verdict", target / "bin" / "changerail-review-verdict"),
     ]

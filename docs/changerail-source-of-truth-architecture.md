@@ -166,8 +166,10 @@ bootstrap-процессом:
 Общее, source of truth в ChangeRail:
 
 - `changerail-*` skills;
+- `chrl-*` daily alias skills;
 - `openspec-*` lifecycle skills, если они используются как часть ChangeRail;
 - Claude slash-команды `/changerail:*`;
+- Claude slash aliases `/chrl:*`;
 - общая методология ChangeRail;
 - board-конвенции;
 - review-gate контракт;
@@ -215,8 +217,10 @@ rewiring.
 
 ```text
 .claude/commands/changerail       -> /opt/changerail/claude/commands/changerail
+.claude/commands/chrl             -> /opt/changerail/claude/commands/chrl
 .claude/skills              -> /opt/changerail/skills
 .codex/skills/changerail-*        -> /opt/changerail/skills/changerail-*
+.codex/skills/chrl-*              -> /opt/changerail/skills/chrl-*
 .codex/skills/openspec-*    -> /opt/changerail/skills/openspec-*
 bin/openspec                -> /opt/changerail/bin/openspec
 ```
@@ -243,7 +247,7 @@ ChangeRail) есть два варианта подключения:
    каталогом с per-skill symlink-ами: единый dir-symlink не может смотреть
    в два источника.
 2. **Агрегатор.** Доменный репозиторий сам становится потребителем ChangeRail: в
-   его каталоге skills generic `changerail-*`/`openspec-*` превращаются в
+   его каталоге skills generic `changerail-*`/`chrl-*`/`openspec-*` превращаются в
    symlink-и на `/opt/changerail`, а domain-skills остаются реальными каталогами.
    Существующие потребители доменного слоя продолжают смотреть на агрегатор
    и получают ChangeRail транзитивно — миграция большого workspace сводится к
@@ -340,7 +344,8 @@ ChangeRail-owned surfaces.
 
 `/opt/changerail/bin/verify-project <path>` должен проверять:
 
-- symlink-и `.claude/commands/changerail`, `.claude/skills`, `.codex/skills/*`;
+- symlink-и `.claude/commands/changerail`, `.claude/commands/chrl`,
+  `.claude/skills`, `.codex/skills/*`;
 - что symlink-и резолвятся в ChangeRail source of truth (напрямую или транзитивно
   через задокументированный агрегатор);
 - наличие и валидность `openspec/config.yaml`;
@@ -558,6 +563,7 @@ verify-проверки, миграция и adoption идут после зел
 ```text
 .claude/skills            -> /opt/changerail/skills
 .claude/commands/changerail     -> /opt/changerail/claude/commands/changerail
+.claude/commands/chrl     -> /opt/changerail/claude/commands/chrl
 .codex/skills/<skill>     -> /opt/changerail/skills/<skill>   для каждого skill c SKILL.md
 bin/openspec              -> /opt/changerail/bin/openspec
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict

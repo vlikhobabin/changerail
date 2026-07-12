@@ -45,8 +45,9 @@ explore -> ff -> do -> review -> pub
 - `deliver` - выполнить полный supervised flow для одной карточки или пачки
   карточек.
 
-Для Codex целевой интерфейс - skills вида `$changerail-*`.
-Для Claude Code целевой интерфейс - slash-команды вида `/changerail:*`.
+Для ежедневной работы рекомендуются короткие aliases: Codex skills
+`$chrl-*` и Claude slash-команды `/chrl:*`. Canonical/reference форма остается
+длинной: `$changerail-*` и `/changerail:*`.
 
 ## Source of truth
 
@@ -101,11 +102,15 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - `AGENTS.shared.md` с начальной общей методологией ChangeRail для AI-агентов;
 - минимальную OpenSpec-доску для dogfooding развития самого ChangeRail;
 - generic ChangeRail lifecycle skills: `changerail-explore`, `changerail-ff`, `changerail-do`,
-  `changerail-review`, `changerail-pub`, `changerail-deliver`;
+  `changerail-review`, `changerail-pub`, `changerail-deliver` и short aliases
+  `chrl-explore`, `chrl-ff`, `chrl-do`, `chrl-review`, `chrl-pub`,
+  `chrl-deliver`;
 - OpenSpec lifecycle skills `openspec-*` для proposal/spec/tasks, apply,
   verify, sync и archive;
 - Claude wrappers `/changerail:explore`, `/changerail:ff`, `/changerail:do`, `/changerail:review`,
-  `/changerail:pub`, `/changerail:deliver`;
+  `/changerail:pub`, `/changerail:deliver` и daily aliases
+  `/chrl:explore`, `/chrl:ff`, `/chrl:do`, `/chrl:review`, `/chrl:pub`,
+  `/chrl:deliver`;
 - `bin/openspec` с pin версии OpenSpec CLI;
 - schemas `changerail.review-verdict.v1`, `changerail.delivery-manifest.v1`,
   `changerail.evidence-index.v1` и helper `bin/changerail-review-verdict`;

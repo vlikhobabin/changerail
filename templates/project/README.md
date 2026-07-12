@@ -31,8 +31,10 @@ Bootstrap creates symlink-и for shared ChangeRail surfaces instead of templatin
 them:
 
 - `.claude/commands/changerail`
+- `.claude/commands/chrl`
 - `.claude/skills`
 - `.codex/skills/changerail-*`
+- `.codex/skills/chrl-*`
 - `.codex/skills/openspec-*`
 - `bin/openspec`
 - `bin/changerail-review-verdict`

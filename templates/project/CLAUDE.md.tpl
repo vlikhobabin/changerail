@@ -2,8 +2,15 @@
 
 Read `AGENTS.md` first. This project uses ChangeRail from `{{CHANGERAIL_ROOT}}`.
 
-ChangeRail Claude commands are exposed through `.claude/commands/changerail`:
+ChangeRail Claude commands are exposed through `.claude/commands/chrl` for
+daily use and `.claude/commands/changerail` as the canonical reference surface:
 
+- `/chrl:explore`
+- `/chrl:ff`
+- `/chrl:do`
+- `/chrl:review`
+- `/chrl:pub`
+- `/chrl:deliver`
 - `/changerail:explore`
 - `/changerail:ff`
 - `/changerail:do`

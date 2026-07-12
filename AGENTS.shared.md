@@ -37,6 +37,11 @@ explore -> ff -> do -> review -> pub
   scoped commit и опубликовать результат.
 - `deliver`: выполнить supervised full flow для одной карточки или ordered batch.
 
+Для ежедневного ручного invocation можно использовать короткие aliases
+`$chrl-*` в Codex и `/chrl:*` в Claude Code. Canonical/reference names остаются
+`$changerail-*` и `/changerail:*`; runtime paths, schema ids и OpenSpec
+namespaces продолжают использовать `changerail`.
+
 Для non-interactive supervised запусков ChangeRail может использовать tracked runner,
 который пишет machine-readable status/run record в ignored runtime state.
 Supervisor должен наблюдать structured status, а не `pgrep` или свободный

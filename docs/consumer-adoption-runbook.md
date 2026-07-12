@@ -89,7 +89,9 @@ git -C /opt/changerail status --short
 ```text
 .claude/skills             -> /opt/changerail/skills
 .claude/commands/changerail      -> /opt/changerail/claude/commands/changerail
+.claude/commands/chrl      -> /opt/changerail/claude/commands/chrl
 .codex/skills/changerail-*       -> /opt/changerail/skills/changerail-*
+.codex/skills/chrl-*       -> /opt/changerail/skills/chrl-*
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
 bin/openspec               -> /opt/changerail/bin/openspec
 bin/changerail-review-verdict    -> /opt/changerail/bin/changerail-review-verdict
@@ -105,6 +107,7 @@ mkdir -p "$PROJECT/.claude/commands" "$PROJECT/.codex/skills" "$PROJECT/bin"
 
 ln -sfnT "$ChangeRail/skills" "$PROJECT/.claude/skills"
 ln -sfnT "$ChangeRail/claude/commands/changerail" "$PROJECT/.claude/commands/changerail"
+ln -sfnT "$ChangeRail/claude/commands/chrl" "$PROJECT/.claude/commands/chrl"
 ln -sfnT "$ChangeRail/bin/openspec" "$PROJECT/bin/openspec"
 ln -sfnT "$ChangeRail/bin/changerail-review-verdict" "$PROJECT/bin/changerail-review-verdict"
 
@@ -120,6 +123,7 @@ done
 
 - `.claude/skills` уже является реальным каталогом с project-specific skills;
 - `.claude/commands/changerail` содержит ручную копию старых команд;
+- `.claude/commands/chrl` содержит ручную копию старых команд;
 - `.codex/skills/<skill>` является локальной копией, а не symlink-ом;
 - `bin/openspec` уже используется проектом для другого wrapper-а.
 
@@ -129,7 +133,7 @@ done
 
 - `AGENTS.md` - локальные правила проекта + ChangeRail generated section;
 - `CLAUDE.md` - короткая подсказка Claude, что команды доступны как
-  `/changerail:*`;
+  `/chrl:*` для ежедневной работы и `/changerail:*` как canonical form;
 - `.mcp.json` - filesystem MCP scope должен покрывать корень проекта;
 - `.codex/config.toml` - trusted project entry и filesystem MCP scope для
   корня проекта;
@@ -176,6 +180,12 @@ git -C /opt/example-project status --short
 ChangeRail команды:
 
 ```text
+/chrl:explore
+/chrl:ff
+/chrl:do
+/chrl:review
+/chrl:pub
+/chrl:deliver
 /changerail:explore
 /changerail:ff
 /changerail:do
@@ -184,7 +194,8 @@ ChangeRail команды:
 /changerail:deliver
 ```
 
-Для Codex доступны соответствующие skills `$changerail-*` и `openspec-*`.
+Для Codex доступны соответствующие skills `$chrl-*`, `$changerail-*` и
+`openspec-*`.
 
 Изменения коммитятся в репозитории проекта. В `/opt/changerail` ничего коммитить не
 нужно, если сам ChangeRail не менялся.

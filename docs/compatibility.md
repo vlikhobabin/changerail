@@ -39,7 +39,9 @@ Status: supported through tracked command wrappers and skill links.
 Expected contract:
 
 - ChangeRail slash command wrappers live under `claude/commands/changerail/`;
-- consumer projects expose them through `.claude/commands/changerail`;
+- short aliases live under `claude/commands/chrl/`;
+- consumer projects expose both `.claude/commands/changerail` and
+  `.claude/commands/chrl`;
 - Claude skills resolve through `.claude/skills`;
 - `.claude/settings.local.json` remains local and ignored.
 
