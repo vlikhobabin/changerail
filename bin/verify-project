@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -44,6 +45,8 @@ SCHEMAS = (
     "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
 )
+EXACT_NPM_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.\-]+)?$")
+SRI_INTEGRITY_RE = re.compile(r"^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$")
 STALE_OPSX_PATHS = (
     ".claude/commands/opsx",
     "bin/opsx-review-verdict",
@@ -57,6 +60,14 @@ class Check:
     name: str
     ok: bool
     message: str
+
+
+@dataclass(frozen=True)
+class LockedNpmPackage:
+    name: str
+    version: str
+    integrity: str
+    source: str
 
 
 def is_relative_to(path: Path, parent: Path) -> bool:
@@ -122,15 +133,16 @@ def check_symlink(project: Path, rel_path: str, expected: Path, changerail_root:
     return Check(rel_path, ok, message)
 
 
-def path_args_cover_root(args: Iterable[object], project: Path) -> bool:
+def path_args_cover_root(args: Iterable[object], project: Path, base: Path) -> bool:
     root = project.resolve()
     for value in args:
         if not isinstance(value, str):
             continue
-        if not value.startswith("/"):
-            continue
         try:
-            if Path(value).resolve(strict=False) == root:
+            candidate = Path(value)
+            if not candidate.is_absolute():
+                candidate = base / candidate
+            if candidate.resolve(strict=False) == root:
                 return True
         except OSError:
             continue
@@ -149,7 +161,7 @@ def check_mcp(project: Path) -> Check:
     args = server.get("args", [])
     if not isinstance(args, list):
         return Check(".mcp.json", False, "filesystem args must be an array")
-    if not path_args_cover_root(args, project):
+    if not path_args_cover_root(args, project, project):
         return Check(".mcp.json", False, "filesystem scope does not cover project root")
     return Check(".mcp.json", True, "filesystem scope covers project root")
 
@@ -165,13 +177,13 @@ def check_codex(project: Path) -> Check:
 
     project_key = str(project.resolve())
     projects = data.get("projects", {})
-    if project_key not in projects:
-        return Check(".codex/config.toml", False, f"missing trusted project entry {project_key}")
+    if project_key not in projects and "." not in projects:
+        return Check(".codex/config.toml", False, f"missing trusted project entry {project_key} or .")
     filesystem = data.get("mcp_servers", {}).get("filesystem", {})
     args = filesystem.get("args", [])
     if not isinstance(args, list):
         return Check(".codex/config.toml", False, "filesystem args must be an array")
-    if not path_args_cover_root(args, project):
+    if not path_args_cover_root(args, project, project):
         return Check(".codex/config.toml", False, "filesystem MCP scope does not cover project root")
     return Check(".codex/config.toml", True, "trusted project and filesystem scope cover project root")
 
@@ -185,6 +197,168 @@ def check_openspec_config(project: Path) -> Check:
     if "schema:" not in text:
         return Check("openspec/config.yaml", False, "missing schema key")
     return Check("openspec/config.yaml", True, "config exists and declares schema")
+
+
+def parse_npm_package_arg(value: str) -> tuple[str, str] | None:
+    if value.startswith("-"):
+        return None
+    if value.startswith("@"):
+        index = value.rfind("@")
+        if index <= 0:
+            return None
+        return value[:index], value[index + 1 :]
+    if "@" not in value:
+        return None
+    name, version = value.rsplit("@", 1)
+    return name, version
+
+
+def load_mcp_npm_lock(changerail_root: Path) -> tuple[dict[tuple[str, str], LockedNpmPackage], str | None]:
+    path = changerail_root / "mcp-npm-lock.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return {}, f"cannot read {path}: {exc}"
+    except json.JSONDecodeError as exc:
+        return {}, f"invalid JSON in {path}: {exc}"
+    lock: dict[tuple[str, str], LockedNpmPackage] = {}
+    errors: list[str] = []
+    packages = data.get("packages", [])
+    if not isinstance(packages, list):
+        return {}, "mcp-npm-lock.json packages must be an array"
+    for index, package in enumerate(packages, start=1):
+        if not isinstance(package, dict):
+            errors.append(f"mcp-npm-lock.json package #{index} must be an object")
+            continue
+        name = package.get("name")
+        version = package.get("version")
+        integrity = package.get("integrity")
+        source = package.get("source", "npm")
+        if not isinstance(name, str) or not name:
+            errors.append(f"mcp-npm-lock.json package #{index} missing name")
+            continue
+        if not isinstance(version, str) or not EXACT_NPM_VERSION_RE.match(version):
+            errors.append(f"mcp-npm-lock.json {name}: version must be exact semver")
+            continue
+        if not isinstance(integrity, str) or not SRI_INTEGRITY_RE.match(integrity):
+            errors.append(f"mcp-npm-lock.json {name}@{version}: integrity must be SRI sha256/384/512")
+            continue
+        if source != "npm":
+            errors.append(f"mcp-npm-lock.json {name}@{version}: source must be npm")
+            continue
+        key = (name, version)
+        if key in lock:
+            errors.append(f"mcp-npm-lock.json duplicates {name}@{version}")
+            continue
+        lock[key] = LockedNpmPackage(name=name, version=version, integrity=integrity, source=source)
+    return lock, "; ".join(errors) if errors else None
+
+
+def npm_mcp_pin_errors(
+    label: str,
+    servers: object,
+    lock: dict[tuple[str, str], LockedNpmPackage],
+) -> tuple[list[str], set[tuple[str, str]]]:
+    errors: list[str] = []
+    referenced: set[tuple[str, str]] = set()
+    if not isinstance(servers, dict):
+        return [f"{label}: MCP servers must be an object"], referenced
+    for name, server in servers.items():
+        if not isinstance(server, dict):
+            continue
+        if server.get("command") != "npx":
+            continue
+        args = server.get("args", [])
+        if not isinstance(args, list):
+            errors.append(f"{label}.{name}: args must be an array")
+            continue
+        package_args = [parsed for arg in args if isinstance(arg, str) for parsed in [parse_npm_package_arg(arg)] if parsed]
+        if not package_args:
+            errors.append(f"{label}.{name}: npx package argument is missing")
+            continue
+        for package_name, version in package_args:
+            if not EXACT_NPM_VERSION_RE.match(version):
+                errors.append(f"{label}.{name}: {package_name} is not exact-version pinned")
+                continue
+            if (package_name, version) not in lock:
+                errors.append(f"{label}.{name}: {package_name}@{version} is absent from mcp-npm-lock.json")
+                continue
+            referenced.add((package_name, version))
+    return errors, referenced
+
+
+def npm_registry_integrity(package_name: str, version: str) -> tuple[str | None, str | None]:
+    spec = f"{package_name}@{version}"
+    try:
+        result = subprocess.run(
+            ["npm", "view", spec, "dist.integrity", "--json"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return None, "npm executable is not available for MCP integrity verification"
+    except subprocess.TimeoutExpired:
+        return None, f"npm registry integrity lookup timed out for {spec}"
+    if result.returncode != 0:
+        output = result.stdout.strip() or f"npm view failed with exit {result.returncode}"
+        return None, f"npm registry integrity lookup failed for {spec}: {output}"
+    output = result.stdout.strip()
+    try:
+        value = json.loads(output)
+    except json.JSONDecodeError:
+        value = output
+    if not isinstance(value, str) or not value:
+        return None, f"npm registry returned no dist.integrity for {spec}"
+    return value, None
+
+
+def npm_integrity_errors(referenced: set[tuple[str, str]], lock: dict[tuple[str, str], LockedNpmPackage]) -> list[str]:
+    errors: list[str] = []
+    for package_name, version in sorted(referenced):
+        locked = lock[(package_name, version)]
+        registry_integrity, registry_error = npm_registry_integrity(package_name, version)
+        if registry_error:
+            errors.append(registry_error)
+            continue
+        if registry_integrity != locked.integrity:
+            errors.append(
+                f"npm registry integrity mismatch for {package_name}@{version}: "
+                "tracked mcp-npm-lock.json does not match dist.integrity"
+            )
+    return errors
+
+
+def check_mcp_npm_pins(project: Path, changerail_root: Path) -> Check:
+    lock, lock_error = load_mcp_npm_lock(changerail_root)
+    if lock_error:
+        return Check("MCP npm pins", False, lock_error)
+    errors: list[str] = []
+    referenced: set[tuple[str, str]] = set()
+    try:
+        mcp_data = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+        mcp_errors, mcp_referenced = npm_mcp_pin_errors(".mcp.json", mcp_data.get("mcpServers", {}), lock)
+        errors.extend(mcp_errors)
+        referenced.update(mcp_referenced)
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f".mcp.json: {exc}")
+    try:
+        codex_data = tomllib.loads((project / ".codex" / "config.toml").read_text(encoding="utf-8"))
+        codex_errors, codex_referenced = npm_mcp_pin_errors(
+            ".codex/config.toml",
+            codex_data.get("mcp_servers", {}),
+            lock,
+        )
+        errors.extend(codex_errors)
+        referenced.update(codex_referenced)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        errors.append(f".codex/config.toml: {exc}")
+    if not errors:
+        errors.extend(npm_integrity_errors(referenced, lock))
+    if errors:
+        return Check("MCP npm pins", False, "; ".join(errors))
+    return Check("MCP npm pins", True, "all npx MCP packages are exact-version pinned, locked and registry-verified")
 
 
 def check_openspec_validate(project: Path) -> Check:
@@ -287,6 +461,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
         check_symlink(project, ".claude/commands/changerail", changerail_root / "claude" / "commands" / "changerail", changerail_root, aggregator_root),
         check_symlink(project, ".claude/commands/chrl", changerail_root / "claude" / "commands" / "chrl", changerail_root, aggregator_root),
         check_symlink(project, "bin/openspec", changerail_root / "bin" / "openspec", changerail_root, aggregator_root),
+        check_symlink(project, "bin/verify-project", changerail_root / "bin" / "verify-project", changerail_root, aggregator_root),
     ]
     for skill in skills:
         checks.append(
@@ -303,6 +478,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
         [
             check_mcp(project),
             check_codex(project),
+            check_mcp_npm_pins(project, changerail_root),
             check_openspec_config(project),
             check_openspec_validate(project),
             check_gitignore(project),

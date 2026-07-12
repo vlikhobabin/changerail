@@ -26,6 +26,7 @@ EXPECTED_SCHEMAS = (
     "schemas/changerail-delivery-run.schema.json",
     "schemas/changerail-evidence-index.schema.json",
 )
+MCP_FILES = (".mcp.json", ".codex/config.toml")
 
 
 @dataclass
@@ -55,9 +56,14 @@ def skill_names(changerail_root: Path) -> list[str]:
 def render_text(text: str, project: Path, changerail_root: Path) -> str:
     replacements = {
         "{{PROJECT_PATH}}": str(project),
+        "{{PROJECT_CONFIG_SCOPE}}": ".",
+        "{{CODEX_PROJECT_KEY}}": ".",
+        "{{PROJECT_ROOT_LABEL}}": "this repository",
         "{{PROJECT_NAME}}": "example-project",
         "{{PROJECT_KIND}}": "generic",
         "{{CHANGERAIL_ROOT}}": str(changerail_root),
+        "{{CHANGERAIL_ROOT_LABEL}}": "the linked ChangeRail source of truth",
+        "{{CHANGERAIL_SHARED_SOURCE}}": "ChangeRail AGENTS.shared.md",
         "{{CHANGERAIL_SHARED_AGENTS}}": (changerail_root / "AGENTS.shared.md").read_text(encoding="utf-8"),
     }
     for token, value in replacements.items():
@@ -111,27 +117,66 @@ def create_fixture(project: Path, changerail_root: Path) -> None:
     for skill in skill_names(changerail_root):
         symlink_force(changerail_root / "skills" / skill, project / ".codex" / "skills" / skill)
     symlink_force(changerail_root / "bin" / "openspec", project / "bin" / "openspec")
+    symlink_force(changerail_root / "bin" / "verify-project", project / "bin" / "verify-project")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
 
 
-def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "OPENSPEC_TELEMETRY": "0"}
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         cmd,
         cwd=cwd,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "OPENSPEC_TELEMETRY": "0"},
+        env=env,
         timeout=180,
     )
 
 
+def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    lock = json.loads((changerail_root / "mcp-npm-lock.json").read_text(encoding="utf-8"))
+    mapping = {
+        f"{package['name']}@{package['version']}": package["integrity"]
+        for package in lock.get("packages", [])
+        if isinstance(package, dict)
+    }
+    npm = fake_bin / "npm"
+    npm.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, os, sys",
+                f"MAPPING = {mapping!r}",
+                "if len(sys.argv) == 5 and sys.argv[1] == 'view' and sys.argv[3] == 'dist.integrity' and sys.argv[4] == '--json':",
+                "    spec = sys.argv[2]",
+                "    if os.environ.get('CHANGERAIL_FAKE_NPM_TAMPER') == spec:",
+                "        print(json.dumps('sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='))",
+                "        raise SystemExit(0)",
+                "    if spec in MAPPING:",
+                "        print(json.dumps(MAPPING[spec]))",
+                "        raise SystemExit(0)",
+                "print('unsupported fake npm invocation: ' + ' '.join(sys.argv[1:]), file=sys.stderr)",
+                "raise SystemExit(1)",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    npm.chmod(0o755)
+    return {"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")}
+
+
 def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     checks: list[Check] = []
+    fake_env = create_fake_npm(changerail_root, run_dir / "fake-bin")
     good_project = run_dir / "example-project"
     create_fixture(good_project, changerail_root)
 
-    verify = run([str(changerail_root / "bin" / "verify-project"), str(good_project)], changerail_root)
+    verify = run([str(changerail_root / "bin" / "verify-project"), str(good_project)], changerail_root, fake_env)
     checks.append(
         Check(
             "valid fixture passes",
@@ -156,7 +201,7 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
         + "\n",
         encoding="utf-8",
     )
-    negative = run([str(changerail_root / "bin" / "verify-project"), str(bad_project)], changerail_root)
+    negative = run([str(changerail_root / "bin" / "verify-project"), str(bad_project)], changerail_root, fake_env)
     checks.append(
         Check(
             "missing runtime ignore fails",
@@ -170,7 +215,7 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     symlink_force(changerail_root / "claude" / "commands" / "changerail", stale_project / ".claude" / "commands" / "opsx")
     symlink_force(changerail_root / "skills" / "changerail-do", stale_project / ".codex" / "skills" / "opsx-do")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", stale_project / "bin" / "opsx-review-verdict")
-    stale = run([str(changerail_root / "bin" / "verify-project"), str(stale_project)], changerail_root)
+    stale = run([str(changerail_root / "bin" / "verify-project"), str(stale_project)], changerail_root, fake_env)
     checks.append(
         Check(
             "stale OPSX wiring fails",
@@ -183,12 +228,64 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     shutil.copytree(good_project, missing_chrl_project, symlinks=True)
     (missing_chrl_project / ".codex" / "skills" / "chrl-do").unlink()
     (missing_chrl_project / ".claude" / "commands" / "chrl").unlink()
-    missing_chrl = run([str(changerail_root / "bin" / "verify-project"), str(missing_chrl_project)], changerail_root)
+    missing_chrl = run(
+        [str(changerail_root / "bin" / "verify-project"), str(missing_chrl_project)],
+        changerail_root,
+        fake_env,
+    )
     checks.append(
         Check(
             "missing chrl alias fails",
             "pass" if missing_chrl.returncode != 0 and "chrl" in missing_chrl.stdout else "fail",
             missing_chrl.stdout.strip(),
+        )
+    )
+
+    bad_scope_project = run_dir / "bad-portable-scope"
+    shutil.copytree(good_project, bad_scope_project, symlinks=True)
+    mcp = bad_scope_project / ".mcp.json"
+    mcp.write_text(mcp.read_text(encoding="utf-8").replace('"."', '".."'), encoding="utf-8")
+    codex = bad_scope_project / ".codex" / "config.toml"
+    codex.write_text(codex.read_text(encoding="utf-8").replace('"."]', '".."]'), encoding="utf-8")
+    bad_scope = run([str(changerail_root / "bin" / "verify-project"), str(bad_scope_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "unsafe portable scope fails",
+            "pass" if bad_scope.returncode != 0 and "scope does not cover project root" in bad_scope.stdout else "fail",
+            bad_scope.stdout.strip(),
+        )
+    )
+
+    unpinned_project = run_dir / "bad-unpinned-mcp"
+    shutil.copytree(good_project, unpinned_project, symlinks=True)
+    for rel_path in MCP_FILES:
+        path = unpinned_project / rel_path
+        path.write_text(
+            path.read_text(encoding="utf-8").replace(
+                "@modelcontextprotocol/server-filesystem@2026.7.10",
+                "@modelcontextprotocol/server-filesystem",
+            ),
+            encoding="utf-8",
+        )
+    unpinned = run([str(changerail_root / "bin" / "verify-project"), str(unpinned_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "unpinned MCP package fails",
+            "pass" if unpinned.returncode != 0 and "MCP npm pins" in unpinned.stdout else "fail",
+            unpinned.stdout.strip(),
+        )
+    )
+
+    tampered_env = {
+        **fake_env,
+        "CHANGERAIL_FAKE_NPM_TAMPER": "@modelcontextprotocol/server-filesystem@2026.7.10",
+    }
+    tampered = run([str(changerail_root / "bin" / "verify-project"), str(good_project)], changerail_root, tampered_env)
+    checks.append(
+        Check(
+            "tampered MCP integrity fails",
+            "pass" if tampered.returncode != 0 and "registry integrity mismatch" in tampered.stdout else "fail",
+            tampered.stdout.strip(),
         )
     )
 

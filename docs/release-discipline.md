@@ -69,8 +69,13 @@ Compatibility source of truth живет в [compatibility notes](compatibility.
 - Codex CLI;
 - Claude Code;
 - OpenSpec CLI.
+- automatically executed MCP npm package pins.
 
 OpenSpec CLI compatibility должна явно ссылаться на pin в `bin/openspec`.
+MCP npm packages должны быть exact-version pinned в tracked config/templates и
+описаны в `mcp-npm-lock.json` с integrity metadata. `verify-project` сверяет
+tracked integrity с `npm view <package>@<version> dist.integrity --json`, поэтому
+release gate должен выполняться в trusted environment с доступом к npm registry.
 
 ## Migration
 
@@ -96,7 +101,34 @@ Migration source of truth живет в [migration guide](migration-guide.md).
 6. Запустить OpenSpec validation и repository baseline checks.
 7. Запустить release CI contract smoke.
 8. Запустить smoke checks, которые относятся к измененной поверхности.
-9. Выполнить independent review gate перед publish.
+9. Проверить, что [security policy](../SECURITY.md) существует, связан из
+   публичных docs и не содержит private contact details или local paths.
+10. Выполнить independent review gate перед publish.
+
+Для executable supply-chain updates maintainer также обновляет tracked pins:
+
+```bash
+npm view @modelcontextprotocol/server-filesystem version dist.integrity --json
+npm view @upstash/context7-mcp@2.1.6 version dist.integrity --json
+git ls-remote https://github.com/actions/checkout.git refs/tags/v4
+git ls-remote https://github.com/actions/setup-node.git refs/tags/v4
+```
+
+После обновления нужно проверить, что `.mcp.json`, `.codex/config.toml`,
+`templates/project/*`, `mcp-npm-lock.json`, `.github/workflows/changerail-ci.yml`
+и `scripts/smoke-release-ci.py` согласованы.
+
+Для MCP npm pins также нужно выполнить trusted setup check:
+
+```bash
+/opt/changerail/bin/verify-project /opt/example-project
+npm view @modelcontextprotocol/server-filesystem@2026.7.10 dist.integrity --json
+npm view @upstash/context7-mcp@2.1.6 dist.integrity --json
+```
+
+`scripts/smoke-verify-project.py` проверяет tampered-integrity fixture через
+локальный fake `npm view`, а реальные registry lookups остаются частью
+operator/release verification перед publish.
 
 Schema coverage в release и project verification включает все публичные
 contract schemas:
@@ -114,6 +146,9 @@ schemas/changerail-evidence-index.schema.json
 ```bash
 openspec validate --all --strict
 python3 scripts/smoke-release-ci.py
+python3 scripts/public-surface-scan.py --self-test
+python3 scripts/public-surface-scan.py
+python3 scripts/public-surface-scan.py --history
 python3 -m json.tool .mcp.json
 python3 - <<'PY'
 import tomllib

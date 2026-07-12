@@ -14,8 +14,10 @@ REQUIRED_SNIPPETS = {
     "trigger push": "push:",
     "trigger pull request": "pull_request:",
     "trigger manual dispatch": "workflow_dispatch:",
-    "checkout action": "actions/checkout@v4",
-    "node setup action": "actions/setup-node@v4",
+    "checkout action pin": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+    "checkout action version comment": "actions/checkout v4",
+    "node setup action pin": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+    "node setup action version comment": "actions/setup-node v4",
     "openspec validation": "./bin/openspec validate --all --strict",
     "json config check": "python3 -m json.tool .mcp.json",
     "toml config check": "import tomllib",
@@ -24,6 +26,7 @@ REQUIRED_SNIPPETS = {
     "release ci smoke": "python3 scripts/smoke-release-ci.py",
     "public surface scan self-test": "python3 scripts/public-surface-scan.py --self-test",
     "public surface scan": "python3 scripts/public-surface-scan.py",
+    "public surface scan history": "python3 scripts/public-surface-scan.py --history",
     "wiring smoke": "python3 scripts/smoke-wiring-discovery.py",
     "verify smoke": "python3 scripts/smoke-verify-project.py",
     "bootstrap smoke": "python3 scripts/smoke-bootstrap-project.py",
@@ -39,6 +42,8 @@ FORBIDDEN_SNIPPETS = {
     "private absolute project path": "/opt" + "/",
     "private drift inventory": "internal/changerail-drift.json",
     "ci drift config inventory": "smoke-drift.py --config",
+    "mutable checkout action tag": "actions/checkout@v4",
+    "mutable setup-node action tag": "actions/setup-node@v4",
 }
 
 

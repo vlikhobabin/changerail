@@ -1,6 +1,6 @@
 # {{PROJECT_NAME}}
 
-Read `AGENTS.md` first. This project uses ChangeRail from `{{CHANGERAIL_ROOT}}`.
+Read `AGENTS.md` first. This project uses ChangeRail from {{CHANGERAIL_ROOT_LABEL}}.
 
 ChangeRail Claude commands are exposed through `.claude/commands/chrl` for
 daily use and `.claude/commands/changerail` as the canonical reference surface:
@@ -20,4 +20,4 @@ daily use and `.claude/commands/changerail` as the canonical reference surface:
 
 Do not write runtime state, auth files, traces or local reports into tracked
 files. Keep project-specific rules in `AGENTS.md`; reusable ChangeRail methodology is
-generated there from `{{CHANGERAIL_ROOT}}/AGENTS.shared.md`.
+generated there from the linked ChangeRail `AGENTS.shared.md`.

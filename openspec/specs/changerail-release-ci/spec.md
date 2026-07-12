@@ -7,9 +7,10 @@ docs/config checks, Python smoke checks, templates/bootstrap/verify/drift and
 wiring discovery.
 ## Requirements
 ### Requirement: Release CI workflow
-
 ChangeRail MUST provide a tracked CI workflow that runs the release verification
 baseline on pushes, pull requests and manual dispatch.
+Release CI MUST run the strengthened public-surface scan for current public
+roots and reachable history.
 
 #### Scenario: CI runs for repository changes
 - **WHEN** the ChangeRail CI workflow is triggered by `push`, `pull_request` or
@@ -17,6 +18,12 @@ baseline on pushes, pull requests and manual dispatch.
 - **THEN** it runs OpenSpec validation, docs/config parsing checks and Python
   syntax checks
 - **AND** it exits non-zero when any required command fails
+
+#### Scenario: CI runs strengthened public-safety scan
+- **WHEN** the ChangeRail CI workflow runs
+- **THEN** it runs the public-surface scanner self-test
+- **AND** it runs the scanner against current public roots and reachable
+  history
 
 ### Requirement: Template and bootstrap smoke in CI
 
@@ -42,15 +49,20 @@ workspace inventory.
 - **AND** committed workflow content contains no private workspace inventory
 
 ### Requirement: CI workflow contract smoke
-
 ChangeRail MUST provide a local smoke check that validates the tracked CI workflow
 contains the required release gates.
+CI workflow contract smoke MUST require the strengthened scanner commands.
 
 #### Scenario: Maintainer edits the workflow
 - **WHEN** `python3 scripts/smoke-release-ci.py` runs
 - **THEN** it fails if the CI workflow is missing required triggers or command
   strings
 - **AND** it passes only when all required release gates are present
+
+#### Scenario: CI smoke requires history scan command
+- **WHEN** `python3 scripts/smoke-release-ci.py` runs
+- **THEN** it fails if the CI workflow no longer invokes the scanner history
+  mode
 
 ### Requirement: Release CI validates ChangeRail fixtures
 Release CI MUST run bootstrap, verify, wiring and drift smoke against generated

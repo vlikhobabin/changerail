@@ -1,12 +1,13 @@
 schema: spec-driven
 
 context: |
-  Repository: {{PROJECT_PATH}}
+  Repository: {{PROJECT_ROOT_LABEL}}
   Project: {{PROJECT_NAME}}
   Kind: {{PROJECT_KIND}}
 
   This project is a ChangeRail consumer. Reusable ChangeRail methodology, skills, command
-  wrappers, schemas and helper wrappers are sourced from {{CHANGERAIL_ROOT}}.
+  wrappers, schemas and helper wrappers are sourced from
+  {{CHANGERAIL_ROOT_LABEL}}.
   Project-specific code, board cards, OpenSpec changes, runtime policy and
   verification remain local to this repository.
 

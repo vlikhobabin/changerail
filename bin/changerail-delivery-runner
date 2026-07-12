@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -125,6 +126,14 @@ def auth_state(codex_home: Path, env: dict[str, str]) -> Check:
     return Check("CODEX auth", "fail", "no auth marker or supported auth environment variable found")
 
 
+def sanitized_endpoint(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    scheme = parts.scheme or "unknown"
+    host = parts.hostname or "unknown-host"
+    port = f":{parts.port}" if parts.port is not None else ""
+    return f"{scheme}://{host}{port}"
+
+
 def record_commit(record: dict[str, Any], root: Path) -> None:
     head = git_head(root)
     if head:
@@ -208,9 +217,9 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
     if args.connectivity_url:
         try:
             with urllib.request.urlopen(args.connectivity_url, timeout=args.connectivity_timeout) as response:
-                checks.append(Check("connectivity", "pass", f"{args.connectivity_url} -> {response.status}"))
+                checks.append(Check("connectivity", "pass", f"{sanitized_endpoint(args.connectivity_url)} status={response.status}"))
         except (OSError, urllib.error.URLError) as exc:
-            checks.append(Check("connectivity", "fail", f"{args.connectivity_url}: {exc}"))
+            checks.append(Check("connectivity", "fail", f"{sanitized_endpoint(args.connectivity_url)} error={exc.__class__.__name__}"))
     else:
         checks.append(Check("connectivity", "skip", "no connectivity URL provided"))
     return checks

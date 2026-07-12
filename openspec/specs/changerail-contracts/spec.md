@@ -90,6 +90,8 @@ deletions and renames.
 ### Requirement: Delivery manifest derivation helper
 ChangeRail MUST provide a helper command that can derive a delivery manifest
 from a board card and the current workspace state.
+Delivery manifest derivation MUST sanitize repository identity before writing it
+to runtime records.
 
 #### Scenario: Delivery derives a card manifest
 - **WHEN** an operator runs the manifest helper for a board card
@@ -102,6 +104,20 @@ from a board card and the current workspace state.
 - **WHEN** a derived manifest is passed to `staging-plan`
 - **THEN** the output is a deterministic list of repository-relative paths that
   can be audited before publish staging
+
+#### Scenario: Manifest redacts credential-bearing repository identity
+- **WHEN** delivery manifest derivation reads an HTTPS remote containing URL
+  userinfo, password or token-like query values
+- **THEN** the manifest repository identity excludes raw userinfo, password,
+  query and fragment values
+- **AND** the identity retains non-sensitive scheme, host and repository path
+  metadata when available
+
+#### Scenario: Manifest redacts SCP-style SSH userinfo
+- **WHEN** delivery manifest derivation reads an SCP-style SSH remote such as
+  `user@example.invalid:org/repo.git`
+- **THEN** the manifest repository identity excludes the raw SSH username
+- **AND** it retains non-sensitive host and repository path metadata
 
 ### Requirement: Точный вывод delivery manifest paths
 Delivery manifest derivation MUST использовать machine-readable git status data

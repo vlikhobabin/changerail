@@ -1,0 +1,30 @@
+{
+  "schema": "changerail.mcp-npm-lock.v1",
+  "updated_at": "2026-07-12T16:55:00Z",
+  "packages": [
+    {
+      "name": "@modelcontextprotocol/server-filesystem",
+      "version": "2026.7.10",
+      "integrity": "sha512-Mmjg4anFBD5OzbPnGJOA0jPPN8645ERhQk38HQLpSenx1ox9bfdPkmAzUnNjeQtqQGFLtKe13J20RtLBmUKMZA==",
+      "source": "npm",
+      "used_by": [
+        ".mcp.json",
+        ".codex/config.toml",
+        "templates/project/mcp.json.tpl",
+        "templates/project/codex-config.toml.tpl"
+      ]
+    },
+    {
+      "name": "@upstash/context7-mcp",
+      "version": "2.1.6",
+      "integrity": "sha512-Mq1o4N7CgIdOVyY9LOPEvNgz0Sorf2TCweESYKE5K87nrf4niIuBZCZN4t+WmOguJyhSvMwJz16toGAOLdJRdw==",
+      "source": "npm",
+      "used_by": [
+        ".mcp.json",
+        ".codex/config.toml",
+        "templates/project/mcp.json.tpl",
+        "templates/project/codex-config.toml.tpl"
+      ]
+    }
+  ]
+}

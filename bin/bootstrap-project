@@ -35,12 +35,30 @@ def skill_names(changerail_root: Path) -> list[str]:
     )
 
 
-def render_text(text: str, *, project: Path, project_name: str, project_kind: str, changerail_root: Path) -> str:
+def render_text(
+    text: str,
+    *,
+    project: Path,
+    project_name: str,
+    project_kind: str,
+    changerail_root: Path,
+    config_mode: str,
+) -> str:
+    local_mode = config_mode == "local"
+    project_config_scope = str(project) if local_mode else "."
+    project_root_label = str(project) if local_mode else "this repository"
+    changerail_root_label = str(changerail_root) if local_mode else "the linked ChangeRail source of truth"
+    shared_source = str(changerail_root / "AGENTS.shared.md") if local_mode else "ChangeRail AGENTS.shared.md"
     replacements = {
         "{{PROJECT_PATH}}": str(project),
+        "{{PROJECT_CONFIG_SCOPE}}": project_config_scope,
+        "{{CODEX_PROJECT_KEY}}": project_config_scope,
+        "{{PROJECT_ROOT_LABEL}}": project_root_label,
         "{{PROJECT_NAME}}": project_name,
         "{{PROJECT_KIND}}": project_kind,
         "{{CHANGERAIL_ROOT}}": str(changerail_root),
+        "{{CHANGERAIL_ROOT_LABEL}}": changerail_root_label,
+        "{{CHANGERAIL_SHARED_SOURCE}}": shared_source,
         "{{CHANGERAIL_SHARED_AGENTS}}": (changerail_root / "AGENTS.shared.md").read_text(encoding="utf-8"),
     }
     for token, value in replacements.items():
@@ -77,6 +95,7 @@ def symlink_plan(changerail_root: Path, target: Path) -> list[tuple[Path, Path]]
         (changerail_root / "claude" / "commands" / "changerail", target / ".claude" / "commands" / "changerail"),
         (changerail_root / "claude" / "commands" / "chrl", target / ".claude" / "commands" / "chrl"),
         (changerail_root / "bin" / "openspec", target / "bin" / "openspec"),
+        (changerail_root / "bin" / "verify-project", target / "bin" / "verify-project"),
         (changerail_root / "bin" / "changerail-review-verdict", target / "bin" / "changerail-review-verdict"),
     ]
     links.extend((changerail_root / "skills" / skill, target / ".codex" / "skills" / skill) for skill in skill_names(changerail_root))
@@ -112,6 +131,7 @@ def write_templates(
     project_name: str,
     project_kind: str,
     changerail_root: Path,
+    config_mode: str,
 ) -> None:
     for action, destination, source in collect_plan(template_root, target):
         assert source is not None
@@ -124,6 +144,7 @@ def write_templates(
                     project_name=project_name,
                     project_kind=project_kind,
                     changerail_root=changerail_root,
+                    config_mode=config_mode,
                 ),
                 encoding="utf-8",
             )
@@ -138,7 +159,8 @@ def create_symlink(target: Path, link_path: Path) -> None:
             shutil.rmtree(link_path)
         else:
             link_path.unlink()
-    os.symlink(target, link_path)
+    relative_target = os.path.relpath(target, start=link_path.parent)
+    os.symlink(relative_target, link_path)
 
 
 def create_symlinks(changerail_root: Path, target: Path) -> None:
@@ -179,6 +201,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--name", default=None, help="Project name. Defaults to target directory name.")
     parser.add_argument("--kind", default="generic", help="Project kind placeholder. Defaults to generic.")
     parser.add_argument("--changerail-root", type=Path, default=repo_root_from_bin())
+    parser.add_argument(
+        "--config-mode",
+        choices=("portable", "local"),
+        default="portable",
+        help="Render portable tracked config by default; local mode embeds absolute machine-local paths.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print planned actions without writing files.")
     parser.add_argument("--backup-existing", action="store_true", help="Move an existing non-empty target aside first.")
     parser.add_argument("--skip-verify", action="store_true", help="Generate files without running verify-project.")
@@ -207,6 +235,7 @@ def main(argv: list[str]) -> int:
             project_name=project_name,
             project_kind=args.kind,
             changerail_root=changerail_root,
+            config_mode=args.config_mode,
         )
         create_symlinks(changerail_root, target)
         if not args.skip_verify:
@@ -215,6 +244,8 @@ def main(argv: list[str]) -> int:
         if backup is not None:
             print(f"backup: {backup}")
         print("next: git init")
+        if args.config_mode == "local":
+            print("warning: --config-mode local rendered machine-local absolute paths; review before git add")
         print("next: git add AGENTS.md CLAUDE.md .gitignore .mcp.json .codex/config.toml .codex/skills .claude bin openspec")
         print("next: git commit -m 'Bootstrap ChangeRail project'")
         print("next: add a remote when the project is ready to publish")

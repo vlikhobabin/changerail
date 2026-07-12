@@ -261,6 +261,16 @@ ChangeRail core публичен по умолчанию. Shared methodology и 
 Используйте generic examples: `/opt/changerail`, `/opt/example-project`,
 `/opt/example-a`, `/opt/example-b`.
 
+Public-surface verification should include the tracked scanner for current
+files and, before release, reachable history:
+
+```bash
+python3 scripts/public-surface-scan.py
+python3 scripts/public-surface-scan.py --history
+```
+
+Scanner findings for token-like assignments must redact secret values in logs.
+
 ## Generated Sections And Drift
 
 Consumer projects могут встраивать эту shared methodology в локальный

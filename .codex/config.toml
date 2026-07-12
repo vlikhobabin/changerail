@@ -15,7 +15,7 @@ trust_level = "trusted"
 
 [mcp_servers.filesystem]
 command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/opt/changerail"]
+args = ["-y", "@modelcontextprotocol/server-filesystem@2026.7.10", "/opt/changerail"]
 startup_timeout_sec = 60
 enabled = true
 

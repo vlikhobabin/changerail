@@ -332,13 +332,16 @@ Bootstrap должен:
 7. Напечатать следующие шаги: `git init`, первый commit, подключение remote.
 
 Шаблоны project-local файлов находятся в `templates/project/`. Bootstrap
-рендерит `*.tpl` файлы с placeholders для project path, project name,
-project kind и ChangeRail root, копирует OpenSpec skeleton и создает symlink-и на
-ChangeRail-owned surfaces.
+рендерит `*.tpl` файлы с placeholders для portable project scope, project name,
+project kind и ChangeRail source label, копирует OpenSpec skeleton и создает
+symlink-и на ChangeRail-owned surfaces.
 
 Текущая реализация `bin/bootstrap-project` поддерживает `--dry-run`,
-`--backup-existing`, `--skip-verify` для диагностики и по умолчанию запускает
-`bin/verify-project` после генерации.
+`--backup-existing`, `--skip-verify` и `--config-mode portable|local` для
+диагностики. Default `portable` не записывает machine-local absolute target path
+в tracked templates; `local` требует explicit opt-in и печатает warning перед
+предложенным staging. Bootstrap по умолчанию запускает `bin/verify-project`
+после генерации.
 
 ## 11. Verification и drift
 

@@ -4,8 +4,8 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "{{PROJECT_PATH}}"
+        "@modelcontextprotocol/server-filesystem@2026.7.10",
+        "{{PROJECT_CONFIG_SCOPE}}"
       ]
     },
     "context7": {

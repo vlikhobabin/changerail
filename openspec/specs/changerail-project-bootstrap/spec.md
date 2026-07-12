@@ -8,12 +8,29 @@ consumer project из tracked templates, ChangeRail source-of-truth symlink-ов
 ### Requirement: Bootstrap project command
 ChangeRail MUST provide `bin/bootstrap-project` to create a new generic consumer
 project from tracked templates and ChangeRail source-of-truth symlink-и.
+Bootstrap MUST generate public-safe portable tracked configuration by default
+and expose local absolute-path configuration only through explicit operator
+opt-in.
 
 #### Scenario: Operator bootstraps a generic project
 - **WHEN** an operator runs `bin/bootstrap-project /opt/example-project --name
   example-project --kind generic`
 - **THEN** the target receives generated project files, ChangeRail symlink-и, helper
   wrappers and an OpenSpec skeleton
+
+#### Scenario: Default bootstrap creates portable tracked config
+- **WHEN** an operator runs `bin/bootstrap-project /opt/example-project --name
+  example-project --kind generic`
+- **THEN** the generated tracked files use portable project scope instead of a
+  machine-local absolute target path
+- **AND** bootstrap still creates the required ChangeRail symlinks and helper
+  wrappers
+
+#### Scenario: Operator explicitly opts into local config
+- **WHEN** an operator runs bootstrap with local absolute config mode
+- **THEN** bootstrap renders machine-local absolute paths only after explicit
+  opt-in
+- **AND** it prints a warning before the suggested `git add` command
 
 ### Requirement: Refuse existing targets by default
 Bootstrap MUST refuse to overwrite an existing non-empty target unless the
@@ -36,11 +53,18 @@ creating or modifying the target project.
 ### Requirement: Bootstrap verification handoff
 Bootstrap MUST run `verify-project` after generating a project unless the
 operator explicitly skips verification for diagnostics.
+Bootstrap verification MUST validate the config model produced by bootstrap
+before reporting success.
 
 #### Scenario: Generated project is verified
 - **WHEN** bootstrap completes project generation
 - **THEN** it runs `bin/verify-project <target>` and fails if verification
   fails
+
+#### Scenario: Portable generated project is verified
+- **WHEN** bootstrap completes default portable project generation
+- **THEN** it runs `bin/verify-project <target>` and fails if portable scope
+  validation fails
 
 ### Requirement: Bootstrap smoke evidence
 ChangeRail MUST provide smoke coverage that exercises bootstrap end-to-end under

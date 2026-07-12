@@ -12,6 +12,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from changerail_contract_schema import validate_with_schema
 
@@ -20,6 +21,7 @@ SCHEMA_FILE = "changerail-delivery-manifest.schema.json"
 OPERATIONS = {"add", "modify", "delete", "rename", "unknown"}
 CHANGE_RE = re.compile(r"^## Change\s+[0-9]+:\s*`?([a-z0-9][a-z0-9-]*)`?", re.MULTILINE)
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+SCP_REMOTE_RE = re.compile(r"^(?:(?P<user>[^@/:]+)@)?(?P<host>[^:/]+):(?P<path>.+)$")
 
 
 class ManifestError(Exception):
@@ -412,7 +414,30 @@ def repository_id(workspace: Path) -> str:
         remote = git_output(workspace, ["config", "--get", "remote.origin.url"]).strip()
     except ManifestError:
         remote = ""
-    return remote or workspace.name
+    return sanitize_repository_identity(remote) or workspace.name
+
+
+def sanitize_repository_identity(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return ""
+    if "://" in raw:
+        parts = urlsplit(raw)
+        host = parts.hostname or ""
+        if not host:
+            return Path(parts.path).name or "repository"
+        netloc = host
+        if parts.port:
+            netloc = f"{netloc}:{parts.port}"
+        return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+    if raw.startswith("/") or raw.startswith("./") or raw.startswith("../"):
+        return Path(raw).name or "repository"
+    match = SCP_REMOTE_RE.match(raw)
+    if match:
+        host = match.group("host")
+        path = match.group("path").lstrip("/")
+        return f"ssh://{host}/{path}"
+    return raw
 
 
 def update_publish(manifest_path: Path, args: argparse.Namespace) -> dict[str, Any]:

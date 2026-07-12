@@ -354,7 +354,7 @@ def check_preflight(tmp: Path) -> None:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        url = f"http://127.0.0.1:{server.server_port}/health"
+        url = f"http://user:secret@127.0.0.1:{server.server_port}/health?access_token=raw-token"
         result = run(
             [
                 str(RUNNER),
@@ -379,6 +379,10 @@ def check_preflight(tmp: Path) -> None:
         checks = {check["name"]: check for check in payload["preflight"]["checks"]}
         if checks["connectivity"]["status"] != "pass":
             raise AssertionError(f"connectivity did not pass: {checks['connectivity']}")
+        message = checks["connectivity"]["message"]
+        for forbidden in ("user:secret", "access_token", "raw-token", "/health"):
+            if forbidden in message:
+                raise AssertionError(f"connectivity success leaked raw URL data: {message}")
         if checks["CODEX auth"]["status"] != "pass":
             raise AssertionError(f"auth state did not pass: {checks['CODEX auth']}")
         if checks["CODEX_HOME symlinks"]["status"] != "pass":
@@ -387,6 +391,45 @@ def check_preflight(tmp: Path) -> None:
             raise AssertionError("preflight status was not written")
     finally:
         server.shutdown()
+
+
+def check_preflight_connectivity_failure_redaction(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "preflight-failure-workspace")
+    launcher = tmp / "fake-codex-preflight-failure"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    url = "http://user:secret@127.0.0.1:1/health?token=raw-token"
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "preflight-failure",
+            "--launcher",
+            str(launcher),
+            "--connectivity-url",
+            url,
+            "--connectivity-timeout",
+            "0.2",
+            "--json",
+            "--write-status",
+        ]
+    )
+    if result.returncode == 0:
+        raise AssertionError("connectivity failure preflight unexpectedly passed")
+    payload = json.loads(result.stdout)
+    checks = {check["name"]: check for check in payload["preflight"]["checks"]}
+    if checks["connectivity"]["status"] != "fail":
+        raise AssertionError(f"connectivity did not fail: {checks['connectivity']}")
+    message = checks["connectivity"]["message"]
+    for forbidden in ("user:secret", "token", "raw-token", "/health"):
+        if forbidden in message:
+            raise AssertionError(f"connectivity failure leaked raw URL data: {message}")
 
 
 def check_run_preflight_failure(tmp: Path) -> None:
@@ -467,6 +510,7 @@ def main() -> int:
         check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
+        check_preflight_connectivity_failure_redaction(workspace)
         check_run_preflight_failure(workspace)
         check_stale_symlink_preflight(workspace)
     print("ok: delivery runner smoke passed")

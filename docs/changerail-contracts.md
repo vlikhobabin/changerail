@@ -93,6 +93,12 @@ runtime paths, preexisting dirty state и publish handoff details. Publish
 использует manifest как initial staging proposal, но обязан повторно сверить
 его с `git status` и не stage-ить runtime files.
 
+`workspace.repository` является sanitized identity. Helper удаляет URL
+userinfo, passwords, query string и fragment из remote URLs; для SCP-style SSH
+remotes сохраняет host/repository path без raw SSH username. Manifest не должен
+содержать credentials, access tokens или private operator identity из remote
+URL.
+
 Helper может вывести или обновить manifest из текущей карточки и workspace
 state:
 
@@ -169,7 +175,11 @@ child-процесса, выполняет child в effective workspace и эк�
 `--runtime-root` не задан, status пишется под
 `<workspace>/.runtime/changerail/delivery-runs/`. Preflight записывает диагностику
 launcher, Codex binary, auth state, `config.toml`, stale symlink-ов в
-`CODEX_HOME`, permissions и optional connectivity URL. `DELIVERED`, `NO-GO` и
+`CODEX_HOME`, permissions и optional connectivity URL. Connectivity diagnostics
+записывают только sanitized endpoint metadata, status или exception class; raw
+URL, query values и raw exception text не являются частью structured status.
+Child stdout/stderr logs остаются raw ignored runtime evidence и не должны
+публиковаться как public artifacts. `DELIVERED`, `NO-GO` и
 `BLOCKED` являются терминальными outcome для supervisor-а и печатаются в stdout
 runner-а. Structured JSONL events вроде `external-review/no-go` дают `NO-GO`,
 а `awaiting-review` дает `BLOCKED`; supervisor не должен выводить outcome из

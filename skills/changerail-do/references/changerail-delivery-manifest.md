@@ -19,6 +19,12 @@ Use the board card filename without `.md` as `<card-id>`.
 Store repository-relative paths only. Do not record secrets, credentials,
 customer data, full source payloads or large command output.
 
+Repository identity and endpoint diagnostics must be sanitized before runtime
+write. Do not store raw URL userinfo, passwords, access tokens, sensitive query
+values or private operator identity from remotes or connectivity URLs. Raw child
+stdout/stderr logs, when retained, remain ignored runtime evidence and are not
+public artifacts.
+
 Record at minimum:
 
 - `workspace.root` and repository identity when known;

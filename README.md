@@ -169,6 +169,11 @@ cd /opt/changerail
 ```
 
 После генерации bootstrap запускает тот же verifier.
+По умолчанию bootstrap рендерит portable tracked config: project scope в
+`.mcp.json` и `.codex/config.toml` хранится как `.` вместо machine-local
+absolute path. Если оператору нужен локальный absolute-path config, используйте
+`--config-mode local`; bootstrap напечатает warning перед предложенным
+`git add`.
 
 Повторная проверка:
 
@@ -232,6 +237,7 @@ python3 /opt/changerail/scripts/smoke-drift.py \
 - [Release discipline](docs/release-discipline.md)
 - [Compatibility notes](docs/compatibility.md)
 - [Migration guide](docs/migration-guide.md)
+- [Security policy](SECURITY.md)
 
 ## Безопасность публичного репозитория
 

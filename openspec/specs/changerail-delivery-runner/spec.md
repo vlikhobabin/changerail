@@ -112,6 +112,8 @@ outcomes.
 The runner MUST provide a preflight mode that checks the Codex launcher,
 effective `CODEX_HOME`, auth state, `CODEX_HOME` config, stale symlinks,
 executable permissions and optional connectivity URL.
+Delivery runner preflight MUST sanitize connectivity diagnostics before writing
+structured runtime status.
 
 #### Scenario: Connectivity check is requested
 - **WHEN** an operator supplies a connectivity URL for preflight
@@ -122,6 +124,20 @@ executable permissions and optional connectivity URL.
 - **WHEN** auth markers are absent or `CODEX_HOME` contains broken symlinks
 - **THEN** preflight records explicit diagnostics before the delivery child is
   launched
+
+#### Scenario: Connectivity success is sanitized
+- **WHEN** an operator supplies a connectivity URL containing URL userinfo or
+  token-like query values and the request succeeds
+- **THEN** the structured preflight check records only sanitized endpoint
+  metadata and response status
+- **AND** it does not include the raw submitted URL, userinfo or query value
+
+#### Scenario: Connectivity failure is sanitized
+- **WHEN** an operator supplies a connectivity URL containing URL userinfo or
+  token-like query values and the request fails
+- **THEN** the structured preflight check records sanitized endpoint metadata
+  and the exception class
+- **AND** it does not include the raw submitted URL or raw exception text
 
 ### Requirement: ChangeRail delivery runner namespace
 The non-interactive delivery runner MUST use ChangeRail command, schema and

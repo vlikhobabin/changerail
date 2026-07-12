@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -66,7 +67,37 @@ def manifest_payload() -> dict[str, Any]:
     }
 
 
+def helper_module() -> Any:
+    spec = importlib.util.spec_from_file_location("changerail_delivery_manifest_smoke", HELPER)
+    if spec is None or spec.loader is None:
+        raise AssertionError("cannot load manifest helper module")
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(HELPER.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.pop(0)
+    return module
+
+
+def check_repository_identity_redaction() -> None:
+    module = helper_module()
+    cases = {
+        "https://user:password@example.invalid/org/repo.git?access_token=secret-value": "https://example.invalid/org/repo.git",
+        "https://ghp_secret@example.invalid/org/repo.git": "https://example.invalid/org/repo.git",
+        "git@example.invalid:org/repo.git": "ssh://example.invalid/org/repo.git",
+    }
+    for raw, expected in cases.items():
+        actual = module.sanitize_repository_identity(raw)
+        if actual != expected:
+            raise AssertionError(f"unexpected sanitized repository identity for {raw!r}: {actual!r}")
+        for forbidden in ("user", "password", "secret-value", "ghp_secret", "git@"):
+            if forbidden in actual:
+                raise AssertionError(f"repository identity leaked {forbidden!r}: {actual!r}")
+
+
 def main() -> int:
+    check_repository_identity_redaction()
     with tempfile.TemporaryDirectory(prefix="changerail-manifest-smoke-") as tmp:
         path = Path(tmp) / "manifest.json"
         path.write_text(json.dumps(manifest_payload(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

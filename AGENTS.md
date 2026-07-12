@@ -109,10 +109,11 @@ git diff --check
 git status --short --ignored
 ```
 
-Before public commit, also scan for local/private names appropriate to this
-machine and confirm ignored files stay ignored. Prefer the tracked helper when
-available:
+Before public commit, also scan for local/private names, token-like assignments,
+common home paths and reachable-history leaks appropriate to this machine and
+confirm ignored files stay ignored. Prefer the tracked helper when available:
 
 ```bash
 python3 scripts/public-surface-scan.py
+python3 scripts/public-surface-scan.py --history
 ```

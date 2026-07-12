@@ -28,9 +28,10 @@ version and marks breaking changes explicitly.
   entries
 
 ### Requirement: Tool compatibility notes
-
 ChangeRail MUST document compatibility expectations for Codex CLI, Claude Code and
 OpenSpec CLI.
+Compatibility notes MUST document executable MCP dependency pins and their
+tracked integrity source and trusted setup verification.
 
 #### Scenario: Operator prepares to update local tools
 - **WHEN** an operator reviews ChangeRail compatibility notes
@@ -39,16 +40,48 @@ OpenSpec CLI.
 - **AND** the OpenSpec CLI compatibility note references the pin used by
   `bin/openspec`
 
-### Requirement: Migration notes between versions
+#### Scenario: Maintainer reviews MCP supply-chain pins
+- **WHEN** a maintainer reads ChangeRail compatibility notes
+- **THEN** the notes identify the exact npm MCP package pins and the tracked
+  integrity lock used to audit them
+- **AND** the notes identify the `verify-project`/`npm view` trusted setup
+  check that compares tracked integrity with npm registry metadata
 
+### Requirement: Migration notes between versions
 ChangeRail MUST maintain migration notes for version-to-version updates that affect
 consumer projects or operator workflow.
+Release discipline MUST describe how maintainers update executable dependency
+pins in a reviewable way.
+Release verification MUST include security disclosure policy and public-safety
+checks for public ChangeRail releases.
 
 #### Scenario: Consumer updates ChangeRail
 - **WHEN** a consumer moves from one ChangeRail version to another
 - **THEN** migration notes describe required update steps, verification gates
   and rollback considerations
 - **AND** migration examples use public generic paths only
+
+#### Scenario: Maintainer updates executable dependency pins
+- **WHEN** a release updates npm MCP package pins or CI action SHAs
+- **THEN** release docs describe the update command, verification commands and
+  review expectations
+
+#### Scenario: Release checks security disclosure policy
+- **WHEN** a maintainer prepares a public ChangeRail release
+- **THEN** release verification confirms that tracked security disclosure
+  policy exists and is linked from public docs
+- **AND** public-safety scans pass for the final tracked payload
+
+### Requirement: Security disclosure policy
+ChangeRail MUST maintain a tracked public security disclosure policy for
+reporting vulnerabilities without publishing sensitive details.
+
+#### Scenario: Public user reports a vulnerability
+- **WHEN** a public user reads `SECURITY.md`
+- **THEN** the policy identifies supported versions, preferred private
+  disclosure channel and report content guidelines
+- **AND** it tells reporters not to include secrets, credentials, exploit
+  payloads or private workspace details in public issues
 
 ### Requirement: Product rename migration notes
 ChangeRail release discipline MUST treat the OPSX to ChangeRail rename as a

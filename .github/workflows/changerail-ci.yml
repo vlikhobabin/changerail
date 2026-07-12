@@ -15,10 +15,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        # actions/checkout v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Set up Node.js for OpenSpec wrapper
-        uses: actions/setup-node@v4
+        # actions/setup-node v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "20"
 
@@ -62,6 +64,7 @@ jobs:
         run: |
           python3 scripts/public-surface-scan.py --self-test
           python3 scripts/public-surface-scan.py
+          python3 scripts/public-surface-scan.py --history
 
       - name: Wiring discovery smoke
         run: python3 scripts/smoke-wiring-discovery.py

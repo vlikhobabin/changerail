@@ -17,11 +17,19 @@ generic consumer projects.
 ### Requirement: Placeholder contract
 Project templates MUST document and use stable placeholders for project path,
 project name and project kind.
+Project templates MUST separate portable tracked scope placeholders from
+machine-local absolute path placeholders.
 
 #### Scenario: Bootstrap renders project-local files
 - **WHEN** `bootstrap-project` renders templates for `/opt/example-project`
 - **THEN** generated project files contain the rendered project path, project
   name and project kind instead of raw placeholder tokens
+
+#### Scenario: Bootstrap renders portable project-local files
+- **WHEN** bootstrap renders templates in the default config mode
+- **THEN** generated tracked files avoid raw absolute consumer project paths
+- **AND** project-local config still scopes filesystem access to the generated
+  repository
 
 ### Requirement: OpenSpec skeleton
 Project templates MUST include a minimal OpenSpec skeleton suitable for a new
@@ -35,11 +43,23 @@ consumer repository.
 ### Requirement: Public-safe template content
 Project templates MUST avoid private workspace names, customer data, secrets,
 local traces, credentials and runtime reports.
+Project templates MUST pin automatically executed npm MCP dependencies to exact
+versions represented in a tracked integrity lock that is verified during trusted
+setup.
 
 #### Scenario: Public-surface scan covers templates
 - **WHEN** templates are prepared for commit
 - **THEN** scan output contains only generic examples such as `/opt/changerail` and
   `/opt/example-project`
+
+#### Scenario: Generated MCP dependencies are exact-version pinned
+- **WHEN** project templates render `.mcp.json` and `.codex/config.toml`
+- **THEN** every automatically executed npm MCP package argument includes an
+  exact version
+- **AND** the package/version is represented in the tracked MCP npm integrity
+  lock
+- **AND** `verify-project` can compare that lock entry with npm registry
+  `dist.integrity`
 
 ### Requirement: Templates render ChangeRail placeholders
 Project templates MUST use ChangeRail placeholder names and generated prose

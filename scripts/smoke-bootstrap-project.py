@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -31,15 +32,50 @@ def utc_run_id() -> str:
     return f"{stamp}-{secrets.token_hex(4)}"
 
 
-def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         cmd,
         cwd=cwd,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env=env,
         timeout=240,
     )
+
+
+def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    lock = json.loads((changerail_root / "mcp-npm-lock.json").read_text(encoding="utf-8"))
+    mapping = {
+        f"{package['name']}@{package['version']}": package["integrity"]
+        for package in lock.get("packages", [])
+        if isinstance(package, dict)
+    }
+    npm = fake_bin / "npm"
+    npm.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, sys",
+                f"MAPPING = {mapping!r}",
+                "if len(sys.argv) == 5 and sys.argv[1] == 'view' and sys.argv[3] == 'dist.integrity' and sys.argv[4] == '--json':",
+                "    spec = sys.argv[2]",
+                "    if spec in MAPPING:",
+                "        print(json.dumps(MAPPING[spec]))",
+                "        raise SystemExit(0)",
+                "print('unsupported fake npm invocation: ' + ' '.join(sys.argv[1:]), file=sys.stderr)",
+                "raise SystemExit(1)",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    npm.chmod(0o755)
+    return {"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")}
 
 
 def contains_placeholder(project: Path) -> list[str]:
@@ -53,6 +89,24 @@ def contains_placeholder(project: Path) -> list[str]:
             continue
         if "{{" in text or "}}" in text:
             offenders.append(str(path.relative_to(project)))
+    return offenders
+
+
+def machine_local_text_offenders(project: Path, changerail_root: Path) -> list[str]:
+    offenders: list[str] = []
+    forbidden = [str(project)]
+    if changerail_root.resolve(strict=False).as_posix() != "/opt/changerail":
+        forbidden.append(str(changerail_root))
+    for path in project.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for value in forbidden:
+            if value and value in text:
+                offenders.append(f"{path.relative_to(project)} contains {value}")
     return offenders
 
 
@@ -85,7 +139,7 @@ def missing_workflow_guidance(project: Path) -> list[str]:
     return missing
 
 
-def check_bootstrap_success(changerail_root: Path, run_dir: Path) -> Check:
+def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dict[str, str]) -> Check:
     project = run_dir / "example-project"
     result = run(
         [
@@ -97,13 +151,17 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path) -> Check:
             "generic",
         ],
         changerail_root,
+        extra_env,
     )
     if result.returncode != 0:
         return Check("bootstrap valid project", "fail", result.stdout.strip())
     placeholders = contains_placeholder(project)
     if placeholders:
         return Check("bootstrap valid project", "fail", "raw placeholders remain: " + ", ".join(placeholders))
-    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root)
+    local_paths = machine_local_text_offenders(project, changerail_root)
+    if local_paths:
+        return Check("bootstrap valid project", "fail", "machine-local tracked text: " + ", ".join(local_paths))
+    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root, extra_env)
     if verify.returncode != 0:
         return Check("bootstrap valid project", "fail", verify.stdout.strip())
     workflow_missing = missing_workflow_guidance(project)
@@ -137,6 +195,31 @@ def check_dry_run(changerail_root: Path, run_dir: Path) -> Check:
     return Check("dry-run no-write", "pass", "dry-run printed plan and left no target")
 
 
+def check_local_config_warning(changerail_root: Path, run_dir: Path) -> Check:
+    project = run_dir / "local-config-project"
+    result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            "local-config-project",
+            "--kind",
+            "generic",
+            "--config-mode",
+            "local",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if result.returncode != 0:
+        return Check("local config warning", "fail", result.stdout.strip())
+    if "warning: --config-mode local rendered machine-local absolute paths" not in result.stdout:
+        return Check("local config warning", "fail", "local config warning missing")
+    if str(project) not in (project / ".mcp.json").read_text(encoding="utf-8"):
+        return Check("local config warning", "fail", "local config did not render absolute project path")
+    return Check("local config warning", "pass", "local config required explicit mode and warned before git add")
+
+
 def check_refuse_existing(changerail_root: Path, run_dir: Path) -> Check:
     project = run_dir / "existing-project"
     project.mkdir(parents=True)
@@ -160,7 +243,7 @@ def check_refuse_existing(changerail_root: Path, run_dir: Path) -> Check:
     return Check("refuse existing target", "pass", "non-empty target refused without changes")
 
 
-def check_backup_existing(changerail_root: Path, run_dir: Path) -> Check:
+def check_backup_existing(changerail_root: Path, run_dir: Path, extra_env: dict[str, str]) -> Check:
     project = run_dir / "backup-project"
     project.mkdir(parents=True)
     marker = project / "existing.txt"
@@ -176,6 +259,7 @@ def check_backup_existing(changerail_root: Path, run_dir: Path) -> Check:
             "--backup-existing",
         ],
         changerail_root,
+        extra_env,
     )
     if result.returncode != 0:
         return Check("backup existing target", "fail", result.stdout.strip())
@@ -184,7 +268,7 @@ def check_backup_existing(changerail_root: Path, run_dir: Path) -> Check:
         return Check("backup existing target", "fail", "backup directory was not created")
     if not (backups[-1] / "existing.txt").is_file():
         return Check("backup existing target", "fail", "backup marker missing")
-    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root)
+    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root, extra_env)
     if verify.returncode != 0:
         return Check("backup existing target", "fail", verify.stdout.strip())
     return Check("backup existing target", "pass", "existing target backed up and new project verified")
@@ -194,11 +278,13 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
+    fake_env = create_fake_npm(changerail_root, run_dir / "fake-bin")
     checks = [
-        check_bootstrap_success(changerail_root, run_dir),
+        check_bootstrap_success(changerail_root, run_dir, fake_env),
         check_dry_run(changerail_root, run_dir),
+        check_local_config_warning(changerail_root, run_dir),
         check_refuse_existing(changerail_root, run_dir),
-        check_backup_existing(changerail_root, run_dir),
+        check_backup_existing(changerail_root, run_dir, fake_env),
     ]
     failed = sum(1 for check in checks if check.status != "pass")
     return {
