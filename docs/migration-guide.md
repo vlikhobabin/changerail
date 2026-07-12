@@ -15,6 +15,17 @@ credentials, traces или machine-local inventory.
 - Pinned OpenSpec CLI bumped `1.3.0` -> `1.3.1`. `skills/openspec-*` were
   refreshed with `openspec update` (all lifecycle skills preserved; sharper
   `contextFiles` guidance in apply-change/verify-change). Not breaking.
+- Delivery runner and metrics helpers are tracked: `bin/changerail-delivery-runner`
+  writes `changerail.delivery-run.v1` runtime status, and
+  `bin/changerail-delivery-metrics` reads run records plus review-cycle history.
+- Review and manifest contracts now include fresh reviewer independence,
+  review-cycle history, delivery manifest derivation, publish finalization
+  metadata and schema-backed helper validation.
+- Daily aliases `$chrl-*` and `/chrl:*` are available while canonical runtime
+  names remain `changerail`.
+- Release verification now includes pinned `ruff`/`jsonschema` tooling,
+  contract schema smoke, inventory-based Python compile checks, public-surface
+  scans and a single local release baseline command.
 
 ### Required Actions
 
@@ -52,6 +63,21 @@ up `1.3.1` automatically. Re-run verification to confirm:
 Consumers that keep a local `openspec-*` copy (not a symlink into ChangeRail) can
 refresh it to `1.3.1` with `openspec update` in that project, or switch to the
 ChangeRail symlink to track the pin centrally.
+
+For maintainers preparing a ChangeRail release, install release-gate tooling in
+an ignored virtualenv and run the local baseline:
+
+```bash
+cd /opt/changerail
+python3 -m venv .runtime/changerail/ci-venv
+.runtime/changerail/ci-venv/bin/python -m pip install \
+  --disable-pip-version-check -r requirements-dev.txt
+python3 scripts/run-release-baseline.py
+```
+
+Existing consumers do not need to adopt runner/metrics helpers unless they want
+non-interactive supervised delivery records or aggregate review/delivery
+metrics.
 
 ### Rollback
 

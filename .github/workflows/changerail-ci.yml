@@ -24,6 +24,12 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Install Python release dependencies
+        run: |
+          python3 -m venv .runtime/changerail/ci-venv
+          .runtime/changerail/ci-venv/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          echo "$PWD/.runtime/changerail/ci-venv/bin" >> "$GITHUB_PATH"
+
       - name: OpenSpec validation
         run: ./bin/openspec validate --all --strict
 
@@ -39,23 +45,14 @@ jobs:
           PY
           git diff --check
 
-      - name: Python syntax checks
-        run: |
-          python3 -m py_compile \
-            bin/bootstrap-project \
-            bin/verify-project \
-            scripts/changerail_review_verdict.py \
-            scripts/changerail_delivery_manifest.py \
-            scripts/public-surface-scan.py \
-            scripts/smoke-bootstrap-project.py \
-            scripts/smoke-delivery-manifest.py \
-            scripts/smoke-delivery-manifest-derive.py \
-            scripts/smoke-drift.py \
-            scripts/smoke-openspec-archive-diagnostics.py \
-            scripts/smoke-review-verdict-validation.py \
-            scripts/smoke-release-ci.py \
-            scripts/smoke-verify-project.py \
-            scripts/smoke-wiring-discovery.py
+      - name: Contract schema validation
+        run: python3 scripts/smoke-contract-schemas.py
+
+      - name: Python syntax inventory
+        run: python3 scripts/compile-python-inventory.py
+
+      - name: Python lint
+        run: ruff check bin scripts
 
       - name: CI contract smoke
         run: python3 scripts/smoke-release-ci.py
@@ -75,10 +72,17 @@ jobs:
       - name: Bootstrap smoke
         run: python3 scripts/smoke-bootstrap-project.py
 
-      - name: Delivery manifest smoke
+      - name: Review contract smoke
+        run: |
+          python3 scripts/smoke-review-verdict-validation.py
+          python3 scripts/smoke-review-fingerprint.py
+
+      - name: Delivery contract smoke
         run: |
           python3 scripts/smoke-delivery-manifest.py
           python3 scripts/smoke-delivery-manifest-derive.py
+          python3 scripts/smoke-delivery-runner.py
+          python3 scripts/smoke-delivery-metrics.py
 
       - name: OpenSpec archive diagnostics smoke
         run: python3 scripts/smoke-openspec-archive-diagnostics.py

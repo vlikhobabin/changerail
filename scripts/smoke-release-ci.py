@@ -18,11 +18,20 @@ REQUIRED_SNIPPETS = {
     "checkout action version comment": "actions/checkout v4",
     "node setup action pin": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
     "node setup action version comment": "actions/setup-node v4",
+    "toml config check": "import tomllib",
+    "drift fixture bootstrap": "./bin/bootstrap-project .runtime/changerail/ci-drift/example-project",
+    "drift uses generated project": "--project .runtime/changerail/ci-drift/example-project",
+}
+
+REQUIRED_COMMANDS = {
+    "python release venv": "python3 -m venv .runtime/changerail/ci-venv",
+    "python release dependencies": ".runtime/changerail/ci-venv/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt",
     "openspec validation": "./bin/openspec validate --all --strict",
     "json config check": "python3 -m json.tool .mcp.json",
-    "toml config check": "import tomllib",
     "whitespace check": "git diff --check",
-    "python syntax check": "python3 -m py_compile",
+    "contract schema validation": "python3 scripts/smoke-contract-schemas.py",
+    "python syntax inventory": "python3 scripts/compile-python-inventory.py",
+    "python lint": "ruff check bin scripts",
     "release ci smoke": "python3 scripts/smoke-release-ci.py",
     "public surface scan self-test": "python3 scripts/public-surface-scan.py --self-test",
     "public surface scan": "python3 scripts/public-surface-scan.py",
@@ -30,12 +39,14 @@ REQUIRED_SNIPPETS = {
     "wiring smoke": "python3 scripts/smoke-wiring-discovery.py",
     "verify smoke": "python3 scripts/smoke-verify-project.py",
     "bootstrap smoke": "python3 scripts/smoke-bootstrap-project.py",
+    "review verdict validation smoke": "python3 scripts/smoke-review-verdict-validation.py",
+    "review fingerprint smoke": "python3 scripts/smoke-review-fingerprint.py",
     "delivery manifest smoke": "python3 scripts/smoke-delivery-manifest.py",
     "delivery manifest derive smoke": "python3 scripts/smoke-delivery-manifest-derive.py",
+    "delivery runner smoke": "python3 scripts/smoke-delivery-runner.py",
+    "delivery metrics smoke": "python3 scripts/smoke-delivery-metrics.py",
     "openspec archive diagnostics smoke": "python3 scripts/smoke-openspec-archive-diagnostics.py",
-    "drift fixture bootstrap": "./bin/bootstrap-project .runtime/changerail/ci-drift/example-project",
     "drift smoke": "python3 scripts/smoke-drift.py",
-    "drift uses generated project": "--project .runtime/changerail/ci-drift/example-project",
 }
 
 FORBIDDEN_SNIPPETS = {
@@ -68,6 +79,33 @@ def check_required(text: str) -> list[Check]:
     return checks
 
 
+def command_inventory(text: str) -> set[str]:
+    commands: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line == "|":
+            continue
+        if line.startswith("run: "):
+            value = line.removeprefix("run: ").strip()
+            if value and value != "|":
+                commands.add(value)
+            continue
+        if line.startswith(("python3 ", "./bin/", ".runtime/", "ruff ", "git ", "rm ")):
+            commands.add(line.removesuffix("\\").rstrip())
+    return commands
+
+
+def check_required_commands(text: str) -> list[Check]:
+    checks: list[Check] = []
+    commands = command_inventory(text)
+    for name, command in REQUIRED_COMMANDS.items():
+        if command in commands:
+            checks.append(Check(name, "pass", "required command present"))
+        else:
+            checks.append(Check(name, "fail", f"missing required command: {command}"))
+    return checks
+
+
 def check_forbidden(text: str) -> list[Check]:
     checks: list[Check] = []
     for name, snippet in FORBIDDEN_SNIPPETS.items():
@@ -88,6 +126,7 @@ def run_smoke(workflow: Path) -> dict[str, object]:
         text = workflow.read_text(encoding="utf-8")
 
     checks.extend(check_required(text))
+    checks.extend(check_required_commands(text))
     checks.extend(check_forbidden(text))
     failed = sum(1 for check in checks if check.status != "pass")
     return {

@@ -98,9 +98,10 @@ Migration source of truth живет в [migration guide](migration-guide.md).
 3. Добавить `BREAKING:` entries при изменении публичного contract.
 4. Обновить compatibility notes.
 5. Обновить migration guide.
-6. Запустить OpenSpec validation и repository baseline checks.
-7. Запустить release CI contract smoke.
-8. Запустить smoke checks, которые относятся к измененной поверхности.
+6. Запустить локальный release baseline.
+7. Проверить release CI contract smoke и focused smoke inventory.
+8. Запустить дополнительные trusted-network checks, если release меняет
+   executable dependency pins.
 9. Проверить, что [security policy](../SECURITY.md) существует, связан из
    публичных docs и не содержит private contact details или local paths.
 10. Выполнить independent review gate перед publish.
@@ -141,24 +142,21 @@ schemas/changerail-delivery-run.schema.json
 schemas/changerail-evidence-index.schema.json
 ```
 
-Минимальный локальный baseline:
+Локальный release baseline:
 
 ```bash
-openspec validate --all --strict
-python3 scripts/smoke-release-ci.py
-python3 scripts/public-surface-scan.py --self-test
-python3 scripts/public-surface-scan.py
-python3 scripts/public-surface-scan.py --history
-python3 -m json.tool .mcp.json
-python3 - <<'PY'
-import tomllib
-for path in (".codex/config.toml",):
-    with open(path, "rb") as f:
-        tomllib.load(f)
-print("TOML_OK")
-PY
-git diff --check
+python3 -m venv .runtime/changerail/ci-venv
+.runtime/changerail/ci-venv/bin/python -m pip install \
+  --disable-pip-version-check -r requirements-dev.txt
+python3 scripts/run-release-baseline.py
 ```
+
+`scripts/run-release-baseline.py` воспроизводит обязательный release baseline:
+OpenSpec strict validation, JSON/TOML config parsing, schema validation,
+tracked Python syntax inventory, `ruff check bin scripts`, focused smoke
+checks, generated drift fixture, public-surface scans, `git diff --check` и
+ignored-status check. Raw runtime reports остаются under `.runtime/` and are
+not committed.
 
 ## CI Gate
 
@@ -178,14 +176,28 @@ The CI workflow runs:
 
 - `./bin/openspec validate --all --strict`;
 - docs/config baseline checks from `AGENTS.md`;
-- Python syntax checks for scripts and helper executables;
+- `scripts/smoke-contract-schemas.py` for all public contract schemas;
+- `scripts/compile-python-inventory.py` for tracked Python helpers and smoke
+  scripts;
+- `ruff check bin scripts` with pinned release-gate tooling;
+- `scripts/smoke-release-ci.py` to validate the workflow command inventory;
+- public-surface scans for current files and reachable history;
 - `scripts/smoke-wiring-discovery.py`;
 - `scripts/smoke-verify-project.py`;
 - `scripts/smoke-bootstrap-project.py`;
+- `scripts/smoke-review-verdict-validation.py`;
+- `scripts/smoke-review-fingerprint.py`;
+- `scripts/smoke-delivery-manifest.py`;
+- `scripts/smoke-delivery-manifest-derive.py`;
+- `scripts/smoke-delivery-runner.py`;
+- `scripts/smoke-delivery-metrics.py`;
+- `scripts/smoke-openspec-archive-diagnostics.py`;
 - `scripts/smoke-drift.py` against a generated generic runtime project.
 
 CI drift checks must use generated fixtures under `.runtime/` and must not use
 private workspace inventory.
+Direct `scripts/smoke-drift.py` usage is inventory-driven: pass `--config`,
+`--workspace-root` or `--project`. No-argument invocation is expected to fail.
 
 ## Update Ritual For Consumers
 

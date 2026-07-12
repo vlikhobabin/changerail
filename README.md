@@ -4,9 +4,9 @@ ChangeRail - открытая технология организации раз
 OpenSpec-артефакты, доска задач, проверяемый delivery pipeline и общий
 toolchain для Codex CLI и Claude Code.
 
-Минимальный public source of truth, bootstrap/verification, drift gate,
-migration/adoption и release discipline уже реализованы. Текущий фокус -
-укрепить delivery pipeline для повторяемой эксплуатации и подготовить stable
+Public source of truth, bootstrap/verification, drift gate, delivery/review/pub
+contracts, runner status, metrics, release CI и release discipline уже
+реализованы. Текущий фокус - закрыть release hardening и подготовить stable
 release на основе практического feedback.
 
 ## Зачем нужен ChangeRail
@@ -112,12 +112,21 @@ changes**, каждый со своими OpenSpec-артефактами в `op
   `/chrl:explore`, `/chrl:ff`, `/chrl:do`, `/chrl:review`, `/chrl:pub`,
   `/chrl:deliver`;
 - `bin/openspec` с pin версии OpenSpec CLI;
-- schemas `changerail.review-verdict.v1`, `changerail.delivery-manifest.v1`,
-  `changerail.evidence-index.v1` и helper `bin/changerail-review-verdict`;
+- schemas `changerail.review-verdict.v1`,
+  `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
+  `changerail.delivery-run.v1`, `changerail.evidence-index.v1` и helper
+  `bin/changerail-review-verdict`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как red/green gate для consumer wiring/config;
 - `bin/bootstrap-project` для создания generic consumer project;
+- `bin/changerail-delivery-runner` для supervised non-interactive single-card
+  runs со structured runtime status;
+- `bin/changerail-delivery-metrics` для чтения delivery run records и review
+  cycle history;
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
+- `scripts/public-surface-scan.py`, `scripts/run-release-baseline.py`,
+  `scripts/compile-python-inventory.py`, `scripts/smoke-contract-schemas.py` и
+  focused smoke checks для release/public-safety gate;
 - `VERSION`, `CHANGELOG.md`, compatibility notes и migration guide для
   release discipline;
 - `.github/workflows/changerail-ci.yml` и `scripts/smoke-release-ci.py` для
@@ -127,10 +136,10 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 
 Следующие направления:
 
-- однозначный lifecycle delivery/review/pub и полный publish scope;
-- generic runner operations, структурированный runtime status и метрики;
 - первый stable release после проверки operational hardening на consumer
-  projects.
+  projects;
+- поддержка packaged distribution/release tags;
+- дальнейшее упрощение adoption и upgrade runbooks по feedback потребителей.
 
 ## Структура репозитория
 
@@ -196,6 +205,15 @@ python3 /opt/changerail/scripts/smoke-drift.py \
 содержать `workspace_roots`, `projects`, `exclude` и `legacy_roots`; публичные
 документы ChangeRail используют только generic examples.
 
+Локальный release baseline для maintainers:
+
+```bash
+python3 -m venv .runtime/changerail/ci-venv
+.runtime/changerail/ci-venv/bin/python -m pip install \
+  --disable-pip-version-check -r requirements-dev.txt
+python3 scripts/run-release-baseline.py
+```
+
 ## Для пользователей
 
 Если вы хотите применять ChangeRail в своем проекте, ориентируйтесь на следующие
@@ -221,7 +239,7 @@ python3 /opt/changerail/scripts/smoke-drift.py \
   `.env` или agent session state;
 - в документации отделяйте универсальную ChangeRail-методологию от
   domain-specific extensions;
-- при изменении будущих templates проверяйте, что generated config не содержит
+- при изменении templates проверяйте, что generated config не содержит
   локальных абсолютных путей кроме явно документированных placeholders.
 
 ## Документация
@@ -258,17 +276,16 @@ ChangeRail распространяется по лицензии MIT. См. [LI
 
 ## Roadmap
 
-Текущая точка: bootstrap-фазы 1-6 завершены. Репозиторий содержит generic
-lifecycle и OpenSpec skills, contracts/helpers, bootstrap/templates,
-verification и drift gates, release CI и документацию. Подтвержденные
-consumer-проекты мигрированы или подключены через adoption flow; проекты вне
-ChangeRail явно исключены из workspace drift inventory.
+Текущая точка: bootstrap-фазы 1-6 и operational runner/metrics hardening
+завершены. Репозиторий содержит generic lifecycle и OpenSpec skills,
+contracts/helpers, bootstrap/templates, verification и drift gates, release CI,
+локальный release baseline, runner status, metrics и документацию.
+Подтвержденные consumer-проекты мигрированы или подключены через adoption flow;
+проекты вне ChangeRail явно исключены из workspace drift inventory.
 
 Ближайшие шаги:
 
-1. Укрепить delivery lifecycle, verification floor и publish scope по активной
-   board card `harden-delivery-operations`.
-2. Добавить public-safe runner operations, structured status и delivery
-   observability без зависимости от machine-local runtime.
-3. Подготовить первый stable release после operational feedback и проверки
+1. Подготовить первый stable release после operational feedback и проверки
    compatibility на consumer projects.
+2. Добавить release tags и packaged distribution metadata.
+3. Упростить consumer upgrade/adoption flow на основе первых migration циклов.

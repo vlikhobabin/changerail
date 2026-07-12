@@ -21,7 +21,13 @@ The project is currently in bootstrap stage. The tracked public surface is:
 - generic ChangeRail lifecycle skills and OpenSpec lifecycle skills under `skills/`;
 - Claude command wrappers under `claude/commands/changerail/`;
 - ChangeRail contract schemas under `schemas/`;
-- helper wrappers `bin/openspec` and `bin/changerail-review-verdict`;
+- helper wrappers `bin/openspec`, `bin/changerail-review-verdict`,
+  `bin/bootstrap-project`, `bin/verify-project`,
+  `bin/changerail-delivery-runner` and `bin/changerail-delivery-metrics`;
+- project bootstrap templates under `templates/project/`;
+- drift, smoke, release baseline, schema validation and public-surface checks
+  under `scripts/`;
+- release-gate Python tooling pins in `requirements-dev.txt` and `ruff.toml`;
 - MIT `LICENSE`;
 - public Codex configuration under `.codex/config.toml`;
 - repo-local Codex skill symlinks under `.codex/skills/`;
@@ -30,9 +36,8 @@ The project is currently in bootstrap stage. The tracked public surface is:
 
 Planned public surface:
 
-- `templates/project/` for project bootstrap templates;
-- `bin/bootstrap-project` and `bin/verify-project`;
-- drift/smoke checks under `scripts/`.
+- release tags and packaged distribution metadata after the first stable
+  release decision.
 
 ## Public Safety
 
@@ -116,4 +121,5 @@ confirm ignored files stay ignored. Prefer the tracked helper when available:
 ```bash
 python3 scripts/public-surface-scan.py
 python3 scripts/public-surface-scan.py --history
+python3 scripts/run-release-baseline.py
 ```

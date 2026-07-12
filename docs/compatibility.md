@@ -109,6 +109,49 @@ when testing ChangeRail contracts:
 /opt/changerail/bin/openspec validate --all --strict
 ```
 
+## ChangeRail Runtime Helpers
+
+Status: supported as tracked Python helpers.
+
+Expected contract:
+
+- `bin/changerail-delivery-runner` launches one card through the repo launcher
+  and writes structured runtime status under `.runtime/changerail/delivery-runs/`;
+- `bin/changerail-delivery-metrics` reads delivery run records and review-cycle
+  history and renders missing optional values as `unknown`;
+- review verdict and delivery manifest helpers validate payloads against
+  tracked Draft 2020-12 schemas before applying semantic checks.
+
+Verification:
+
+```bash
+python3 scripts/smoke-delivery-runner.py
+python3 scripts/smoke-delivery-metrics.py
+python3 scripts/smoke-review-verdict-validation.py
+python3 scripts/smoke-review-fingerprint.py
+python3 scripts/smoke-contract-schemas.py
+```
+
+## Release Gate Tooling
+
+Status: pinned direct Python tooling for the release gate.
+
+`requirements-dev.txt` pins release-gate Python tools:
+
+```text
+jsonschema==4.23.0
+ruff==0.6.9
+```
+
+Use an ignored virtualenv before running the full local baseline:
+
+```bash
+python3 -m venv .runtime/changerail/ci-venv
+.runtime/changerail/ci-venv/bin/python -m pip install \
+  --disable-pip-version-check -r requirements-dev.txt
+python3 scripts/run-release-baseline.py
+```
+
 ## Consumer Project Gates
 
 Before treating a tool combination as compatible, run at least:
