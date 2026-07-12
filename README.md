@@ -171,6 +171,10 @@ cd /opt/opsx
 /opt/opsx/bin/verify-project /opt/example-project
 ```
 
+Для подключения существующего проекта используйте отдельный
+[runbook adoption](docs/consumer-adoption-runbook.md). Не запускайте
+`bootstrap-project` поверх непустого проекта без отдельного решения.
+
 Проверка drift по workspace inventory:
 
 ```bash
@@ -215,6 +219,7 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 Основные документы:
 
 - [Как это работает](docs/how-it-works.md)
+- [Runbook подключения существующего проекта](docs/consumer-adoption-runbook.md)
 - [OPSX как единый source of truth разработки](docs/opsx-source-of-truth-architecture.md)
 - [OpenSpec lifecycle source](docs/openspec-lifecycle.md)
 - [OPSX contracts](docs/opsx-contracts.md)
