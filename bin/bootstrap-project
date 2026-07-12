@@ -26,8 +26,8 @@ def repo_root_from_bin() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def skill_names(opsx_root: Path) -> list[str]:
-    skills_root = opsx_root / "skills"
+def skill_names(changerail_root: Path) -> list[str]:
+    skills_root = changerail_root / "skills"
     return sorted(
         path.name
         for path in skills_root.iterdir()
@@ -35,13 +35,13 @@ def skill_names(opsx_root: Path) -> list[str]:
     )
 
 
-def render_text(text: str, *, project: Path, project_name: str, project_kind: str, opsx_root: Path) -> str:
+def render_text(text: str, *, project: Path, project_name: str, project_kind: str, changerail_root: Path) -> str:
     replacements = {
         "{{PROJECT_PATH}}": str(project),
         "{{PROJECT_NAME}}": project_name,
         "{{PROJECT_KIND}}": project_kind,
-        "{{OPSX_ROOT}}": str(opsx_root),
-        "{{OPSX_SHARED_AGENTS}}": (opsx_root / "AGENTS.shared.md").read_text(encoding="utf-8"),
+        "{{CHANGERAIL_ROOT}}": str(changerail_root),
+        "{{CHANGERAIL_SHARED_AGENTS}}": (changerail_root / "AGENTS.shared.md").read_text(encoding="utf-8"),
     }
     for token, value in replacements.items():
         text = text.replace(token, value)
@@ -71,14 +71,14 @@ def collect_plan(template_root: Path, target: Path) -> list[tuple[str, Path, Pat
     return plan
 
 
-def symlink_plan(opsx_root: Path, target: Path) -> list[tuple[Path, Path]]:
+def symlink_plan(changerail_root: Path, target: Path) -> list[tuple[Path, Path]]:
     links = [
-        (opsx_root / "skills", target / ".claude" / "skills"),
-        (opsx_root / "claude" / "commands" / "opsx", target / ".claude" / "commands" / "opsx"),
-        (opsx_root / "bin" / "openspec", target / "bin" / "openspec"),
-        (opsx_root / "bin" / "opsx-review-verdict", target / "bin" / "opsx-review-verdict"),
+        (changerail_root / "skills", target / ".claude" / "skills"),
+        (changerail_root / "claude" / "commands" / "changerail", target / ".claude" / "commands" / "changerail"),
+        (changerail_root / "bin" / "openspec", target / "bin" / "openspec"),
+        (changerail_root / "bin" / "changerail-review-verdict", target / "bin" / "changerail-review-verdict"),
     ]
-    links.extend((opsx_root / "skills" / skill, target / ".codex" / "skills" / skill) for skill in skill_names(opsx_root))
+    links.extend((changerail_root / "skills" / skill, target / ".codex" / "skills" / skill) for skill in skill_names(changerail_root))
     return links
 
 
@@ -110,7 +110,7 @@ def write_templates(
     target: Path,
     project_name: str,
     project_kind: str,
-    opsx_root: Path,
+    changerail_root: Path,
 ) -> None:
     for action, destination, source in collect_plan(template_root, target):
         assert source is not None
@@ -122,7 +122,7 @@ def write_templates(
                     project=target,
                     project_name=project_name,
                     project_kind=project_kind,
-                    opsx_root=opsx_root,
+                    changerail_root=changerail_root,
                 ),
                 encoding="utf-8",
             )
@@ -140,16 +140,16 @@ def create_symlink(target: Path, link_path: Path) -> None:
     os.symlink(target, link_path)
 
 
-def create_symlinks(opsx_root: Path, target: Path) -> None:
-    for source, link_path in symlink_plan(opsx_root, target):
+def create_symlinks(changerail_root: Path, target: Path) -> None:
+    for source, link_path in symlink_plan(changerail_root, target):
         create_symlink(source, link_path)
 
 
-def run_verify(opsx_root: Path, target: Path) -> None:
-    verify = opsx_root / "bin" / "verify-project"
+def run_verify(changerail_root: Path, target: Path) -> None:
+    verify = changerail_root / "bin" / "verify-project"
     result = subprocess.run(
         [str(verify), str(target)],
-        cwd=opsx_root,
+        cwd=changerail_root,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -161,23 +161,23 @@ def run_verify(opsx_root: Path, target: Path) -> None:
         raise BootstrapError(f"verify-project failed for {target}")
 
 
-def print_plan(template_root: Path, opsx_root: Path, target: Path, *, backup: Path | None, skip_verify: bool) -> None:
+def print_plan(template_root: Path, changerail_root: Path, target: Path, *, backup: Path | None, skip_verify: bool) -> None:
     if backup is not None:
         print(f"PLAN backup {target} -> {backup}")
     for action, destination, source in collect_plan(template_root, target):
         print(f"PLAN {action} {source} -> {destination}")
-    for source, link_path in symlink_plan(opsx_root, target):
+    for source, link_path in symlink_plan(changerail_root, target):
         print(f"PLAN symlink {link_path} -> {source}")
     if not skip_verify:
-        print(f"PLAN verify {opsx_root / 'bin' / 'verify-project'} {target}")
+        print(f"PLAN verify {changerail_root / 'bin' / 'verify-project'} {target}")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Bootstrap a new OPSX consumer project.")
+    parser = argparse.ArgumentParser(description="Bootstrap a new ChangeRail consumer project.")
     parser.add_argument("path", type=Path, help="Target project path.")
     parser.add_argument("--name", default=None, help="Project name. Defaults to target directory name.")
     parser.add_argument("--kind", default="generic", help="Project kind placeholder. Defaults to generic.")
-    parser.add_argument("--opsx-root", type=Path, default=repo_root_from_bin())
+    parser.add_argument("--changerail-root", type=Path, default=repo_root_from_bin())
     parser.add_argument("--dry-run", action="store_true", help="Print planned actions without writing files.")
     parser.add_argument("--backup-existing", action="store_true", help="Move an existing non-empty target aside first.")
     parser.add_argument("--skip-verify", action="store_true", help="Generate files without running verify-project.")
@@ -186,8 +186,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    opsx_root = args.opsx_root.resolve()
-    template_root = opsx_root / "templates" / "project"
+    changerail_root = args.changerail_root.resolve()
+    template_root = changerail_root / "templates" / "project"
     target = args.path.resolve()
     project_name = args.name or target.name
 
@@ -196,7 +196,7 @@ def main(argv: list[str]) -> int:
             raise BootstrapError(f"template root missing: {template_root}")
         backup = ensure_target(target, backup_existing=args.backup_existing, dry_run=args.dry_run)
         if args.dry_run:
-            print_plan(template_root, opsx_root, target, backup=backup, skip_verify=args.skip_verify)
+            print_plan(template_root, changerail_root, target, backup=backup, skip_verify=args.skip_verify)
             print("dry-run: no files were written")
             return 0
 
@@ -205,17 +205,17 @@ def main(argv: list[str]) -> int:
             target=target,
             project_name=project_name,
             project_kind=args.kind,
-            opsx_root=opsx_root,
+            changerail_root=changerail_root,
         )
-        create_symlinks(opsx_root, target)
+        create_symlinks(changerail_root, target)
         if not args.skip_verify:
-            run_verify(opsx_root, target)
+            run_verify(changerail_root, target)
         print(f"bootstrapped: {target}")
         if backup is not None:
             print(f"backup: {backup}")
         print("next: git init")
         print("next: git add AGENTS.md CLAUDE.md .gitignore .mcp.json .codex/config.toml .codex/skills .claude bin openspec")
-        print("next: git commit -m 'Bootstrap OPSX project'")
+        print("next: git commit -m 'Bootstrap ChangeRail project'")
         print("next: add a remote when the project is ready to publish")
         return 0
     except BootstrapError as exc:

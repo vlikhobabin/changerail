@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository owns OPSX: an open workflow/toolchain for AI-assisted
+This repository owns ChangeRail: an open workflow/toolchain for AI-assisted
 development with OpenSpec artifacts, board-driven delivery, reusable agent
 skills, review gates and project bootstrap tooling.
 
@@ -16,12 +16,12 @@ The project is currently in bootstrap stage. The tracked public surface is:
 
 - architecture and roadmap documentation under `docs/`;
 - root `README.md`;
-- reusable OPSX methodology in `AGENTS.shared.md`;
+- reusable ChangeRail methodology in `AGENTS.shared.md`;
 - self-hosted OpenSpec dogfooding structure under `openspec/`;
-- generic OPSX lifecycle skills and OpenSpec lifecycle skills under `skills/`;
-- Claude command wrappers under `claude/commands/opsx/`;
-- OPSX contract schemas under `schemas/`;
-- helper wrappers `bin/openspec` and `bin/opsx-review-verdict`;
+- generic ChangeRail lifecycle skills and OpenSpec lifecycle skills under `skills/`;
+- Claude command wrappers under `claude/commands/changerail/`;
+- ChangeRail contract schemas under `schemas/`;
+- helper wrappers `bin/openspec` and `bin/changerail-review-verdict`;
 - MIT `LICENSE`;
 - public Codex configuration under `.codex/config.toml`;
 - repo-local Codex skill symlinks under `.codex/skills/`;
@@ -36,7 +36,7 @@ Planned public surface:
 
 ## Public Safety
 
-- Keep examples generic: use `/opt/opsx`, `/opt/example-project`,
+- Keep examples generic: use `/opt/changerail`, `/opt/example-project`,
   `/opt/example-a`, `/opt/example-b`.
 - Keep real private project names and local migration notes in ignored files
   such as `internal/`.
@@ -59,13 +59,13 @@ Use the repo-scoped launcher:
 
 The launcher sets:
 
-- `CODEX_HOME=/opt/opsx/.codex`;
-- `CODEX_WORKDIR=/opt/opsx`.
+- `CODEX_HOME=/opt/changerail/.codex`;
+- `CODEX_WORKDIR=/opt/changerail`.
 
 The committed Codex profile enables:
 
-- trusted project path `/opt/opsx`;
-- filesystem MCP scoped to `/opt/opsx`;
+- trusted project path `/opt/changerail`;
+- filesystem MCP scoped to `/opt/changerail`;
 - Context7 MCP for current library documentation;
 - Figma curated plugin for design-related workflows;
 - `approval_policy = "never"`;
@@ -80,15 +80,15 @@ untrusted content.
 - Prefer Linux-native shell/Python scripts.
 - Use `rg`/`rg --files` for search.
 - Use `apply_patch` for manual file edits.
-- Keep public docs and OPSX-owned OpenSpec artifacts in Russian for now;
+- Keep public docs and ChangeRail-owned OpenSpec artifacts in Russian for now;
   English docs will be added later. Technical identifiers, commands, paths and
   schema-required OpenSpec keywords may stay in English.
-- Agent runtime contracts under `skills/` and `claude/commands/opsx/` may use
+- Agent runtime contracts under `skills/` and `claude/commands/changerail/` may use
   English because their frontmatter, trigger descriptions and instructions are
   consumed directly by coding agents.
 - Keep `AGENTS.shared.md` generic and reusable; keep this root `AGENTS.md`
-  specific to the OPSX repository.
-- Keep generic OPSX core separate from future domain-specific extensions.
+  specific to the ChangeRail repository.
+- Keep generic ChangeRail core separate from future domain-specific extensions.
 - Do not introduce references to private repositories in public docs.
 - Do not commit generated runtime state.
 

@@ -1,38 +1,38 @@
-# OPSX wiring discovery
+# ChangeRail wiring discovery
 
-Статус: рабочий контракт для OPSX skills, OpenSpec lifecycle skills и Claude
+Статус: рабочий контракт для ChangeRail skills, OpenSpec lifecycle skills и Claude
 command wrappers.
 
-Этот документ фиксирует, как проекты видят OPSX skills и Claude command
-wrappers, и какой smoke подтверждает discovery. OPSX остается source of truth в
-`/opt/opsx`; проекты-потребители не копируют весь репозиторий.
+Этот документ фиксирует, как проекты видят ChangeRail skills и Claude command
+wrappers, и какой smoke подтверждает discovery. ChangeRail остается source of truth в
+`/opt/changerail`; проекты-потребители не копируют весь репозиторий.
 
 ## Область
 
 Проверяемая поверхность:
 
-- Codex skills: `opsx-*` и `openspec-*`;
+- Codex skills: `changerail-*` и `openspec-*`;
 - Claude skills: те же каталоги через `.claude/skills`;
-- Claude commands: `/opsx:explore`, `/opsx:ff`, `/opsx:do`,
-  `/opsx:review`, `/opsx:pub`, `/opsx:deliver`;
-- helper wrappers: `bin/openspec`, `bin/opsx-review-verdict`.
+- Claude commands: `/changerail:explore`, `/changerail:ff`, `/changerail:do`,
+  `/changerail:review`, `/changerail:pub`, `/changerail:deliver`;
+- helper wrappers: `bin/openspec`, `bin/changerail-review-verdict`.
 
 Smoke проверяет discovery wiring, а не полный runtime-flow этих команд.
 
 ## Repo-local wiring
 
-Сам репозиторий OPSX использует относительные symlink-и, которые остаются
-внутри `/opt/opsx` и не указывают на другой workspace:
+Сам репозиторий ChangeRail использует относительные symlink-и, которые остаются
+внутри `/opt/changerail` и не указывают на другой workspace:
 
 ```text
 .claude/skills             -> ../skills
-.claude/commands/opsx      -> ../../claude/commands/opsx
-.codex/skills/opsx-explore -> ../../skills/opsx-explore
-.codex/skills/opsx-ff      -> ../../skills/opsx-ff
-.codex/skills/opsx-do      -> ../../skills/opsx-do
-.codex/skills/opsx-review  -> ../../skills/opsx-review
-.codex/skills/opsx-pub     -> ../../skills/opsx-pub
-.codex/skills/opsx-deliver -> ../../skills/opsx-deliver
+.claude/commands/changerail      -> ../../claude/commands/changerail
+.codex/skills/changerail-explore -> ../../skills/changerail-explore
+.codex/skills/changerail-ff      -> ../../skills/changerail-ff
+.codex/skills/changerail-do      -> ../../skills/changerail-do
+.codex/skills/changerail-review  -> ../../skills/changerail-review
+.codex/skills/changerail-pub     -> ../../skills/changerail-pub
+.codex/skills/changerail-deliver -> ../../skills/changerail-deliver
 .codex/skills/openspec-*   -> ../../skills/openspec-*
 ```
 
@@ -43,30 +43,30 @@ wiring и не коммитятся.
 
 ## Consumer wiring
 
-Потребительский проект подключает OPSX source of truth из своего репозитория:
+Потребительский проект подключает ChangeRail source of truth из своего репозитория:
 
 ```text
-.claude/skills             -> /opt/opsx/skills
-.claude/commands/opsx      -> /opt/opsx/claude/commands/opsx
-.codex/skills/opsx-explore -> /opt/opsx/skills/opsx-explore
-.codex/skills/opsx-ff      -> /opt/opsx/skills/opsx-ff
-.codex/skills/opsx-do      -> /opt/opsx/skills/opsx-do
-.codex/skills/opsx-review  -> /opt/opsx/skills/opsx-review
-.codex/skills/opsx-pub     -> /opt/opsx/skills/opsx-pub
-.codex/skills/opsx-deliver -> /opt/opsx/skills/opsx-deliver
-.codex/skills/openspec-*   -> /opt/opsx/skills/openspec-*
-bin/openspec               -> /opt/opsx/bin/openspec
-bin/opsx-review-verdict    -> /opt/opsx/bin/opsx-review-verdict
+.claude/skills             -> /opt/changerail/skills
+.claude/commands/changerail      -> /opt/changerail/claude/commands/changerail
+.codex/skills/changerail-explore -> /opt/changerail/skills/changerail-explore
+.codex/skills/changerail-ff      -> /opt/changerail/skills/changerail-ff
+.codex/skills/changerail-do      -> /opt/changerail/skills/changerail-do
+.codex/skills/changerail-review  -> /opt/changerail/skills/changerail-review
+.codex/skills/changerail-pub     -> /opt/changerail/skills/changerail-pub
+.codex/skills/changerail-deliver -> /opt/changerail/skills/changerail-deliver
+.codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
+bin/openspec               -> /opt/changerail/bin/openspec
+bin/changerail-review-verdict    -> /opt/changerail/bin/changerail-review-verdict
 ```
 
-Для Codex допустимы generated copies под `.codex/skills/opsx-*`, если symlink
+Для Codex допустимы generated copies под `.codex/skills/changerail-*`, если symlink
 discovery у конкретной версии CLI сломан или запрещен политикой проекта. Такие
-copies должны генерироваться из `/opt/opsx/skills/opsx-*` и проверяться drift
+copies должны генерироваться из `/opt/changerail/skills/changerail-*` и проверяться drift
 gate; Codex runtime state под `.codex/` не коммитится.
 
 ## Smoke
 
-Запуск из корня OPSX:
+Запуск из корня ChangeRail:
 
 ```bash
 python3 scripts/smoke-wiring-discovery.py
@@ -82,13 +82,13 @@ python3 scripts/smoke-wiring-discovery.py
 Consumer example создается во временном ignored-каталоге:
 
 ```text
-.runtime/opsx/wiring-smoke/<run-id>/example-project
+.runtime/changerail/wiring-smoke/<run-id>/example-project
 ```
 
 Report пишется рядом:
 
 ```text
-.runtime/opsx/wiring-smoke/<run-id>/report.json
+.runtime/changerail/wiring-smoke/<run-id>/report.json
 ```
 
 ## Report contract
@@ -96,14 +96,14 @@ Report пишется рядом:
 Schema id:
 
 ```text
-opsx.wiring-discovery-smoke.v1
+changerail.wiring-discovery-smoke.v1
 ```
 
 Report является aggregate-отчетом. Верхний уровень содержит:
 
 - `schema`;
 - `run_id`;
-- `opsx_root`;
+- `changerail_root`;
 - `report_kind`: `aggregate`;
 - `modes`;
 - `surfaces`;
@@ -135,27 +135,27 @@ Smoke считается успешным, когда все checks имеют `
 
 Claude checks:
 
-- `.claude/skills` resolves to OPSX `skills/`;
-- `.claude/commands/opsx` resolves to OPSX `claude/commands/opsx`;
-- wrappers `/opsx:explore`, `/opsx:ff`, `/opsx:do`, `/opsx:review`,
-  `/opsx:pub` and `/opsx:deliver` mention the expected skill names;
+- `.claude/skills` resolves to ChangeRail `skills/`;
+- `.claude/commands/changerail` resolves to ChangeRail `claude/commands/changerail`;
+- wrappers `/changerail:explore`, `/changerail:ff`, `/changerail:do`, `/changerail:review`,
+  `/changerail:pub` and `/changerail:deliver` mention the expected skill names;
 - wrappers do not reference a consumer-root `skills/` path.
 
 Codex checks:
 
-- `.codex/skills/opsx-*` resolves to OPSX `skills/opsx-*`;
-- `.codex/skills/openspec-*` resolves to OPSX `skills/openspec-*`;
+- `.codex/skills/changerail-*` resolves to ChangeRail `skills/changerail-*`;
+- `.codex/skills/openspec-*` resolves to ChangeRail `skills/openspec-*`;
 - each discovered `SKILL.md` has frontmatter `name` matching the skill
   directory.
 
 Repo-local checks additionally require relative symlink targets. Consumer
-checks may use absolute `/opt/opsx` symlink targets because `/opt/opsx` is the
+checks may use absolute `/opt/changerail` symlink targets because `/opt/changerail` is the
 documented contract path.
 
 ## Public safety
 
 Committable wiring artifacts are limited to this document, the smoke script and
-public-safe relative symlink-и in the OPSX repo. Runtime reports under
+public-safe relative symlink-и in the ChangeRail repo. Runtime reports under
 `.runtime/` remain ignored. Do not commit private project names, customer data,
 secrets, local traces, screenshots, databases, auth state or machine-specific
 workspace paths.

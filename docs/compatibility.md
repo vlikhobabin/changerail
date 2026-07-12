@@ -1,12 +1,12 @@
 # Compatibility Notes
 
-Этот документ фиксирует tool compatibility expectations для OPSX. Он не
+Этот документ фиксирует tool compatibility expectations для ChangeRail. Он не
 заменяет smoke checks: если tool behavior изменился, release должен обновить
 notes, migration guide и проверки.
 
-## OPSX Version
+## ChangeRail Version
 
-Current OPSX version:
+Current ChangeRail version:
 
 ```text
 0.1.0
@@ -38,8 +38,8 @@ Status: supported through tracked command wrappers and skill links.
 
 Expected contract:
 
-- OPSX slash command wrappers live under `claude/commands/opsx/`;
-- consumer projects expose them through `.claude/commands/opsx`;
+- ChangeRail slash command wrappers live under `claude/commands/changerail/`;
+- consumer projects expose them through `.claude/commands/changerail`;
 - Claude skills resolve through `.claude/skills`;
 - `.claude/settings.local.json` remains local and ignored.
 
@@ -53,7 +53,7 @@ python3 scripts/smoke-wiring-discovery.py
 
 Status: pinned wrapper.
 
-OPSX resolves OpenSpec through `bin/openspec`. The wrapper uses:
+ChangeRail resolves OpenSpec through `bin/openspec`. The wrapper uses:
 
 ```text
 @fission-ai/openspec@1.3.1
@@ -62,14 +62,14 @@ OPSX resolves OpenSpec through `bin/openspec`. The wrapper uses:
 Operators may override the pin for diagnostics only:
 
 ```bash
-OPENSPEC_VERSION=1.3.0 /opt/opsx/bin/openspec validate --all --strict
+OPENSPEC_VERSION=1.3.0 /opt/changerail/bin/openspec validate --all --strict
 ```
 
 Release-facing changes should use the wrapper, not an unpinned global command,
-when testing OPSX contracts:
+when testing ChangeRail contracts:
 
 ```bash
-/opt/opsx/bin/openspec validate --all --strict
+/opt/changerail/bin/openspec validate --all --strict
 ```
 
 ## Consumer Project Gates
@@ -77,14 +77,14 @@ when testing OPSX contracts:
 Before treating a tool combination as compatible, run at least:
 
 ```bash
-/opt/opsx/bin/verify-project /opt/example-project
-python3 /opt/opsx/scripts/smoke-wiring-discovery.py
+/opt/changerail/bin/verify-project /opt/example-project
+python3 /opt/changerail/scripts/smoke-wiring-discovery.py
 ```
 
 Workspace-level compatibility uses operator-provided drift inventory and must
-not be committed to OPSX:
+not be committed to ChangeRail:
 
 ```bash
-python3 /opt/opsx/scripts/smoke-drift.py \
-  --config /opt/opsx/internal/opsx-drift.json
+python3 /opt/changerail/scripts/smoke-drift.py \
+  --config /opt/changerail/internal/changerail-drift.json
 ```

@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
-SCHEMA = "opsx.release-ci-smoke.v1"
+SCHEMA = "changerail.release-ci-smoke.v1"
 
 REQUIRED_SNIPPETS = {
     "trigger push": "push:",
@@ -25,14 +25,14 @@ REQUIRED_SNIPPETS = {
     "wiring smoke": "python3 scripts/smoke-wiring-discovery.py",
     "verify smoke": "python3 scripts/smoke-verify-project.py",
     "bootstrap smoke": "python3 scripts/smoke-bootstrap-project.py",
-    "drift fixture bootstrap": "./bin/bootstrap-project .runtime/opsx/ci-drift/example-project",
+    "drift fixture bootstrap": "./bin/bootstrap-project .runtime/changerail/ci-drift/example-project",
     "drift smoke": "python3 scripts/smoke-drift.py",
-    "drift uses generated project": "--project .runtime/opsx/ci-drift/example-project",
+    "drift uses generated project": "--project .runtime/changerail/ci-drift/example-project",
 }
 
 FORBIDDEN_SNIPPETS = {
     "private absolute project path": "/opt" + "/",
-    "private drift inventory": "internal/opsx-drift.json",
+    "private drift inventory": "internal/changerail-drift.json",
     "ci drift config inventory": "smoke-drift.py --config",
 }
 
@@ -95,12 +95,12 @@ def run_smoke(workflow: Path) -> dict[str, object]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     root = repo_root_from_script()
-    parser = argparse.ArgumentParser(description="Validate OPSX CI workflow contract.")
+    parser = argparse.ArgumentParser(description="Validate ChangeRail CI workflow contract.")
     parser.add_argument(
         "--workflow",
         type=Path,
-        default=root / ".github" / "workflows" / "opsx-ci.yml",
-        help="Path to the OPSX CI workflow.",
+        default=root / ".github" / "workflows" / "changerail-ci.yml",
+        help="Path to the ChangeRail CI workflow.",
     )
     parser.add_argument("--json", action="store_true", help="Print full JSON report.")
     return parser.parse_args(argv)

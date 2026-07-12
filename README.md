@@ -1,6 +1,6 @@
-# OPSX
+# ChangeRail
 
-OPSX - открытая технология организации разработки с AI-агентами:
+ChangeRail - открытая технология организации разработки с AI-агентами:
 OpenSpec-артефакты, доска задач, проверяемый delivery pipeline и общий
 toolchain для Codex CLI и Claude Code.
 
@@ -9,12 +9,12 @@ migration/adoption и release discipline уже реализованы. Теку
 укрепить delivery pipeline для повторяемой эксплуатации и подготовить stable
 release на основе практического feedback.
 
-## Зачем нужен OPSX
+## Зачем нужен ChangeRail
 
-OPSX решает практическую проблему AI-assisted разработки: агент должен не
+ChangeRail решает практическую проблему AI-assisted разработки: агент должен не
 просто писать код, а работать в воспроизводимом процессе.
 
-OPSX задает:
+ChangeRail задает:
 
 - единый workflow от идеи до публикации;
 - OpenSpec-артефакты для требований, дизайна, задач и проверок;
@@ -26,7 +26,7 @@ OPSX задает:
 
 ## Базовый pipeline
 
-Целевая форма OPSX pipeline:
+Целевая форма ChangeRail pipeline:
 
 ```text
 explore -> ff -> do -> review -> pub
@@ -45,18 +45,18 @@ explore -> ff -> do -> review -> pub
 - `deliver` - выполнить полный supervised flow для одной карточки или пачки
   карточек.
 
-Для Codex целевой интерфейс - skills вида `$opsx-*`.
-Для Claude Code целевой интерфейс - slash-команды вида `/opsx:*`.
+Для Codex целевой интерфейс - skills вида `$changerail-*`.
+Для Claude Code целевой интерфейс - slash-команды вида `/changerail:*`.
 
 ## Source of truth
 
-OPSX проектируется как отдельный системный source of truth:
+ChangeRail проектируется как отдельный системный source of truth:
 
 ```text
-/opt/opsx
+/opt/changerail
 ```
 
-Проекты-потребители не копируют OPSX целиком. Они подключают общие skills,
+Проекты-потребители не копируют ChangeRail целиком. Они подключают общие skills,
 команды и helpers через symlink-и или generated wiring, а проектные файлы
 получают через bootstrap.
 
@@ -64,7 +64,7 @@ OPSX проектируется как отдельный системный sou
 
 ```text
                  +-----------+
-                 | /opt/opsx |
+                 | /opt/changerail |
                  +-----+-----+
                        |
           symlinks + generated config
@@ -98,24 +98,24 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 
 - публичную архитектурную запись;
 - базовый `README.md`;
-- `AGENTS.shared.md` с начальной общей методологией OPSX для AI-агентов;
-- минимальную OpenSpec-доску для dogfooding развития самого OPSX;
-- generic OPSX lifecycle skills: `opsx-explore`, `opsx-ff`, `opsx-do`,
-  `opsx-review`, `opsx-pub`, `opsx-deliver`;
+- `AGENTS.shared.md` с начальной общей методологией ChangeRail для AI-агентов;
+- минимальную OpenSpec-доску для dogfooding развития самого ChangeRail;
+- generic ChangeRail lifecycle skills: `changerail-explore`, `changerail-ff`, `changerail-do`,
+  `changerail-review`, `changerail-pub`, `changerail-deliver`;
 - OpenSpec lifecycle skills `openspec-*` для proposal/spec/tasks, apply,
   verify, sync и archive;
-- Claude wrappers `/opsx:explore`, `/opsx:ff`, `/opsx:do`, `/opsx:review`,
-  `/opsx:pub`, `/opsx:deliver`;
+- Claude wrappers `/changerail:explore`, `/changerail:ff`, `/changerail:do`, `/changerail:review`,
+  `/changerail:pub`, `/changerail:deliver`;
 - `bin/openspec` с pin версии OpenSpec CLI;
-- schemas `opsx.review-verdict.v1`, `opsx.delivery-manifest.v1`,
-  `opsx.evidence-index.v1` и helper `bin/opsx-review-verdict`;
+- schemas `changerail.review-verdict.v1`, `changerail.delivery-manifest.v1`,
+  `changerail.evidence-index.v1` и helper `bin/changerail-review-verdict`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как red/green gate для consumer wiring/config;
 - `bin/bootstrap-project` для создания generic consumer project;
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
 - `VERSION`, `CHANGELOG.md`, compatibility notes и migration guide для
   release discipline;
-- `.github/workflows/opsx-ci.yml` и `scripts/smoke-release-ci.py` для
+- `.github/workflows/changerail-ci.yml` и `scripts/smoke-release-ci.py` для
   release CI gate;
 - публично-безопасный `.gitignore`;
 - лицензию MIT.
@@ -130,7 +130,7 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 ## Структура репозитория
 
 ```text
-opsx/
+changerail/
 ├── README.md
 ├── LICENSE
 ├── AGENTS.shared.md
@@ -138,7 +138,7 @@ opsx/
 ├── skills/
 ├── claude/
 │   └── commands/
-│       └── opsx/
+│       └── changerail/
 ├── schemas/
 ├── bin/
 ├── templates/
@@ -148,17 +148,17 @@ opsx/
 
 ## Быстрый старт
 
-Установите OPSX source of truth:
+Установите ChangeRail source of truth:
 
 ```bash
-git clone https://github.com/vlikhobabin/opsx.git /opt/opsx
-cd /opt/opsx
+git clone https://github.com/vlikhobabin/changerail.git /opt/changerail
+cd /opt/changerail
 ```
 
 Создайте generic consumer project:
 
 ```bash
-/opt/opsx/bin/bootstrap-project /opt/example-project \
+/opt/changerail/bin/bootstrap-project /opt/example-project \
   --name example-project \
   --kind generic
 ```
@@ -168,7 +168,7 @@ cd /opt/opsx
 Повторная проверка:
 
 ```bash
-/opt/opsx/bin/verify-project /opt/example-project
+/opt/changerail/bin/verify-project /opt/example-project
 ```
 
 Для подключения существующего проекта используйте отдельный
@@ -178,22 +178,22 @@ cd /opt/opsx
 Проверка drift по workspace inventory:
 
 ```bash
-python3 /opt/opsx/scripts/smoke-drift.py \
-  --config /opt/opsx/internal/opsx-drift.json
+python3 /opt/changerail/scripts/smoke-drift.py \
+  --config /opt/changerail/internal/changerail-drift.json
 ```
 
 Файл inventory держите в ignored `internal/` или генерируйте в CI. Он может
 содержать `workspace_roots`, `projects`, `exclude` и `legacy_roots`; публичные
-документы OPSX используют только generic examples.
+документы ChangeRail используют только generic examples.
 
 ## Для пользователей
 
-Если вы хотите применять OPSX в своем проекте, ориентируйтесь на следующие
+Если вы хотите применять ChangeRail в своем проекте, ориентируйтесь на следующие
 принципы:
 
 - проект остается самостоятельным git-репозиторием;
 - OpenSpec, board, исходный код и проектные правила живут в проекте;
-- общая методология, skills и команды живут в OPSX;
+- общая методология, skills и команды живут в ChangeRail;
 - runtime-состояние агентов не коммитится;
 - публикация изменений должна быть scoped и проверяемой;
 - review gate выполняется отдельным контекстом, а не той же сессией, которая
@@ -206,10 +206,10 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 - считайте этот репозиторий публичным по умолчанию;
 - не добавляйте сведения о локальных рабочих проектах, customer data, токенах,
   ключах, runtime traces или machine-local путях;
-- используйте generic-примеры вроде `/opt/opsx` и `/opt/example-project`;
+- используйте generic-примеры вроде `/opt/changerail` и `/opt/example-project`;
 - не коммитьте `.runtime/`, `.artifacts/`, `.ai/`, `.codex/`, локальные
   `.env` или agent session state;
-- в документации отделяйте универсальную OPSX-методологию от
+- в документации отделяйте универсальную ChangeRail-методологию от
   domain-specific extensions;
 - при изменении будущих templates проверяйте, что generated config не содержит
   локальных абсолютных путей кроме явно документированных placeholders.
@@ -220,9 +220,9 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 
 - [Как это работает](docs/how-it-works.md)
 - [Runbook подключения существующего проекта](docs/consumer-adoption-runbook.md)
-- [OPSX как единый source of truth разработки](docs/opsx-source-of-truth-architecture.md)
+- [ChangeRail как единый source of truth разработки](docs/changerail-source-of-truth-architecture.md)
 - [OpenSpec lifecycle source](docs/openspec-lifecycle.md)
-- [OPSX contracts](docs/opsx-contracts.md)
+- [ChangeRail contracts](docs/changerail-contracts.md)
 - [Release discipline](docs/release-discipline.md)
 - [Compatibility notes](docs/compatibility.md)
 - [Migration guide](docs/migration-guide.md)
@@ -236,13 +236,13 @@ python3 /opt/opsx/scripts/smoke-drift.py \
 - трассы, дампы, логи, базы данных, отчеты с чувствительными данными;
 - реальные customer/workspace данные;
 - упоминания локальных рабочих репозиториев, если они не являются частью
-  публичной документации OPSX.
+  публичной документации ChangeRail.
 
 `.gitignore` настроен консервативно, но он не заменяет review перед commit.
 
 ## Лицензия
 
-OPSX распространяется по лицензии MIT. См. [LICENSE](LICENSE).
+ChangeRail распространяется по лицензии MIT. См. [LICENSE](LICENSE).
 
 ## Roadmap
 
@@ -250,7 +250,7 @@ OPSX распространяется по лицензии MIT. См. [LICENSE]
 lifecycle и OpenSpec skills, contracts/helpers, bootstrap/templates,
 verification и drift gates, release CI и документацию. Подтвержденные
 consumer-проекты мигрированы или подключены через adoption flow; проекты вне
-OPSX явно исключены из workspace drift inventory.
+ChangeRail явно исключены из workspace drift inventory.
 
 Ближайшие шаги:
 

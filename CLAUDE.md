@@ -1,8 +1,8 @@
 @AGENTS.md
 
-# Claude Code — OPSX workspace notes
+# Claude Code — ChangeRail workspace notes
 
-Этот файл — точка входа Claude Code в репозиторий OPSX. Агент-нейтральные
+Этот файл — точка входа Claude Code в репозиторий ChangeRail. Агент-нейтральные
 рабочие правила — в [`AGENTS.md`](AGENTS.md) (импортирован выше): Codex читает
 его напрямую, Claude получает тот же корпус через импорт. Здесь — только
 Claude-специфика.
@@ -13,35 +13,35 @@ Claude-специфика.
 | --- | --- | --- |
 | Разрешения (максимальные + generic deny) | `.claude/settings.json` | да |
 | Включение MCP-серверов | `.claude/settings.local.json` (`enabledMcpjsonServers`) | нет (machine-local) |
-| MCP baseline | `.mcp.json` — `filesystem` (scope `/opt/opsx`) + `context7` | да |
+| MCP baseline | `.mcp.json` — `filesystem` (scope `/opt/changerail`) + `context7` | да |
 
 Baseline MCP намеренно минимальный. Provider-MCP других workspace сюда не
-добавляются: OPSX — источник технологии, а не потребитель доменных сервисов.
+добавляются: ChangeRail — источник технологии, а не потребитель доменных сервисов.
 
-## Тулчейн OPSX в этом репозитории
+## Тулчейн ChangeRail в этом репозитории
 
-Публичные source-файлы для OPSX surface:
+Публичные source-файлы для ChangeRail surface:
 
-- `skills/opsx-explore/`;
-- `skills/opsx-ff/`;
-- `skills/opsx-do/`;
-- `skills/opsx-review/`;
-- `skills/opsx-pub/`;
-- `skills/opsx-deliver/`;
+- `skills/changerail-explore/`;
+- `skills/changerail-ff/`;
+- `skills/changerail-do/`;
+- `skills/changerail-review/`;
+- `skills/changerail-pub/`;
+- `skills/changerail-deliver/`;
 - `skills/openspec-*`;
-- `claude/commands/opsx/explore.md`;
-- `claude/commands/opsx/ff.md`;
-- `claude/commands/opsx/do.md`;
-- `claude/commands/opsx/review.md`;
-- `claude/commands/opsx/pub.md`;
-- `claude/commands/opsx/deliver.md`;
+- `claude/commands/changerail/explore.md`;
+- `claude/commands/changerail/ff.md`;
+- `claude/commands/changerail/do.md`;
+- `claude/commands/changerail/review.md`;
+- `claude/commands/changerail/pub.md`;
+- `claude/commands/changerail/deliver.md`;
 - `bin/openspec`;
-- `bin/opsx-review-verdict`;
-- `schemas/opsx-*.schema.json`.
+- `bin/changerail-review-verdict`;
+- `schemas/changerail-*.schema.json`.
 
-Repo-local slash-команды `/opsx:*` подключены через внутренние относительные
+Repo-local slash-команды `/changerail:*` подключены через внутренние относительные
 симлинки `.claude/skills -> ../skills` и
-`.claude/commands/opsx -> ../../claude/commands/opsx`. Codex skills в
+`.claude/commands/changerail -> ../../claude/commands/changerail`. Codex skills в
 `.codex/skills/` также являются относительными symlink-и на source directories
 под `skills/`.
 

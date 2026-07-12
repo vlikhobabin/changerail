@@ -1,6 +1,6 @@
-# OPSX Board
+# ChangeRail Board
 
-Файловая доска проекта для развития OPSX через собственный workflow.
+Файловая доска проекта для развития ChangeRail через собственный workflow.
 
 Доска живет в `openspec/board/`, потому что карточки являются story-level
 входом, а `openspec/changes/` содержит apply-ready OpenSpec changes для этих
@@ -30,7 +30,7 @@
   префиксом.
 - В `2.todo/` и `3.inprogress/` карточка должна содержать ordered sections
   `## Change 1:`, `## Change 2:` и так далее.
-- В `Related` указываются только публичные пути внутри OPSX или generic
+- В `Related` указываются только публичные пути внутри ChangeRail или generic
   example-пути.
 
 ## Agent Workflow
@@ -38,14 +38,14 @@
 1. Создать или уточнить карточку в `1.backlog/`.
 2. После triage перенести карточку в `2.todo/` и описать ordered change plan.
 3. Когда artifacts готовы, перенести карточку в `3.inprogress/`.
-4. Реализовать changes через OPSX/OpenSpec flow, записать результат, проверки
+4. Реализовать changes через ChangeRail/OpenSpec flow, записать результат, проверки
    и archive paths, оставив review-gated карточку в `3.inprogress/`.
 5. Провести independent review; на `no-go` исправлять только scoped blocker и
    запрашивать свежий review.
 6. После fresh `go` выполнить publish и перенести карточку в `4.done/` только
    как deterministic post-publish finalization.
 
-Минимальный собственный OPSX surface уже начинается с `opsx-explore` и
-`opsx-ff`. Пока delivery/review/publish skills не перенесены, реализация,
+Минимальный собственный ChangeRail surface уже начинается с `changerail-explore` и
+`changerail-ff`. Пока delivery/review/publish skills не перенесены, реализация,
 archive и publish выполняются прямыми правками с baseline verification из
 `AGENTS.md` либо через явно доступный project-local workflow.

@@ -1,0 +1,163 @@
+# changerail-skill-surface Specification
+
+## Purpose
+Зафиксировать минимальный public source surface для generic ChangeRail skills и
+Claude command wrappers: какие skills поставляются первыми, какие boundaries у
+planning-only flow и какие path-neutrality требования должны соблюдаться до
+подключения bootstrap/adoption wiring.
+## Requirements
+### Requirement: Minimal generic ChangeRail skills
+ChangeRail MUST provide tracked generic source skills for `changerail-explore`, `changerail-ff`,
+`changerail-do`, `changerail-review`, `changerail-pub` and `changerail-deliver`.
+
+#### Scenario: Consumer project links ChangeRail lifecycle skills
+- **WHEN** consumer project symlinks or copies ChangeRail skill source files
+- **THEN** all generic ChangeRail lifecycle skills are available from `skills/`
+
+### Requirement: Path-neutral skill content
+ChangeRail skill source files MUST avoid private workspace names, machine-specific
+fallback paths, customer data, secrets and domain-specific provider policy.
+
+#### Scenario: Public-surface scan runs before publication
+- **WHEN** skill files are scanned for private local paths and workspace names
+- **THEN** no private machine-local source path appears in the generic skill
+  surface
+
+### Requirement: Explore remains non-implementation mode
+`changerail-explore` MUST describe an exploration workflow that reads relevant project
+context and helps shape the problem without implementing product/runtime
+changes.
+
+#### Scenario: User invokes explore for an unclear requirement
+- **WHEN** agent follows `changerail-explore`
+- **THEN** agent investigates, compares options and recommends next artifacts
+  without applying code changes
+
+### Requirement: Fast-forward remains planning-only
+`changerail-ff` MUST describe a card planning workflow that decomposes stories and
+creates apply-ready OpenSpec artifacts without implementing, archiving or
+publishing.
+
+#### Scenario: User invokes fast-forward for a board card
+- **WHEN** agent follows `changerail-ff`
+- **THEN** agent updates the card and OpenSpec change artifacts while leaving
+  implementation to a later delivery workflow
+
+### Requirement: Claude wrappers for minimal commands
+ChangeRail MUST provide Claude command wrapper source files for `/changerail:explore`,
+`/changerail:ff`, `/changerail:do`, `/changerail:review`, `/changerail:pub` and `/changerail:deliver`.
+
+#### Scenario: Consumer project wires Claude commands
+- **WHEN** consumer project links `claude/commands/changerail/`
+- **THEN** source wrappers exist for the generic ChangeRail lifecycle commands
+
+### Requirement: Claude wrappers use skill discovery
+Claude command wrappers MUST load ChangeRail skills by name or by the consumer's
+Claude skill discovery mechanism, not by assuming a root-level `skills/` path in
+the consumer repository.
+
+#### Scenario: Consumer project links commands and skills through documented wiring
+- **WHEN** consumer project exposes ChangeRail commands under `.claude/commands/changerail`
+  and skills under `.claude/skills`
+- **THEN** `/changerail:explore` and `/changerail:ff` do not require a separate
+  `<consumer-root>/skills` symlink
+
+### Requirement: Fast-forward handoff is conditional
+`changerail-ff` MUST hand off to the delivery workflow without requiring `changerail-do` to
+be installed by the minimal skill surface.
+
+#### Scenario: Minimal skill surface is installed without delivery commands
+- **WHEN** `changerail-ff` finishes planning a card
+- **THEN** it may name `$changerail-do` or `/changerail:do` only as the delivery command to
+  use when that surface is installed
+
+### Requirement: Delivery skill implements generic do flow
+`changerail-do` MUST describe a supervised delivery workflow that implements ordered
+card-owned OpenSpec changes, verifies them, syncs specs and archives completed
+changes without committing or publishing.
+
+#### Scenario: Agent invokes delivery for a planned card
+- **WHEN** agent follows `changerail-do` for a card with apply-ready changes
+- **THEN** the agent processes each card-owned change through implementation,
+  verification, spec sync and archive before handing off to review
+
+### Requirement: Review skill enforces independent gate
+`changerail-review` MUST require a fresh context that did not plan or implement the
+card and MUST write only an ignored runtime verdict file.
+
+#### Scenario: Implementing session attempts self-review
+- **WHEN** the current session produced the diff under review
+- **THEN** `changerail-review` stops before writing a verdict
+
+### Requirement: Publish skill requires review gate by default
+`changerail-pub` MUST fail closed for review-gated cards when a fresh valid `go`
+verdict is absent or stale.
+
+#### Scenario: Publish runs without a valid review verdict
+- **WHEN** publish is invoked for a delivered card without a fresh `go` verdict
+- **THEN** publish stops before staging, committing or pushing files
+
+### Requirement: Deliver skill orchestrates the lifecycle
+`changerail-deliver` MUST orchestrate the card-level flow `ff -> do -> review -> pub`
+while preserving phase safety stops and scoped publish behavior.
+
+#### Scenario: Deliver reaches an external review stop
+- **WHEN** an operator requires external review instead of self-launched review
+- **THEN** `changerail-deliver` stops at the review gate and prints the review and
+  resume commands without publishing
+
+### Requirement: Delivery skills preserve review-gated lifecycle
+ChangeRail lifecycle skills MUST keep implementation, independent review and publish
+as separate gates with explicit card-state responsibilities.
+
+#### Scenario: Delivery hands off without done move
+- **WHEN** `changerail-do` completes and archives all card-owned changes
+- **THEN** it records verification and archive evidence but does not move the
+  card to `4.done`
+
+#### Scenario: Publish performs final board transition
+- **WHEN** `changerail-pub` has a fresh valid `go` verdict and publishes the scoped
+  payload
+- **THEN** it performs only the documented board finalization needed to mark the
+  story done
+
+### Requirement: Delivery and review audit mandatory verification
+`changerail-do` MUST collect mandatory verification from local rules and artifacts,
+and `changerail-review` MUST audit whether mandatory verification claims are backed by
+concrete evidence.
+
+#### Scenario: Delivery hands off evidence
+- **WHEN** `changerail-do` completes a change with mandatory checks
+- **THEN** the card, tasks or delivery manifest contains command/outcome
+  evidence for those checks
+
+#### Scenario: Review finds an unbacked mandatory claim
+- **WHEN** `changerail-review` sees a mandatory verification claim without concrete
+  command/outcome evidence
+- **THEN** it records a finding instead of treating the claim as proven
+
+### Requirement: ChangeRail lifecycle skill namespace
+The generic lifecycle skill surface MUST use `changerail-*` skill names and
+`/changerail:*` Claude commands as the canonical invocation namespace.
+
+#### Scenario: Codex discovers lifecycle skills
+- **WHEN** Codex skill discovery reads the repository skill surface
+- **THEN** it finds `changerail-explore`, `changerail-ff`, `changerail-do`,
+  `changerail-review`, `changerail-pub` and `changerail-deliver`
+- **AND** it does not require `opsx-*` lifecycle skill names for new defaults
+
+#### Scenario: Claude discovers lifecycle commands
+- **WHEN** Claude command discovery reads the repository command surface
+- **THEN** it finds `/changerail:explore`, `/changerail:ff`,
+  `/changerail:do`, `/changerail:review`, `/changerail:pub` and
+  `/changerail:deliver`
+- **AND** new generated projects do not install `/opsx:*` command defaults
+
+### Requirement: OpenSpec lifecycle namespace is preserved
+ChangeRail MUST keep OpenSpec lifecycle skills under the `openspec-*`
+namespace.
+
+#### Scenario: OpenSpec skills are discovered after rename
+- **WHEN** Codex or Claude loads ChangeRail project skills
+- **THEN** OpenSpec artifact lifecycle skills remain named `openspec-*`
+- **AND** `bin/openspec` remains the pinned OpenSpec CLI wrapper

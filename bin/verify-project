@@ -38,9 +38,15 @@ FORBIDDEN_TRACKED_EXACT = {
     "claude-trace-context.json",
 }
 SCHEMAS = (
-    "opsx-review-verdict.schema.json",
-    "opsx-delivery-manifest.schema.json",
-    "opsx-evidence-index.schema.json",
+    "changerail-review-verdict.schema.json",
+    "changerail-delivery-manifest.schema.json",
+    "changerail-evidence-index.schema.json",
+)
+STALE_OPSX_PATHS = (
+    ".claude/commands/opsx",
+    "bin/opsx-review-verdict",
+    "bin/opsx-delivery-runner",
+    "bin/opsx-delivery-metrics",
 )
 
 
@@ -64,8 +70,8 @@ def print_check(check: Check) -> None:
     print(f"{status} {check.name}: {check.message}")
 
 
-def skill_names(opsx_root: Path) -> list[str]:
-    skills_root = opsx_root / "skills"
+def skill_names(changerail_root: Path) -> list[str]:
+    skills_root = changerail_root / "skills"
     if not skills_root.is_dir():
         return []
     return sorted(
@@ -75,21 +81,21 @@ def skill_names(opsx_root: Path) -> list[str]:
     )
 
 
-def expected_rel(expected: Path, opsx_root: Path) -> Path:
+def expected_rel(expected: Path, changerail_root: Path) -> Path:
     try:
-        return expected.resolve(strict=False).relative_to(opsx_root.resolve(strict=False))
+        return expected.resolve(strict=False).relative_to(changerail_root.resolve(strict=False))
     except ValueError:
         return Path(expected.name)
 
 
-def accepted_target(resolved: Path, expected: Path, opsx_root: Path, aggregator_root: Path | None) -> tuple[bool, str]:
+def accepted_target(resolved: Path, expected: Path, changerail_root: Path, aggregator_root: Path | None) -> tuple[bool, str]:
     expected_resolved = expected.resolve(strict=False)
     if resolved == expected_resolved:
         return True, f"resolves to {expected_resolved}"
-    if is_relative_to(resolved, opsx_root):
-        return False, f"resolves under OPSX but expected {expected_resolved}, got {resolved}"
+    if is_relative_to(resolved, changerail_root):
+        return False, f"resolves under ChangeRail but expected {expected_resolved}, got {resolved}"
     if aggregator_root is not None and is_relative_to(resolved, aggregator_root):
-        rel = expected_rel(expected, opsx_root)
+        rel = expected_rel(expected, changerail_root)
         try:
             agg_rel = resolved.relative_to(aggregator_root)
         except ValueError:
@@ -97,10 +103,10 @@ def accepted_target(resolved: Path, expected: Path, opsx_root: Path, aggregator_
         if agg_rel == rel:
             return True, f"resolves through aggregator {aggregator_root}"
         return False, f"aggregator path {resolved} does not match expected relative path {rel}"
-    return False, f"resolves outside OPSX source: {resolved}"
+    return False, f"resolves outside ChangeRail source: {resolved}"
 
 
-def check_symlink(project: Path, rel_path: str, expected: Path, opsx_root: Path, aggregator_root: Path | None) -> Check:
+def check_symlink(project: Path, rel_path: str, expected: Path, changerail_root: Path, aggregator_root: Path | None) -> Check:
     path = project / rel_path
     if not path.exists() and not path.is_symlink():
         return Check(rel_path, False, "missing")
@@ -110,7 +116,7 @@ def check_symlink(project: Path, rel_path: str, expected: Path, opsx_root: Path,
         resolved = path.resolve(strict=True)
     except OSError as exc:
         return Check(rel_path, False, f"broken symlink: {exc}")
-    ok, message = accepted_target(resolved, expected, opsx_root, aggregator_root)
+    ok, message = accepted_target(resolved, expected, changerail_root, aggregator_root)
     return Check(rel_path, ok, message)
 
 
@@ -197,20 +203,34 @@ def check_openspec_validate(project: Path) -> Check:
     return Check("bin/openspec validate --all --strict", True, "OpenSpec validation passed")
 
 
-def check_schemas_and_helper(project: Path, opsx_root: Path, aggregator_root: Path | None) -> list[Check]:
+def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     checks = [
         check_symlink(
             project,
-            "bin/opsx-review-verdict",
-            opsx_root / "bin" / "opsx-review-verdict",
-            opsx_root,
+            "bin/changerail-review-verdict",
+            changerail_root / "bin" / "changerail-review-verdict",
+            changerail_root,
             aggregator_root,
         )
     ]
     for schema in SCHEMAS:
-        path = opsx_root / "schemas" / schema
-        checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from OPSX root" if path.is_file() else "missing"))
+        path = changerail_root / "schemas" / schema
+        checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from ChangeRail root" if path.is_file() else "missing"))
     return checks
+
+
+def check_no_stale_opsx_wiring(project: Path) -> Check:
+    stale = [rel for rel in STALE_OPSX_PATHS if (project / rel).exists() or (project / rel).is_symlink()]
+    codex_skills = project / ".codex" / "skills"
+    if codex_skills.is_dir():
+        stale.extend(
+            str(path.relative_to(project))
+            for path in sorted(codex_skills.glob("opsx-*"), key=lambda item: item.name)
+            if path.exists() or path.is_symlink()
+        )
+    if stale:
+        return Check("stale OPSX wiring", False, "stale paths present: " + ", ".join(stale))
+    return Check("stale OPSX wiring", True, "no stale OPSX command, skill or helper defaults")
 
 
 def check_gitignore(project: Path) -> Check:
@@ -257,25 +277,25 @@ def check_tracked_runtime(project: Path) -> Check:
     return Check("tracked runtime/auth files", True, "no tracked runtime/auth files")
 
 
-def build_checks(project: Path, opsx_root: Path, aggregator_root: Path | None) -> list[Check]:
-    skills = skill_names(opsx_root)
+def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
+    skills = skill_names(changerail_root)
     checks: list[Check] = [
         Check("project root", project.is_dir(), str(project)),
-        check_symlink(project, ".claude/skills", opsx_root / "skills", opsx_root, aggregator_root),
-        check_symlink(project, ".claude/commands/opsx", opsx_root / "claude" / "commands" / "opsx", opsx_root, aggregator_root),
-        check_symlink(project, "bin/openspec", opsx_root / "bin" / "openspec", opsx_root, aggregator_root),
+        check_symlink(project, ".claude/skills", changerail_root / "skills", changerail_root, aggregator_root),
+        check_symlink(project, ".claude/commands/changerail", changerail_root / "claude" / "commands" / "changerail", changerail_root, aggregator_root),
+        check_symlink(project, "bin/openspec", changerail_root / "bin" / "openspec", changerail_root, aggregator_root),
     ]
     for skill in skills:
         checks.append(
             check_symlink(
                 project,
                 f".codex/skills/{skill}",
-                opsx_root / "skills" / skill,
-                opsx_root,
+                changerail_root / "skills" / skill,
+                changerail_root,
                 aggregator_root,
             )
         )
-    checks.extend(check_schemas_and_helper(project, opsx_root, aggregator_root))
+    checks.extend(check_schemas_and_helper(project, changerail_root, aggregator_root))
     checks.extend(
         [
             check_mcp(project),
@@ -284,15 +304,16 @@ def build_checks(project: Path, opsx_root: Path, aggregator_root: Path | None) -
             check_openspec_validate(project),
             check_gitignore(project),
             check_tracked_runtime(project),
+            check_no_stale_opsx_wiring(project),
         ]
     )
     return checks
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify an OPSX consumer project.")
+    parser = argparse.ArgumentParser(description="Verify a ChangeRail consumer project.")
     parser.add_argument("path", type=Path, help="Consumer project path.")
-    parser.add_argument("--opsx-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--changerail-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--aggregator-root", type=Path, default=None)
     parser.add_argument("--json", action="store_true", help="Emit JSON report.")
     return parser.parse_args(argv)
@@ -301,9 +322,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     project = args.path.resolve()
-    opsx_root = args.opsx_root.resolve()
+    changerail_root = args.changerail_root.resolve()
     aggregator_root = args.aggregator_root.resolve() if args.aggregator_root else None
-    checks = build_checks(project, opsx_root, aggregator_root)
+    checks = build_checks(project, changerail_root, aggregator_root)
     failed = [check for check in checks if not check.ok]
 
     if args.json:
@@ -311,7 +332,7 @@ def main(argv: list[str]) -> int:
             json.dumps(
                 {
                     "project": str(project),
-                    "opsx_root": str(opsx_root),
+                    "changerail_root": str(changerail_root),
                     "aggregator_root": str(aggregator_root) if aggregator_root else None,
                     "summary": {
                         "status": "fail" if failed else "pass",

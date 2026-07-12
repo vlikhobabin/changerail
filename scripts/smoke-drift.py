@@ -13,20 +13,23 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA = "opsx.drift-gate.v1"
-GREEN_CLASSES = {"opsx_source", "explicitly_excluded"}
-OPSX_LIKE_PATHS = (
+SCHEMA = "changerail.drift-gate.v1"
+GREEN_CLASSES = {"changerail_source", "explicitly_excluded"}
+CHANGERAIL_LIKE_PATHS = (
     "AGENTS.md",
     "openspec",
     ".claude",
     ".codex",
     "bin/openspec",
+    "bin/changerail-review-verdict",
     "bin/opsx-review-verdict",
 )
 SYMLINK_PATHS = (
     ".claude/skills",
+    ".claude/commands/changerail",
     ".claude/commands/opsx",
     "bin/openspec",
+    "bin/changerail-review-verdict",
     "bin/opsx-review-verdict",
 )
 
@@ -209,7 +212,7 @@ def is_relative_to(path: Path, parent: Path) -> bool:
 
 def existing_indicators(project: Path) -> list[str]:
     found: list[str] = []
-    for rel in OPSX_LIKE_PATHS:
+    for rel in CHANGERAIL_LIKE_PATHS:
         path = project / rel
         if path.exists() or path.is_symlink():
             found.append(rel)
@@ -247,17 +250,17 @@ def legacy_symlinks(project: Path, legacy_roots: Iterable[Path]) -> list[dict[st
     return matches
 
 
-def run_verify(project: Path, opsx_root: Path) -> tuple[int, dict[str, object] | None, str]:
+def run_verify(project: Path, changerail_root: Path) -> tuple[int, dict[str, object] | None, str]:
     try:
         result = subprocess.run(
             [
-                str(opsx_root / "bin" / "verify-project"),
+                str(changerail_root / "bin" / "verify-project"),
                 str(project),
-                "--opsx-root",
-                str(opsx_root),
+                "--changerail-root",
+                str(changerail_root),
                 "--json",
             ],
-            cwd=opsx_root,
+            cwd=changerail_root,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -287,7 +290,7 @@ def classify_project(
     project: Path,
     excludes: dict[str, str | None],
     legacy_roots: list[Path],
-    opsx_root: Path,
+    changerail_root: Path,
 ) -> ProjectResult:
     key = resolved_key(project)
     indicators = existing_indicators(project)
@@ -295,7 +298,7 @@ def classify_project(
     indicator_data: dict[str, object] = {
         "exists": project.exists(),
         "is_dir": project.is_dir(),
-        "opsx_like_paths": indicators,
+        "changerail_like_paths": indicators,
         "symlinks": symlinks,
     }
 
@@ -325,13 +328,13 @@ def classify_project(
             indicators=indicator_data,
         )
 
-    verify_code, verify_data, verify_output = run_verify(project, opsx_root)
+    verify_code, verify_data, verify_output = run_verify(project, changerail_root)
     verify_summary = summarize_verify(verify_data, verify_output)
     if verify_code == 0:
         return ProjectResult(
             name=project.name,
             path=key,
-            class_="opsx_source",
+            class_="changerail_source",
             status="pass",
             message="verify-project passed",
             excluded=False,
@@ -361,7 +364,7 @@ def classify_project(
             path=key,
             class_="broken_wiring",
             status="fail",
-            message="OPSX-like files are present but verify-project failed",
+            message="ChangeRail-like files are present but verify-project failed",
             excluded=False,
             exclude_reason=None,
             verify_summary=verify_summary,
@@ -373,7 +376,7 @@ def classify_project(
         path=key,
         class_="disconnected",
         status="fail",
-        message="no OPSX indicators were found",
+        message="no ChangeRail indicators were found",
         excluded=False,
         exclude_reason=None,
         verify_summary=verify_summary,
@@ -401,7 +404,7 @@ def summarize(results: list[ProjectResult], errors: list[str]) -> dict[str, obje
 def build_report(
     *,
     run_id: str,
-    opsx_root: Path,
+    changerail_root: Path,
     config_source: str,
     projects: list[Path],
     excludes: dict[str, str | None],
@@ -409,13 +412,13 @@ def build_report(
     errors: list[str],
 ) -> dict[str, object]:
     results = [
-        classify_project(project=project, excludes=excludes, legacy_roots=legacy_roots, opsx_root=opsx_root)
+        classify_project(project=project, excludes=excludes, legacy_roots=legacy_roots, changerail_root=changerail_root)
         for project in projects
     ]
     return {
         "schema": SCHEMA,
         "run_id": run_id,
-        "opsx_root": str(opsx_root),
+        "changerail_root": str(changerail_root),
         "config_source": config_source,
         "summary": summarize(results, errors),
         "errors": errors,
@@ -424,9 +427,9 @@ def build_report(
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run OPSX workspace drift smoke checks.")
+    parser = argparse.ArgumentParser(description="Run ChangeRail workspace drift smoke checks.")
     parser.add_argument("--config", type=Path, default=None, help="JSON inventory config, often under internal/.")
-    parser.add_argument("--opsx-root", type=Path, default=repo_root_from_script(), help="OPSX repository root.")
+    parser.add_argument("--changerail-root", type=Path, default=repo_root_from_script(), help="ChangeRail repository root.")
     parser.add_argument("--runtime-root", type=Path, default=None, help="Runtime output root.")
     parser.add_argument("--run-id", default=utc_run_id(), help="Run id used under runtime output root.")
     parser.add_argument("--report", type=Path, default=None, help="Explicit report path.")
@@ -439,15 +442,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    opsx_root = args.opsx_root.resolve(strict=False)
-    runtime_root = args.runtime_root or opsx_root / ".runtime" / "opsx" / "drift-smoke"
+    changerail_root = args.changerail_root.resolve(strict=False)
+    runtime_root = args.runtime_root or changerail_root / ".runtime" / "changerail" / "drift-smoke"
     run_dir = runtime_root / args.run_id
     report_path = args.report or run_dir / "report.json"
 
     projects, excludes, legacy_roots, config_source, errors = collect_inventory(args)
     report = build_report(
         run_id=args.run_id,
-        opsx_root=opsx_root,
+        changerail_root=changerail_root,
         config_source=config_source,
         projects=projects,
         excludes=excludes,

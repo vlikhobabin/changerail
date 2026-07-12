@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke checks for OPSX delivery metrics."""
+"""Smoke checks for ChangeRail delivery metrics."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-METRICS = ROOT / "bin" / "opsx-delivery-metrics"
+METRICS = ROOT / "bin" / "changerail-delivery-metrics"
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -31,10 +31,10 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def run_record(run_id: str, card_id: str, result: str, usage: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema": "opsx.delivery-run.v1",
+        "schema": "changerail.delivery-run.v1",
         "run_id": run_id,
         "updated_at": "2026-07-11T00:00:10Z",
-        "workspace": {"root": "/opt/opsx"},
+        "workspace": {"root": "/opt/changerail"},
         "card": {"id": card_id, "path": f"openspec/board/3.inprogress/{card_id}.md"},
         "phase": "terminal",
         "result": result,
@@ -47,16 +47,16 @@ def run_record(run_id: str, card_id: str, result: str, usage: dict[str, Any]) ->
 
 def history(card_id: str, cycles: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "schema": "opsx.review-cycle-history.v1",
+        "schema": "changerail.review-cycle-history.v1",
         "updated_at": "2026-07-11T00:00:20Z",
-        "workspace": {"root": "/opt/opsx"},
+        "workspace": {"root": "/opt/changerail"},
         "card": {"id": card_id, "path": f"openspec/board/3.inprogress/{card_id}.md"},
         "cycles": cycles,
     }
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="opsx-delivery-metrics-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="changerail-delivery-metrics-") as tmp:
         root = Path(tmp)
         runs = root / "runs"
         reviews = root / "reviews"
@@ -82,8 +82,8 @@ def main() -> int:
                         "review_cycle": 1,
                         "result": "no-go",
                         "reviewed_at": "2026-07-11T00:00:11Z",
-                        "verdict_path": ".runtime/opsx/reviews/card-a.json",
-                        "verdict_snapshot_path": ".runtime/opsx/reviews/card-a.cycle-1.json",
+                        "verdict_path": ".runtime/changerail/reviews/card-a.json",
+                        "verdict_snapshot_path": ".runtime/changerail/reviews/card-a.cycle-1.json",
                         "findings": {"blocker": 1, "major": 1, "minor": 0},
                         "finding_details": [
                             {
@@ -91,7 +91,7 @@ def main() -> int:
                                 "severity": "blocker",
                                 "summary": "workspace not honored",
                                 "detail": "child process ran outside the requested workspace",
-                                "paths": ["bin/opsx-delivery-runner"],
+                                "paths": ["bin/changerail-delivery-runner"],
                             },
                             {
                                 "id": "R2",
@@ -105,7 +105,7 @@ def main() -> int:
                         "review_cycle": 2,
                         "result": "go",
                         "reviewed_at": "2026-07-11T00:00:19Z",
-                        "verdict_path": ".runtime/opsx/reviews/card-a.json",
+                        "verdict_path": ".runtime/changerail/reviews/card-a.json",
                         "findings": {"blocker": 0, "major": 0, "minor": 1},
                         "finding_details": [
                             {
@@ -128,7 +128,7 @@ def main() -> int:
                         "review_cycle": 1,
                         "result": "go",
                         "reviewed_at": "2026-07-11T00:00:12Z",
-                        "verdict_path": ".runtime/opsx/reviews/card-b.json",
+                        "verdict_path": ".runtime/changerail/reviews/card-b.json",
                         "findings": {"blocker": 0, "major": 0, "minor": 0},
                         "finding_details": [],
                         "acceptance": {"pass": 1, "fail": 0, "unverifiable": 0, "not_applicable": 0},

@@ -10,12 +10,12 @@ apps = true
 responses_websockets = false
 responses_websockets_v2 = false
 
-[projects."/opt/opsx"]
+[projects."/opt/changerail"]
 trust_level = "trusted"
 
 [mcp_servers.filesystem]
 command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/opt/opsx"]
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/opt/changerail"]
 startup_timeout_sec = 60
 enabled = true
 

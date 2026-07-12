@@ -5,14 +5,14 @@ context: |
   Project: {{PROJECT_NAME}}
   Kind: {{PROJECT_KIND}}
 
-  This project is an OPSX consumer. Reusable OPSX methodology, skills, command
-  wrappers, schemas and helper wrappers are sourced from {{OPSX_ROOT}}.
+  This project is a ChangeRail consumer. Reusable ChangeRail methodology, skills, command
+  wrappers, schemas and helper wrappers are sourced from {{CHANGERAIL_ROOT}}.
   Project-specific code, board cards, OpenSpec changes, runtime policy and
   verification remain local to this repository.
 
 rules:
   proposal:
-    - Describe whether the change affects project code, local OPSX wiring, docs,
+    - Describe whether the change affects project code, local ChangeRail wiring, docs,
       runtime policy or verification.
     - Keep public examples generic unless project owners explicitly document a
       private repository policy.

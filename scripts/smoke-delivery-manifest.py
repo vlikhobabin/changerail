@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke checks for OPSX delivery manifest staging operations."""
+"""Smoke checks for ChangeRail delivery manifest staging operations."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-HELPER = ROOT / "scripts" / "opsx_delivery_manifest.py"
+HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -28,9 +28,9 @@ def require_ok(result: subprocess.CompletedProcess[str], label: str) -> None:
 
 def manifest_payload() -> dict[str, Any]:
     return {
-        "schema": "opsx.delivery-manifest.v1",
+        "schema": "changerail.delivery-manifest.v1",
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "workspace": {"root": "/opt/opsx", "repository": "opsx"},
+        "workspace": {"root": "/opt/changerail", "repository": "changerail"},
         "card": {
             "id": "harden-delivery-operations",
             "path": "openspec/board/3.inprogress/harden-delivery-operations.md",
@@ -67,7 +67,7 @@ def manifest_payload() -> dict[str, Any]:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="opsx-manifest-smoke-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="changerail-manifest-smoke-") as tmp:
         path = Path(tmp) / "manifest.json"
         path.write_text(json.dumps(manifest_payload(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

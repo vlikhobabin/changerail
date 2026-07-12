@@ -14,14 +14,14 @@ from pathlib import Path
 from typing import Iterable
 
 
-SCHEMA = "opsx.wiring-discovery-smoke.v1"
+SCHEMA = "changerail.wiring-discovery-smoke.v1"
 SKILLS = (
-    "opsx-explore",
-    "opsx-ff",
-    "opsx-do",
-    "opsx-review",
-    "opsx-pub",
-    "opsx-deliver",
+    "changerail-explore",
+    "changerail-ff",
+    "changerail-do",
+    "changerail-review",
+    "changerail-pub",
+    "changerail-deliver",
     "openspec-apply-change",
     "openspec-archive-change",
     "openspec-bulk-archive-change",
@@ -35,12 +35,12 @@ SKILLS = (
     "openspec-verify-change",
 )
 COMMANDS = {
-    "explore": "opsx-explore",
-    "ff": "opsx-ff",
-    "do": "opsx-do",
-    "review": "opsx-review",
-    "pub": "opsx-pub",
-    "deliver": "opsx-deliver",
+    "explore": "changerail-explore",
+    "ff": "changerail-ff",
+    "do": "changerail-do",
+    "review": "changerail-review",
+    "pub": "changerail-pub",
+    "deliver": "changerail-deliver",
 }
 FORBIDDEN_CONSUMER_ROOT_SKILLS = re.compile(r"(^|[\s`'\"])(\./)?skills/")
 
@@ -99,7 +99,7 @@ def check_symlink(
     name: str,
     path: Path,
     expected_target: Path,
-    opsx_root: Path,
+    changerail_root: Path,
     mode: str,
     surface: str,
     require_relative_link: bool,
@@ -116,15 +116,15 @@ def check_symlink(
         failures.append(f"path is not resolvable: {resolved_error}")
     if expected_resolved and resolved and resolved != expected_resolved:
         failures.append("resolved target differs from expected target")
-    if resolved and not is_relative_to(resolved, opsx_root):
-        failures.append("resolved target is outside opsx_root")
+    if resolved and not is_relative_to(resolved, changerail_root):
+        failures.append("resolved target is outside changerail_root")
     if require_relative_link and path.is_symlink():
         raw_target = os.readlink(path)
         if Path(raw_target).is_absolute():
             failures.append("repo-local symlink target is absolute")
 
     status = "fail" if failures else "pass"
-    message = "; ".join(failures) if failures else "symlink resolves to expected OPSX source"
+    message = "; ".join(failures) if failures else "symlink resolves to expected ChangeRail source"
     return Check(
         name=name,
         path=str(path),
@@ -210,7 +210,7 @@ def check_command_wrapper(
             failures.append(f"command wrapper cannot be read: {exc}")
 
     if text:
-        slash = f"/opsx:{command_name}"
+        slash = f"/changerail:{command_name}"
         if expected_skill not in text:
             failures.append(f"wrapper does not mention {expected_skill}")
         if slash not in text:
@@ -221,7 +221,7 @@ def check_command_wrapper(
     status = "fail" if failures else "pass"
     message = "; ".join(failures) if failures else "wrapper references expected skill without root skills/ path"
     return Check(
-        name=f"claude {mode} /opsx:{command_name} wrapper contract",
+        name=f"claude {mode} /changerail:{command_name} wrapper contract",
         path=str(command_file),
         expected_target=str(expected_source),
         resolved_target=str(resolved or ""),
@@ -242,38 +242,38 @@ def symlink_force(target: Path, link_path: Path) -> None:
     os.symlink(target, link_path)
 
 
-def create_consumer_example(run_dir: Path, opsx_root: Path) -> Path:
+def create_consumer_example(run_dir: Path, changerail_root: Path) -> Path:
     project = run_dir / "example-project"
     if project.exists():
         shutil.rmtree(project)
     project.mkdir(parents=True)
 
-    symlink_force(opsx_root / "skills", project / ".claude" / "skills")
-    symlink_force(opsx_root / "claude" / "commands" / "opsx", project / ".claude" / "commands" / "opsx")
+    symlink_force(changerail_root / "skills", project / ".claude" / "skills")
+    symlink_force(changerail_root / "claude" / "commands" / "changerail", project / ".claude" / "commands" / "changerail")
     for skill in SKILLS:
-        symlink_force(opsx_root / "skills" / skill, project / ".codex" / "skills" / skill)
+        symlink_force(changerail_root / "skills" / skill, project / ".codex" / "skills" / skill)
     return project
 
 
-def base_for_mode(mode: str, run_dir: Path, opsx_root: Path) -> Path:
+def base_for_mode(mode: str, run_dir: Path, changerail_root: Path) -> Path:
     if mode == "repo-local":
-        return opsx_root
+        return changerail_root
     if mode == "consumer-example":
-        return create_consumer_example(run_dir, opsx_root)
+        return create_consumer_example(run_dir, changerail_root)
     raise ValueError(f"unsupported mode: {mode}")
 
 
-def claude_checks(mode: str, base: Path, opsx_root: Path) -> list[Check]:
+def claude_checks(mode: str, base: Path, changerail_root: Path) -> list[Check]:
     checks: list[Check] = []
     require_relative = mode == "repo-local"
     skills_dir = base / ".claude" / "skills"
-    commands_dir = base / ".claude" / "commands" / "opsx"
+    commands_dir = base / ".claude" / "commands" / "changerail"
     checks.append(
         check_symlink(
             name=f"claude {mode} skills directory",
             path=skills_dir,
-            expected_target=opsx_root / "skills",
-            opsx_root=opsx_root,
+            expected_target=changerail_root / "skills",
+            changerail_root=changerail_root,
             mode=mode,
             surface="claude",
             require_relative_link=require_relative,
@@ -283,8 +283,8 @@ def claude_checks(mode: str, base: Path, opsx_root: Path) -> list[Check]:
         check_symlink(
             name=f"claude {mode} commands directory",
             path=commands_dir,
-            expected_target=opsx_root / "claude" / "commands" / "opsx",
-            opsx_root=opsx_root,
+            expected_target=changerail_root / "claude" / "commands" / "changerail",
+            changerail_root=changerail_root,
             mode=mode,
             surface="claude",
             require_relative_link=require_relative,
@@ -295,7 +295,7 @@ def claude_checks(mode: str, base: Path, opsx_root: Path) -> list[Check]:
             check_skill_contract(
                 skill_path=skills_dir / skill,
                 expected_name=skill,
-                expected_source=opsx_root / "skills" / skill,
+                expected_source=changerail_root / "skills" / skill,
                 mode=mode,
                 surface="claude",
             )
@@ -306,7 +306,7 @@ def claude_checks(mode: str, base: Path, opsx_root: Path) -> list[Check]:
                 command_file=commands_dir / f"{command_name}.md",
                 command_name=command_name,
                 expected_skill=skill,
-                expected_source=opsx_root / "claude" / "commands" / "opsx" / f"{command_name}.md",
+                expected_source=changerail_root / "claude" / "commands" / "changerail" / f"{command_name}.md",
                 mode=mode,
                 surface="claude",
             )
@@ -314,18 +314,18 @@ def claude_checks(mode: str, base: Path, opsx_root: Path) -> list[Check]:
     return checks
 
 
-def codex_checks(mode: str, base: Path, opsx_root: Path) -> list[Check]:
+def codex_checks(mode: str, base: Path, changerail_root: Path) -> list[Check]:
     checks: list[Check] = []
     require_relative = mode == "repo-local"
     for skill in SKILLS:
         skill_path = base / ".codex" / "skills" / skill
-        source_path = opsx_root / "skills" / skill
+        source_path = changerail_root / "skills" / skill
         checks.append(
             check_symlink(
                 name=f"codex {mode} {skill} skill directory",
                 path=skill_path,
                 expected_target=source_path,
-                opsx_root=opsx_root,
+                changerail_root=changerail_root,
                 mode=mode,
                 surface="codex",
                 require_relative_link=require_relative,
@@ -355,25 +355,25 @@ def summarize(checks: Iterable[Check]) -> dict[str, int | str]:
     }
 
 
-def build_report(run_id: str, opsx_root: Path, run_dir: Path, modes: list[str], surfaces: list[str]) -> dict[str, object]:
+def build_report(run_id: str, changerail_root: Path, run_dir: Path, modes: list[str], surfaces: list[str]) -> dict[str, object]:
     runs: list[dict[str, object]] = []
     all_checks: list[Check] = []
 
     consumer_base: Path | None = None
     for mode in modes:
         if mode == "consumer-example":
-            consumer_base = create_consumer_example(run_dir, opsx_root)
+            consumer_base = create_consumer_example(run_dir, changerail_root)
             break
 
     for mode in modes:
-        base = opsx_root if mode == "repo-local" else consumer_base
+        base = changerail_root if mode == "repo-local" else consumer_base
         if base is None:
-            base = base_for_mode(mode, run_dir, opsx_root)
+            base = base_for_mode(mode, run_dir, changerail_root)
         for surface in surfaces:
             if surface == "claude":
-                checks = claude_checks(mode, base, opsx_root)
+                checks = claude_checks(mode, base, changerail_root)
             elif surface == "codex":
-                checks = codex_checks(mode, base, opsx_root)
+                checks = codex_checks(mode, base, changerail_root)
             else:
                 raise ValueError(f"unsupported surface: {surface}")
             all_checks.extend(checks)
@@ -389,7 +389,7 @@ def build_report(run_id: str, opsx_root: Path, run_dir: Path, modes: list[str], 
     return {
         "schema": SCHEMA,
         "run_id": run_id,
-        "opsx_root": str(opsx_root),
+        "changerail_root": str(changerail_root),
         "report_kind": "aggregate",
         "modes": modes,
         "surfaces": surfaces,
@@ -400,8 +400,8 @@ def build_report(run_id: str, opsx_root: Path, run_dir: Path, modes: list[str], 
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run OPSX wiring discovery smoke checks.")
-    parser.add_argument("--opsx-root", type=Path, default=repo_root_from_script(), help="OPSX repository root.")
+    parser = argparse.ArgumentParser(description="Run ChangeRail wiring discovery smoke checks.")
+    parser.add_argument("--changerail-root", type=Path, default=repo_root_from_script(), help="ChangeRail repository root.")
     parser.add_argument("--runtime-root", type=Path, default=None, help="Runtime output root.")
     parser.add_argument("--run-id", default=utc_run_id(), help="Run id used under runtime output root.")
     parser.add_argument("--report", type=Path, default=None, help="Explicit report path.")
@@ -422,15 +422,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    opsx_root = args.opsx_root.resolve()
-    runtime_root = args.runtime_root or opsx_root / ".runtime" / "opsx" / "wiring-smoke"
+    changerail_root = args.changerail_root.resolve()
+    runtime_root = args.runtime_root or changerail_root / ".runtime" / "changerail" / "wiring-smoke"
     run_dir = runtime_root / args.run_id
     report_path = args.report or run_dir / "report.json"
     modes = expand_selected(args.mode, ("repo-local", "consumer-example"))
     surfaces = expand_selected(args.surface, ("claude", "codex"))
 
     run_dir.mkdir(parents=True, exist_ok=True)
-    report = build_report(args.run_id, opsx_root, run_dir, modes, surfaces)
+    report = build_report(args.run_id, changerail_root, run_dir, modes, surfaces)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

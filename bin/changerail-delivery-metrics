@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""Report ChangeRail delivery metrics from structured runtime records."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+RUN_SCHEMA = "changerail.delivery-run.v1"
+HISTORY_SCHEMA = "changerail.review-cycle-history.v1"
+SEVERITIES = ("blocker", "major", "minor")
+ACCEPTANCE = ("pass", "fail", "unverifiable", "not_applicable")
+UNKNOWN = "unknown"
+
+
+def repo_root_from_script() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def seconds_between(start: object, end: object) -> str:
+    started = parse_time(start)
+    ended = parse_time(end)
+    if not started or not ended:
+        return UNKNOWN
+    return str(int((ended - started).total_seconds()))
+
+
+def collect_runs(runs_dir: Path) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    for path in sorted(runs_dir.glob("*/status.json")):
+        data = load_json(path)
+        if data and data.get("schema") == RUN_SCHEMA:
+            data["_path"] = str(path)
+            runs.append(data)
+    return runs
+
+
+def collect_histories(reviews_dir: Path) -> dict[str, dict[str, Any]]:
+    histories: dict[str, dict[str, Any]] = {}
+    for path in sorted(reviews_dir.glob("*.history.json")):
+        data = load_json(path)
+        if not data or data.get("schema") != HISTORY_SCHEMA:
+            continue
+        card = data.get("card")
+        if isinstance(card, dict) and isinstance(card.get("id"), str):
+            data["_path"] = str(path)
+            histories[card["id"]] = data
+    return histories
+
+
+def summarize_history(history: dict[str, Any] | None) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "review_cycles": UNKNOWN,
+        "first_review_result": UNKNOWN,
+        "latest_review_result": UNKNOWN,
+        "first_pass_go": UNKNOWN,
+        "finding_ids": UNKNOWN,
+    }
+    for severity in SEVERITIES:
+        summary[f"findings_{severity}"] = 0
+    for verdict in ACCEPTANCE:
+        summary[f"acceptance_{verdict}"] = 0
+    if not history:
+        for severity in SEVERITIES:
+            summary[f"findings_{severity}"] = UNKNOWN
+        for verdict in ACCEPTANCE:
+            summary[f"acceptance_{verdict}"] = UNKNOWN
+        return summary
+    cycles = history.get("cycles")
+    if not isinstance(cycles, list) or not cycles:
+        return summary
+    summary["review_cycles"] = len(cycles)
+    first = cycles[0]
+    latest = cycles[-1]
+    summary["first_review_result"] = first.get("result", UNKNOWN)
+    summary["latest_review_result"] = latest.get("result", UNKNOWN)
+    summary["first_pass_go"] = "yes" if first.get("result") == "go" else "no"
+    finding_ids: list[str] = []
+    for cycle in cycles:
+        findings = cycle.get("findings", {}) if isinstance(cycle, dict) else {}
+        acceptance = cycle.get("acceptance", {}) if isinstance(cycle, dict) else {}
+        details = cycle.get("finding_details", []) if isinstance(cycle, dict) else []
+        if isinstance(details, list):
+            for finding in details:
+                if isinstance(finding, dict) and isinstance(finding.get("id"), str):
+                    finding_ids.append(finding["id"])
+        for severity in SEVERITIES:
+            value = findings.get(severity, 0) if isinstance(findings, dict) else 0
+            summary[f"findings_{severity}"] += value if isinstance(value, int) else 0
+        for verdict in ACCEPTANCE:
+            value = acceptance.get(verdict, 0) if isinstance(acceptance, dict) else 0
+            summary[f"acceptance_{verdict}"] += value if isinstance(value, int) else 0
+    summary["finding_ids"] = ";".join(finding_ids)
+    return summary
+
+
+def usage_value(run: dict[str, Any], key: str) -> str:
+    usage = run.get("usage")
+    if not isinstance(usage, dict) or not usage.get("available"):
+        return UNKNOWN
+    value = usage.get(key)
+    return str(value) if isinstance(value, int) else UNKNOWN
+
+
+def row_for_run(run: dict[str, Any], history: dict[str, Any] | None) -> dict[str, Any]:
+    card = run.get("card") if isinstance(run.get("card"), dict) else {}
+    timestamps = run.get("timestamps") if isinstance(run.get("timestamps"), dict) else {}
+    row = {
+        "run_id": run.get("run_id", UNKNOWN),
+        "card_id": card.get("id", UNKNOWN),
+        "result": run.get("result", UNKNOWN),
+        "wall_time_seconds": seconds_between(timestamps.get("started_at"), timestamps.get("ended_at")),
+        "input_tokens": usage_value(run, "input_tokens"),
+        "output_tokens": usage_value(run, "output_tokens"),
+        "total_tokens": usage_value(run, "total_tokens"),
+    }
+    row.update(summarize_history(history))
+    return row
+
+
+def rows_and_aggregate(runs: list[dict[str, Any]], histories: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    rows = []
+    for run in runs:
+        card = run.get("card") if isinstance(run.get("card"), dict) else {}
+        card_id = card.get("id") if isinstance(card.get("id"), str) else ""
+        rows.append(row_for_run(run, histories.get(card_id)))
+    aggregate: dict[str, Any] = {
+        "runs": len(rows),
+        "delivered": sum(1 for row in rows if row["result"] == "DELIVERED"),
+        "blocked": sum(1 for row in rows if row["result"] == "BLOCKED"),
+        "no_go": sum(1 for row in rows if row["result"] == "NO-GO"),
+    }
+    known_first = [row for row in rows if row["first_pass_go"] != UNKNOWN]
+    if known_first:
+        passed = sum(1 for row in known_first if row["first_pass_go"] == "yes")
+        aggregate["first_pass_go_rate"] = f"{passed}/{len(known_first)}"
+    else:
+        aggregate["first_pass_go_rate"] = UNKNOWN
+    for severity in SEVERITIES:
+        values = [row[f"findings_{severity}"] for row in rows if row[f"findings_{severity}"] != UNKNOWN]
+        aggregate[f"findings_{severity}"] = sum(int(value) for value in values) if values else UNKNOWN
+    return rows, aggregate
+
+
+def print_text(rows: list[dict[str, Any]], aggregate: dict[str, Any]) -> None:
+    print("per-run:")
+    for row in rows:
+        print(
+            f"- {row['run_id']} card={row['card_id']} result={row['result']} "
+            f"first_review={row['first_review_result']} latest_review={row['latest_review_result']} "
+            f"wall_time_seconds={row['wall_time_seconds']} total_tokens={row['total_tokens']} "
+            f"finding_ids={row['finding_ids']}"
+        )
+    print("aggregate:")
+    for key in sorted(aggregate):
+        print(f"- {key}: {aggregate[key]}")
+
+
+def print_csv(rows: list[dict[str, Any]]) -> None:
+    fields = [
+        "run_id",
+        "card_id",
+        "result",
+        "wall_time_seconds",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "review_cycles",
+        "first_review_result",
+        "latest_review_result",
+        "first_pass_go",
+        "findings_blocker",
+        "findings_major",
+        "findings_minor",
+        "finding_ids",
+        "acceptance_pass",
+        "acceptance_fail",
+        "acceptance_unverifiable",
+        "acceptance_not_applicable",
+    ]
+    writer = csv.DictWriter(sys.stdout, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    root = repo_root_from_script()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runs-dir", type=Path, default=root / ".runtime" / "changerail" / "delivery-runs")
+    parser.add_argument("--reviews-dir", type=Path, default=root / ".runtime" / "changerail" / "reviews")
+    parser.add_argument("--csv", action="store_true", help="emit per-run CSV")
+    parser.add_argument("--json", action="store_true", help="emit rows and aggregate as JSON")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+    rows, aggregate = rows_and_aggregate(collect_runs(args.runs_dir), collect_histories(args.reviews_dir))
+    if args.csv:
+        print_csv(rows)
+    elif args.json:
+        print(json.dumps({"rows": rows, "aggregate": aggregate}, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print_text(rows, aggregate)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

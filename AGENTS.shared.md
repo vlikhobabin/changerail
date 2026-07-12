@@ -1,12 +1,12 @@
-# Общая методология OPSX для агентов
+# Общая методология ChangeRail для агентов
 
-Этот файл задает переиспользуемый workflow OPSX для AI-агентов и
+Этот файл задает переиспользуемый workflow ChangeRail для AI-агентов и
 сопровождающих. Проектно-специфичные правила остаются в `AGENTS.md` каждого
 потребителя.
 
 ## Область
 
-OPSX предоставляет общий процесс и toolchain для AI-assisted разработки:
+ChangeRail предоставляет общий процесс и toolchain для AI-assisted разработки:
 
 - OpenSpec-артефакты для proposal, requirements, design и tasks;
 - файловые board-карточки для story-level планирования;
@@ -21,7 +21,7 @@ runtime policy, secrets policy и domain-specific verification.
 
 ## Pipeline
 
-Стандартный delivery pipeline OPSX:
+Стандартный delivery pipeline ChangeRail:
 
 ```text
 explore -> ff -> do -> review -> pub
@@ -37,7 +37,7 @@ explore -> ff -> do -> review -> pub
   scoped commit и опубликовать результат.
 - `deliver`: выполнить supervised full flow для одной карточки или ordered batch.
 
-Для non-interactive supervised запусков OPSX может использовать tracked runner,
+Для non-interactive supervised запусков ChangeRail может использовать tracked runner,
 который пишет machine-readable status/run record в ignored runtime state.
 Supervisor должен наблюдать structured status, а не `pgrep` или свободный
 текст лога. Per-run model/effort overrides не должны менять repository defaults.
@@ -68,7 +68,7 @@ quality gate.
 `openspec/changes/<change-slug>/` и фиксирует, зачем нужен change, чего он
 должен достичь, зависимости и verification expectations.
 
-Для review-gated карточек `opsx-do` завершает implementation payload:
+Для review-gated карточек `changerail-do` завершает implementation payload:
 реализует changes, выполняет verification, синхронизирует specs и архивирует
 card-owned OpenSpec changes. Сама story при этом остается в `3.inprogress`,
 пока independent review и publish не пройдут успешно. Переход в `4.done` -
@@ -111,7 +111,7 @@ Fast-forward planning превращает board card в apply-ready changes. Х
 - делит implementation на небольшие ordered changes;
 - создает нужные OpenSpec artifacts для каждого change;
 - записывает dependencies и verification expectations;
-- держит domain-specific work вне generic OPSX core, если он явно не входит в
+- держит domain-specific work вне generic ChangeRail core, если он явно не входит в
   scope.
 
 ## Delivery
@@ -122,7 +122,7 @@ target card и change artifacts.
 
 Обязательный verification floor собирается из project-declared sources:
 `AGENTS.md`, `openspec/config.yaml`, `tasks.md`, `design.md` и затронутого
-toolchain. Generic OPSX не делает formatter, strict typing или clean/ambient
+toolchain. Generic ChangeRail не делает formatter, strict typing или clean/ambient
 environment matrix обязательными для всех проектов, если они не объявлены
 локальными правилами или не следуют из измененного surface.
 
@@ -212,33 +212,33 @@ usage, отображаются явно как unknown.
 
 ## Public Safety
 
-OPSX core публичен по умолчанию. Shared methodology и templates не должны
+ChangeRail core публичен по умолчанию. Shared methodology и templates не должны
 содержать:
 
 - private workspace или customer names;
 - secrets, tokens, keys или `.env` content;
 - local traces, dumps, screenshots, databases или runtime reports;
 - machine-local state вне documented generic examples;
-- domain-specific extension rules, выданные за generic OPSX behavior.
+- domain-specific extension rules, выданные за generic ChangeRail behavior.
 
-Используйте generic examples: `/opt/opsx`, `/opt/example-project`,
+Используйте generic examples: `/opt/changerail`, `/opt/example-project`,
 `/opt/example-a`, `/opt/example-b`.
 
 ## Generated Sections And Drift
 
 Consumer projects могут встраивать эту shared methodology в локальный
 `AGENTS.md` как generated section. Generated section должен содержать marker,
-который позволит будущему `verify-project` сравнить его с OPSX source of truth.
+который позволит будущему `verify-project` сравнить его с ChangeRail source of truth.
 
-Внешняя ссылка на `/opt/opsx/AGENTS.shared.md` полезна для людей, но embedded
+Внешняя ссылка на `/opt/changerail/AGENTS.shared.md` полезна для людей, но embedded
 generated content является default target для надежного agent context.
 
 ## Extension Boundary
 
-OPSX generic core должен оставаться отдельно от domain-specific extensions.
+ChangeRail generic core должен оставаться отдельно от domain-specific extensions.
 Domain extension может добавить extra skills, commands, verification matrices
-или runtime policies, но не должен делать generic OPSX зависимым от этого
+или runtime policies, но не должен делать generic ChangeRail зависимым от этого
 domain.
 
-Если consumer project использует и OPSX core, и extension, его project
+Если consumer project использует и ChangeRail core, и extension, его project
 `AGENTS.md` должен явно фиксировать ordering и ownership boundaries.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke checks for the OPSX non-interactive delivery runner."""
+"""Smoke checks for the ChangeRail non-interactive delivery runner."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNNER = ROOT / "bin" / "opsx-delivery-runner"
+RUNNER = ROOT / "bin" / "changerail-delivery-runner"
 CARD = "openspec/board/3.inprogress/harden-delivery-operations.md"
 
 
@@ -39,10 +39,10 @@ def run(
 
 def runner_env(mode: str | None = None) -> dict[str, str]:
     env = os.environ.copy()
-    for name in ("CODEX_HOME", "CODEX_WORKDIR", "CODEX_AUTH_TOKEN", "OPENAI_API_KEY", "OPSX_FAKE_MODE"):
+    for name in ("CODEX_HOME", "CODEX_WORKDIR", "CODEX_AUTH_TOKEN", "OPENAI_API_KEY", "CHANGERAIL_FAKE_MODE"):
         env.pop(name, None)
     if mode:
-        env["OPSX_FAKE_MODE"] = mode
+        env["CHANGERAIL_FAKE_MODE"] = mode
     return env
 
 
@@ -69,7 +69,7 @@ def create_workspace(root: Path, name: str) -> Path:
     git(["init"], workspace)
     git(["add", "README.md"], workspace)
     git(
-        ["-c", "user.name=OPSX Smoke", "-c", "user.email=opsx-smoke@example.invalid", "commit", "-m", "init"],
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "init"],
         workspace,
     )
     return workspace
@@ -87,7 +87,7 @@ def write_fake_launcher(path: Path) -> None:
                 "import json, os, sys",
                 "stdin = sys.stdin.read()",
                 "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME')}))",
-                "mode = os.environ.get('OPSX_FAKE_MODE')",
+                "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
                 "if mode == 'no-go':",
                 "    print(json.dumps({'type': 'external-review/no-go', 'data': {'result': 'no-go'}}))",
                 "if mode == 'awaiting-review':",
@@ -176,7 +176,7 @@ def check_default_workspace_run(tmp: Path) -> None:
         cwd=workspace,
     )
     require_ok(result, "runner default workspace")
-    runtime = workspace / ".runtime" / "opsx" / "delivery-runs"
+    runtime = workspace / ".runtime" / "changerail" / "delivery-runs"
     status = load_status(runtime, "default-workspace")
     if status["workspace"]["root"] != str(workspace):
         raise AssertionError(f"default workspace did not use invocation repo: {status['workspace']}")
@@ -366,7 +366,7 @@ def check_stale_symlink_preflight(tmp: Path) -> None:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix="opsx-delivery-runner-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="changerail-delivery-runner-") as tmp:
         workspace = Path(tmp)
         check_success_run(workspace)
         check_default_workspace_run(workspace)

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA = "opsx.bootstrap-project-smoke.v1"
+SCHEMA = "changerail.bootstrap-project-smoke.v1"
 
 
 @dataclass
@@ -56,35 +56,35 @@ def contains_placeholder(project: Path) -> list[str]:
     return offenders
 
 
-def check_bootstrap_success(opsx_root: Path, run_dir: Path) -> Check:
+def check_bootstrap_success(changerail_root: Path, run_dir: Path) -> Check:
     project = run_dir / "example-project"
     result = run(
         [
-            str(opsx_root / "bin" / "bootstrap-project"),
+            str(changerail_root / "bin" / "bootstrap-project"),
             str(project),
             "--name",
             "example-project",
             "--kind",
             "generic",
         ],
-        opsx_root,
+        changerail_root,
     )
     if result.returncode != 0:
         return Check("bootstrap valid project", "fail", result.stdout.strip())
     placeholders = contains_placeholder(project)
     if placeholders:
         return Check("bootstrap valid project", "fail", "raw placeholders remain: " + ", ".join(placeholders))
-    verify = run([str(opsx_root / "bin" / "verify-project"), str(project)], opsx_root)
+    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root)
     if verify.returncode != 0:
         return Check("bootstrap valid project", "fail", verify.stdout.strip())
     return Check("bootstrap valid project", "pass", "project generated and verified")
 
 
-def check_dry_run(opsx_root: Path, run_dir: Path) -> Check:
+def check_dry_run(changerail_root: Path, run_dir: Path) -> Check:
     project = run_dir / "dry-run-project"
     result = run(
         [
-            str(opsx_root / "bin" / "bootstrap-project"),
+            str(changerail_root / "bin" / "bootstrap-project"),
             str(project),
             "--name",
             "dry-run-project",
@@ -92,7 +92,7 @@ def check_dry_run(opsx_root: Path, run_dir: Path) -> Check:
             "generic",
             "--dry-run",
         ],
-        opsx_root,
+        changerail_root,
     )
     if result.returncode != 0:
         return Check("dry-run no-write", "fail", result.stdout.strip())
@@ -101,21 +101,21 @@ def check_dry_run(opsx_root: Path, run_dir: Path) -> Check:
     return Check("dry-run no-write", "pass", "dry-run printed plan and left no target")
 
 
-def check_refuse_existing(opsx_root: Path, run_dir: Path) -> Check:
+def check_refuse_existing(changerail_root: Path, run_dir: Path) -> Check:
     project = run_dir / "existing-project"
     project.mkdir(parents=True)
     marker = project / "existing.txt"
     marker.write_text("keep\n", encoding="utf-8")
     result = run(
         [
-            str(opsx_root / "bin" / "bootstrap-project"),
+            str(changerail_root / "bin" / "bootstrap-project"),
             str(project),
             "--name",
             "existing-project",
             "--kind",
             "generic",
         ],
-        opsx_root,
+        changerail_root,
     )
     if result.returncode == 0:
         return Check("refuse existing target", "fail", "bootstrap unexpectedly succeeded")
@@ -124,14 +124,14 @@ def check_refuse_existing(opsx_root: Path, run_dir: Path) -> Check:
     return Check("refuse existing target", "pass", "non-empty target refused without changes")
 
 
-def check_backup_existing(opsx_root: Path, run_dir: Path) -> Check:
+def check_backup_existing(changerail_root: Path, run_dir: Path) -> Check:
     project = run_dir / "backup-project"
     project.mkdir(parents=True)
     marker = project / "existing.txt"
     marker.write_text("backup me\n", encoding="utf-8")
     result = run(
         [
-            str(opsx_root / "bin" / "bootstrap-project"),
+            str(changerail_root / "bin" / "bootstrap-project"),
             str(project),
             "--name",
             "backup-project",
@@ -139,7 +139,7 @@ def check_backup_existing(opsx_root: Path, run_dir: Path) -> Check:
             "generic",
             "--backup-existing",
         ],
-        opsx_root,
+        changerail_root,
     )
     if result.returncode != 0:
         return Check("backup existing target", "fail", result.stdout.strip())
@@ -148,27 +148,27 @@ def check_backup_existing(opsx_root: Path, run_dir: Path) -> Check:
         return Check("backup existing target", "fail", "backup directory was not created")
     if not (backups[-1] / "existing.txt").is_file():
         return Check("backup existing target", "fail", "backup marker missing")
-    verify = run([str(opsx_root / "bin" / "verify-project"), str(project)], opsx_root)
+    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root)
     if verify.returncode != 0:
         return Check("backup existing target", "fail", verify.stdout.strip())
     return Check("backup existing target", "pass", "existing target backed up and new project verified")
 
 
-def run_smoke(opsx_root: Path, run_dir: Path) -> dict[str, object]:
+def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     if run_dir.exists():
         shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True)
     checks = [
-        check_bootstrap_success(opsx_root, run_dir),
-        check_dry_run(opsx_root, run_dir),
-        check_refuse_existing(opsx_root, run_dir),
-        check_backup_existing(opsx_root, run_dir),
+        check_bootstrap_success(changerail_root, run_dir),
+        check_dry_run(changerail_root, run_dir),
+        check_refuse_existing(changerail_root, run_dir),
+        check_backup_existing(changerail_root, run_dir),
     ]
     failed = sum(1 for check in checks if check.status != "pass")
     return {
         "schema": SCHEMA,
         "run_dir": str(run_dir),
-        "opsx_root": str(opsx_root),
+        "changerail_root": str(changerail_root),
         "summary": {
             "status": "fail" if failed else "pass",
             "total": len(checks),
@@ -181,7 +181,7 @@ def run_smoke(opsx_root: Path, run_dir: Path) -> dict[str, object]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run bootstrap-project smoke checks.")
-    parser.add_argument("--opsx-root", type=Path, default=repo_root_from_script())
+    parser.add_argument("--changerail-root", type=Path, default=repo_root_from_script())
     parser.add_argument("--runtime-root", type=Path, default=None)
     parser.add_argument("--run-id", default=utc_run_id())
     parser.add_argument("--report", type=Path, default=None)
@@ -190,12 +190,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    opsx_root = args.opsx_root.resolve()
-    runtime_root = args.runtime_root or opsx_root / ".runtime" / "opsx" / "bootstrap-smoke"
+    changerail_root = args.changerail_root.resolve()
+    runtime_root = args.runtime_root or changerail_root / ".runtime" / "changerail" / "bootstrap-smoke"
     run_dir = runtime_root / args.run_id
     report_path = args.report or run_dir / "report.json"
 
-    report = run_smoke(opsx_root, run_dir)
+    report = run_smoke(changerail_root, run_dir)
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary = report["summary"]
     print(f"report: {report_path}")
