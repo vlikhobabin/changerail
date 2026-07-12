@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "bin" / "changerail-delivery-runner"
+VERDICT_HELPER = ROOT / "scripts" / "changerail_review_verdict.py"
 CARD = "openspec/board/3.inprogress/harden-delivery-operations.md"
 
 
@@ -65,8 +67,9 @@ def create_workspace(root: Path, name: str) -> Path:
     (workspace / ".codex" / "config.toml").write_text("# smoke config\n", encoding="utf-8")
     (workspace / ".codex" / "auth.json").write_text("{}\n", encoding="utf-8")
     (workspace / "README.md").write_text("smoke workspace\n", encoding="utf-8")
+    (workspace / ".gitignore").write_text(".runtime/\n", encoding="utf-8")
     git(["init"], workspace)
-    git(["add", "README.md"], workspace)
+    git(["add", ".gitignore", "README.md"], workspace)
     git(
         ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "init"],
         workspace,
@@ -84,6 +87,10 @@ def write_fake_launcher(path: Path) -> None:
             [
                 "#!/usr/bin/env python3",
                 "import json, os, sys",
+                "call_log = os.environ.get('CHANGERAIL_FAKE_CALL_LOG')",
+                "if call_log:",
+                "    with open(call_log, 'a', encoding='utf-8') as handle:",
+                "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
                 "stdin = sys.stdin.read()",
                 "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME')}))",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
@@ -96,6 +103,8 @@ def write_fake_launcher(path: Path) -> None:
                 "if mode == 'ordered-conflict':",
                 "    print(json.dumps({'type': 'external-review/no-go'}))",
                 "    print(json.dumps({'terminal_outcome': 'delivered'}))",
+                "if mode == 'safety-stop-no-go':",
+                "    print(json.dumps({'type': 'assistant-message', 'content': 'safety stop after repeated no-go'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'output_tokens': 5, 'total_tokens': 8}}))",
                 "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
             ]
@@ -108,6 +117,96 @@ def write_fake_launcher(path: Path) -> None:
 
 def load_status(runtime_root: Path, run_id: str) -> dict[str, Any]:
     return json.loads((runtime_root / run_id / "status.json").read_text(encoding="utf-8"))
+
+
+def write_board_card(workspace: Path, card: str) -> None:
+    path = workspace / card
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "# Smoke card",
+                "",
+                "## Status",
+                "3.inprogress",
+                "",
+                "## Result",
+                "awaiting review fix",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def review_fingerprint(workspace: Path) -> dict[str, str]:
+    result = run([sys.executable, str(VERDICT_HELPER), "fingerprint", "--workspace", str(workspace)])
+    require_ok(result, "review fingerprint")
+    return json.loads(result.stdout)
+
+
+def write_no_go_verdict(workspace: Path, card: str) -> Path:
+    data = review_fingerprint(workspace)
+    card_name = Path(card).name.removesuffix(".md")
+    verdict = {
+        "schema": "changerail.review-verdict.v1",
+        "reviewed_at": "2026-07-12T00:00:00Z",
+        "card": {
+            "id": card_name,
+            "path": card,
+        },
+        "workspace": {
+            "root": data["workspace"],
+            "head_commit": data["head_commit"],
+            "diff_fingerprint": data["diff_fingerprint"],
+        },
+        "reviewer": {
+            "kind": "codex-exec",
+            "independence": {
+                "fresh_context": True,
+                "did_not_plan_or_implement": True,
+                "basis": "fresh smoke-test reviewer context",
+            },
+        },
+        "result": "no-go",
+        "review_cycle": 3,
+        "acceptance": [
+            {
+                "criterion": "published payload",
+                "verdict": "fail",
+                "evidence": "smoke fixture: card remains unpublished under 3.inprogress",
+            }
+        ],
+        "findings": [
+            {
+                "id": "R1",
+                "severity": "blocker",
+                "area": "process",
+                "summary": "publish is blocked by repeated no-go",
+            }
+        ],
+        "evidence_audit": {
+            "claims_checked": 1,
+            "claims_unbacked": 0,
+        },
+    }
+    verdict_path = workspace / ".runtime" / "changerail" / "reviews" / f"{card_name}.json"
+    verdict_path.parent.mkdir(parents=True, exist_ok=True)
+    verdict_path.write_text(json.dumps(verdict, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    validate = run(
+        [
+            sys.executable,
+            str(VERDICT_HELPER),
+            "validate",
+            str(verdict_path),
+            "--check-fresh",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ]
+    )
+    require_ok(validate, "review verdict validate")
+    return verdict_path
 
 
 def check_success_run(tmp: Path) -> None:
@@ -226,6 +325,87 @@ def check_no_go_run(tmp: Path) -> None:
         raise AssertionError(f"structured external-review/no-go should be NO-GO: {status['result']}")
     if "terminal_outcome: NO-GO" not in result.stdout:
         raise AssertionError(f"NO-GO terminal outcome was not printed: {result.stdout}")
+
+
+def check_review_no_go_fallback_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "review-no-go-fallback-workspace")
+    launcher = tmp / "fake-codex-review-no-go-fallback"
+    runtime = tmp / "runtime"
+    card = "openspec/board/3.inprogress/review-no-go-fallback.md"
+    write_fake_launcher(launcher)
+    write_board_card(workspace, card)
+    write_no_go_verdict(workspace, card)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            card,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "review-no-go-fallback",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("safety-stop-no-go"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("review no-go fallback unexpectedly returned success")
+    status = load_status(runtime, "review-no-go-fallback")
+    if status["result"] != "NO-GO" or status.get("terminal_outcome") != "NO-GO":
+        raise AssertionError(f"fresh no-go verdict fallback should be NO-GO: {status}")
+    if status.get("process", {}).get("exit_code") != 0:
+        raise AssertionError(f"fixture child should exit 0: {status}")
+    if "terminal_outcome: NO-GO" not in result.stdout:
+        raise AssertionError(f"NO-GO fallback terminal outcome was not printed: {result.stdout}")
+
+
+def check_supervisor_stops_after_fallback_no_go(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "supervisor-stop-workspace")
+    launcher = tmp / "fake-codex-supervisor-stop"
+    runtime = tmp / "runtime"
+    call_log = tmp / "supervisor-calls.jsonl"
+    first_card = "openspec/board/3.inprogress/supervisor-first.md"
+    second_card = "openspec/board/3.inprogress/supervisor-second.md"
+    write_fake_launcher(launcher)
+    write_board_card(workspace, first_card)
+    write_board_card(workspace, second_card)
+    write_no_go_verdict(workspace, first_card)
+
+    started: list[str] = []
+    for index, card in enumerate((first_card, second_card), start=1):
+        env = runner_env("safety-stop-no-go" if index == 1 else None)
+        env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+        result = run(
+            [
+                str(RUNNER),
+                "run",
+                card,
+                "--workspace",
+                str(workspace),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"supervisor-{index}",
+                "--launcher",
+                str(launcher),
+            ],
+            env=env,
+        )
+        started.append(card)
+        if result.returncode != 0:
+            break
+
+    if started != [first_card]:
+        raise AssertionError(f"supervisor should stop after first non-delivered card: {started}")
+    calls = call_log.read_text(encoding="utf-8").splitlines()
+    if len(calls) != 1:
+        raise AssertionError(f"second runner child should not start after fallback NO-GO: {calls}")
+    status = load_status(runtime, "supervisor-1")
+    if status["result"] != "NO-GO":
+        raise AssertionError(f"first card should stop batch with NO-GO: {status}")
 
 
 def check_non_terminal_error_success_run(tmp: Path) -> None:
@@ -504,6 +684,8 @@ def main() -> int:
         check_success_run(workspace)
         check_default_workspace_run(workspace)
         check_no_go_run(workspace)
+        check_review_no_go_fallback_run(workspace)
+        check_supervisor_stops_after_fallback_no_go(workspace)
         check_non_terminal_error_success_run(workspace)
         check_ordered_conflict_run(workspace)
         check_nonzero_without_outcome_run(workspace)

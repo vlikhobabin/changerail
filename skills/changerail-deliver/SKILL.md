@@ -154,6 +154,18 @@ request a fresh re-review. Default `--max-review-cycles` is `2`, allowing two
 scoped rescue attempts after the first `no-go`; a third consecutive `no-go` is
 a safety stop.
 
+When the execution surface supports machine-readable JSONL events, every
+review-gated safety stop that returns without publish must emit a documented
+terminal event instead of relying only on assistant prose:
+
+- repeated or final external review `no-go`: `external-review/no-go`
+- awaiting external review: `awaiting-review` or `awaiting-external-review`
+- other blocked publish/review gate stop: `delivery/blocked` or explicit
+  `terminal_outcome: BLOCKED`
+
+The delivery runner still checks canonical review evidence as a fail-closed
+fallback when this structured event is absent.
+
 When launching a fresh reviewer context, use this review contract as the prompt
 body and fill in the card path and id:
 

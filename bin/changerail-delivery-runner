@@ -24,6 +24,7 @@ AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
 TERMINAL_FIELD_KEYS = {"terminal_outcome", "terminal-outcome", "outcome", "result"}
+BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 
 
 @dataclass
@@ -143,6 +144,38 @@ def record_commit(record: dict[str, Any], root: Path) -> None:
 
 def card_id(card: str) -> str:
     return Path(card).name.removesuffix(".md")
+
+
+def repository_relative(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def current_card_locations(root: Path, card: str) -> list[str]:
+    filename = Path(card).name
+    seen: set[str] = set()
+    locations: list[str] = []
+    direct = root / card
+    if direct.exists():
+        relative = repository_relative(direct, root)
+        seen.add(relative)
+        locations.append(relative)
+    for column in BOARD_COLUMNS:
+        candidate = root / "openspec" / "board" / column / filename
+        if not candidate.exists():
+            continue
+        relative = repository_relative(candidate, root)
+        if relative not in seen:
+            seen.add(relative)
+            locations.append(relative)
+    return sorted(locations)
+
+
+def card_is_published(root: Path, card: str) -> bool:
+    locations = current_card_locations(root, card)
+    return bool(locations) and all(path.startswith("openspec/board/4.done/") for path in locations)
 
 
 def base_record(args: argparse.Namespace, phase: str, result: str) -> dict[str, Any]:
@@ -322,6 +355,47 @@ def stdout_terminal_outcome(stdout_path: Path) -> str | None:
     return outcome
 
 
+def review_verdict_path(root: Path, card: str) -> Path:
+    return root / ".runtime" / "changerail" / "reviews" / f"{card_id(card)}.json"
+
+
+def review_verdict_fallback_outcome(args: argparse.Namespace) -> str | None:
+    root = args.workspace.resolve(strict=False)
+    verdict = review_verdict_path(root, args.card)
+    if not verdict.is_file() or card_is_published(root, args.card):
+        return None
+
+    helper = repo_root_from_script() / "scripts" / "changerail_review_verdict.py"
+    if not helper.is_file():
+        return "BLOCKED"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(helper),
+            "validate",
+            str(verdict),
+            "--check-fresh",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return "BLOCKED"
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return "BLOCKED"
+    if payload.get("result") == "no-go":
+        return "NO-GO"
+    if payload.get("result") == "go":
+        return "BLOCKED"
+    return None
+
+
 def command_preflight(args: argparse.Namespace) -> int:
     args.started_at = utc_now()
     checks = check_preflight(args)
@@ -371,7 +445,8 @@ def command_run(args: argparse.Namespace) -> int:
         atomic_write_json(status_path(args), record)
         exit_code = process.wait()
     structured_outcome = stdout_terminal_outcome(stdout_path)
-    outcome = structured_outcome or ("DELIVERED" if exit_code == 0 else "BLOCKED")
+    fallback_outcome = review_verdict_fallback_outcome(args) if structured_outcome is None else None
+    outcome = structured_outcome or fallback_outcome or ("DELIVERED" if exit_code == 0 else "BLOCKED")
     if exit_code != 0 and outcome == "DELIVERED":
         outcome = "BLOCKED"
     record["phase"] = "terminal"

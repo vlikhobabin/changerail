@@ -1,13 +1,13 @@
 # Исправить terminal outcome раннера при safety stop
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Source
 - Тестовый запуск пакетного ChangeRail runner-а 2026-07-12:
@@ -74,29 +74,92 @@ authoritative structured terminal outcome и применил fallback:
 - Документация runner-а и contract docs описывают этот case как safety stop.
 
 ## Change Set
-- none yet
+- `fix-runner-review-safety-stop-outcome`
 
 ## Verify
-- not started
+- `$changerail-ff`: `openspec validate fix-runner-review-safety-stop-outcome --strict` passed.
+- `$changerail-ff`: `openspec validate --all --strict` passed.
+- `$changerail-ff`: `git diff --check` passed.
+- `$changerail-do`: `python3 scripts/smoke-delivery-runner.py` passed with
+  regression coverage for child exit `0` plus fresh `no-go` verdict fallback and
+  sequential supervisor stop behavior.
+- `$changerail-do`: `openspec validate fix-runner-review-safety-stop-outcome --strict` passed.
+- `$changerail-do`: `openspec validate changerail-delivery-runner --strict` passed.
+- `$changerail-do`: `openspec validate changerail-contracts --strict` passed.
+- `$changerail-do`: `openspec validate --all --strict` passed.
+- `$changerail-do`: `git diff --check` passed.
+- `$changerail-do`: `python3 scripts/public-surface-scan.py` passed
+  `(422 files scanned, 0 findings)`.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-07-12-fix-runner-review-safety-stop-outcome/`
 
 ## Related
 - `bin/changerail-delivery-runner`
 - `scripts/smoke-delivery-runner.py`
 - `docs/changerail-contracts.md`
 - `openspec/specs/changerail-delivery-runner/spec.md`
+- `openspec/specs/changerail-contracts/spec.md`
 - `skills/changerail-deliver/SKILL.md`
 - `openspec/board/3.inprogress/protect-public-data-and-supply-chain.md`
 
 ## Result
-not started
+implemented; awaiting independent review and publish
+
+Published reviewed payload as `82f316ac62242726d93851193bb175deac1aa668`; push status `pending` on `main`/`origin`.
 
 ## Next
-- Triage whether the fix belongs in `$changerail-deliver`, the outer delivery
-  runner, or both, then create ordered OpenSpec changes.
+- done
+
+## Change 1: `fix-runner-review-safety-stop-outcome`
+
+### Why
+Delivery runner supervisors need a reliable terminal outcome when `$changerail-deliver`
+stops after a review-gated `no-go`. A child exit code of `0` is not enough to
+prove publication when a fresh canonical verdict still blocks publish.
+
+### Goal
+Teach the runner contract and implementation to classify a successful child
+exit with review-gated safety-stop evidence as `NO-GO` or `BLOCKED`, never
+`DELIVERED`, and cover the case in the smoke suite.
+
+### Scope
+- Update delivery-runner outcome classification for fresh canonical `no-go`,
+  stale/invalid verdict, and blocked publish evidence when no structured
+  terminal event is present.
+- Preserve existing authoritative JSONL terminal event behavior and the
+  non-terminal tool-error success case.
+- Add regression smoke coverage for child exit `0` plus repeated no-go
+  safety-stop evidence, including single-card batch-stop semantics.
+- Update public runner contract docs/specs and the deliver skill contract for
+  the structured safety-stop event expectation.
+
+### Acceptance
+- Runner terminal `status.json`, printed `terminal_outcome` and wrapper exit code
+  agree on a non-delivered outcome for the no-go safety-stop regression.
+- The runner does not advance from the first card in a simulated batch after the
+  non-delivered outcome.
+- Existing structured JSONL terminal events remain authoritative and ordered.
+- Documentation and specs describe the structured event or fallback evidence
+  contract without relying on arbitrary free-text log parsing.
+
+### Depends On
+- none
+
+### Related
+- `openspec/changes/archive/2026-07-12-fix-runner-review-safety-stop-outcome/`
 
 ## Log
 - 2026-07-12T17:36:00Z card created from observed runner mismatch: safety stop
   after fresh review `no-go` was recorded as `DELIVERED` in delivery-run status.
+- 2026-07-12T19:39:25Z `$changerail-ff` accepted scope, created one ordered
+  change, and moved card to `2.todo`.
+- 2026-07-12T19:42:19Z `$changerail-ff` completed OpenSpec artifacts and moved
+  card to `3.inprogress`.
+- 2026-07-12T19:47:10Z `$changerail-do` implemented runner fallback, smoke
+  regression coverage, docs/spec/skill updates and verification; preparing
+  OpenSpec archive before review.
+- 2026-07-12T19:47:48Z `$changerail-do` archived
+  `fix-runner-review-safety-stop-outcome`; card remains in `3.inprogress` for
+  independent review.
+- 2026-07-12T19:55:11Z publish finalized card into `4.done` with commit `82f316ac62242726d93851193bb175deac1aa668` and push status `pending`.
