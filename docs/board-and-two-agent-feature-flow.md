@@ -253,6 +253,48 @@ Runner пишет structured status под:
 - после нескольких опубликованных карточек пересмотреть оставшуюся очередь.
 
 
+## Параллельная работа в workspace из нескольких репозиториев
+
+Если верхний каталог является workspace-агрегатором, а внутри лежат независимые
+дочерние git-репозитории, default-модель ChangeRail другая: единицей delivery
+становится **дочерний репозиторий**, а не общий root. У каждого дочернего
+репозитория должна быть своя доска `openspec/board/`, свои OpenSpec artifacts,
+свой git status и свой runtime state.
+
+В таком workspace можно запускать несколько карточек параллельно, если они
+принадлежат разным дочерним репозиториям:
+
+```bash
+/opt/changerail/bin/changerail-delivery-runner run \
+  --workspace /opt/example-workspace/service-a \
+  openspec/board/1.backlog/example-card.md
+
+/opt/changerail/bin/changerail-delivery-runner run \
+  --workspace /opt/example-workspace/service-b \
+  openspec/board/1.backlog/another-card.md
+```
+
+Каждый runner пишет status под своим workspace:
+
+```text
+/opt/example-workspace/service-a/.runtime/changerail/delivery-runs/<run-id>/status.json
+/opt/example-workspace/service-b/.runtime/changerail/delivery-runs/<run-id>/status.json
+```
+
+Ограничения:
+
+- внутри одного дочернего репозитория карточки все равно выполняются
+  последовательно;
+- delivery не должен писать tracked payload в root-агрегатор, если карточка
+  принадлежит дочернему репозиторию;
+- если root отслеживает child repos как submodules/gitlinks или хранит общий
+  integration manifest, root-level update выполняется отдельным сериализованным
+  gate после child-repo publish;
+- если карточка требует synchronized changes сразу в нескольких child repos,
+  ее нужно разложить на отдельные repo-local карточки и root-level integration
+  карточку либо явно остановиться на coordination decision.
+
+
 ## Что делать, когда агент предлагает новое изменение
 
 Если предложение относится к текущей карточке и не расширяет scope, можно

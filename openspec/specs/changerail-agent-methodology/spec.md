@@ -228,6 +228,26 @@ non-interactive card invocation.
 - **AND** `bin/changerail-delivery-runner run <card>` is documented as the
   single-card structured-status launcher
 
+### Requirement: Multi-repository workspace delivery default
+ChangeRail methodology MUST describe independent child git repositories as the
+default delivery unit for aggregator workspaces that contain multiple project
+repositories.
+
+#### Scenario: Operator plans parallel work across child repositories
+- **WHEN** a workspace root contains multiple independent child git repositories
+  with their own `openspec/board/`
+- **THEN** methodology treats each child repository as a separate ChangeRail
+  consumer and delivery workspace
+- **AND** it permits parallel delivery runs across different child repositories
+  when each runner uses its own `--workspace`, git scope and runtime status
+- **AND** it keeps card delivery sequential inside any one repository
+
+#### Scenario: Root integration remains serialized
+- **WHEN** the aggregator root tracks child repositories through submodules,
+  gitlinks or a shared integration manifest
+- **THEN** root-level integration updates are documented as a separate serialized
+  gate after child-repository payloads are published
+
 ### Requirement: Deterministic publish finalization helper
 ChangeRail methodology MUST allow helper-assisted card finalization after a
 reviewed payload commit, as long as the helper changes only deterministic board

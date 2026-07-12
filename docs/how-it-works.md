@@ -122,6 +122,13 @@ child-процесса и пишет
 оркестратора, который вызывает runner отдельно для каждой карточки. Один runner
 run пишет status для одной карточки.
 
+Для workspace-агрегаторов с несколькими независимыми дочерними git-репозиториями
+default-модель - запускать runner в каждом дочернем репозитории через
+`--workspace <child-repo>`. Такие child-repo deliveries могут идти параллельно,
+потому что у них разные git scopes, доски и runtime status. Внутри одного
+репозитория карточки остаются последовательными, а root-level integration
+обновления выполняются отдельным сериализованным gate.
+
 Per-run model и reasoning effort передаются штатными Codex CLI overrides и не
 меняют repository defaults:
 
