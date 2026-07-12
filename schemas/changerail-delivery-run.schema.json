@@ -177,6 +177,18 @@
           "type": "integer",
           "minimum": 0
         },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uncached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
         "total_tokens": {
           "type": "integer",
           "minimum": 0
@@ -185,9 +197,193 @@
           "type": "string"
         }
       }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wall_time_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "event_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "agent_message_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "command_execution_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "file_change_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/commandTiming"
+          }
+        },
+        "slowest_commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/commandTiming"
+          }
+        },
+        "timeline": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/timelineEvent"
+          }
+        },
+        "review": {
+          "$ref": "#/$defs/reviewTiming"
+        },
+        "publish": {
+          "$ref": "#/$defs/publishTiming"
+        }
+      }
     }
   },
   "$defs": {
+    "commandTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "exit_code": {
+          "type": "integer"
+        }
+      }
+    },
+    "timelineEvent": {
+      "type": "object",
+      "required": ["observed_at", "event_type"],
+      "additionalProperties": false,
+      "properties": {
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "terminal_outcome": {
+          "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
+        },
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "reviewTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cycle_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_review_latency_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "time_to_final_go_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cycles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reviewCycleTiming"
+          }
+        }
+      }
+    },
+    "reviewCycleTiming": {
+      "type": "object",
+      "required": ["review_cycle"],
+      "additionalProperties": false,
+      "properties": {
+        "review_cycle": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "result": {
+          "enum": ["go", "no-go"]
+        },
+        "reviewed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "latency_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "since_previous_seconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "publishTiming": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "latency_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pushed_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
     "check": {
       "type": "object",
       "required": ["name", "status", "message"],

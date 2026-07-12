@@ -62,7 +62,7 @@ def delivery_manifest() -> dict[str, Any]:
     }
 
 
-def delivery_run() -> dict[str, Any]:
+def delivery_run_minimal() -> dict[str, Any]:
     return {
         "schema": "changerail.delivery-run.v1",
         "run_id": "example-run",
@@ -76,6 +76,62 @@ def delivery_run() -> dict[str, Any]:
         "command": {"argv": ["bin/codex", "exec"], "launcher": "bin/codex", "stdin": "closed", "json": True},
         "usage": {"available": False, "reason": "not observed in schema smoke"},
     }
+
+
+def delivery_run() -> dict[str, Any]:
+    payload = delivery_run_minimal()
+    payload["usage"] = {
+        "available": True,
+        "input_tokens": 10,
+        "cached_input_tokens": 4,
+        "uncached_input_tokens": 6,
+        "output_tokens": 5,
+        "reasoning_tokens": 2,
+        "total_tokens": 15,
+    }
+    payload["performance"] = {
+        "wall_time_seconds": 12.5,
+        "event_counts": {"exec_command": 2, "agent_message": 1},
+        "agent_message_count": 1,
+        "command_execution_count": 2,
+        "file_change_count": 3,
+        "commands": [
+            {
+                "command_id": "cmd-1",
+                "command": "python3 scripts/smoke-contract-schemas.py",
+                "started_at": DATE,
+                "ended_at": DATE,
+                "duration_seconds": 0.2,
+                "exit_code": 0,
+            }
+        ],
+        "slowest_commands": [
+            {
+                "command_id": "cmd-1",
+                "command": "python3 scripts/smoke-contract-schemas.py",
+                "duration_seconds": 0.2,
+                "exit_code": 0,
+            }
+        ],
+        "timeline": [
+            {
+                "observed_at": DATE,
+                "event_id": "event-1",
+                "event_type": "exec_command.completed",
+                "command_id": "cmd-1",
+                "command": "python3 scripts/smoke-contract-schemas.py",
+                "duration_seconds": 0.2,
+            }
+        ],
+        "review": {
+            "cycle_count": 1,
+            "first_review_latency_seconds": 10.0,
+            "time_to_final_go_seconds": 10.0,
+            "cycles": [{"review_cycle": 1, "result": "go", "reviewed_at": DATE, "latency_seconds": 10.0}],
+        },
+        "publish": {"latency_seconds": 2.0, "pushed_at": DATE},
+    }
+    return payload
 
 
 def review_cycle_history() -> dict[str, Any]:
@@ -156,6 +212,10 @@ def main() -> int:
         positive_errors = validator(positive)
         if positive_errors:
             failures.append(f"{name}: positive fixture failed: {positive_errors}")
+        if name == "changerail-delivery-run.schema.json":
+            minimal_errors = validator(delivery_run_minimal())
+            if minimal_errors:
+                failures.append(f"{name}: minimal fixture without performance failed: {minimal_errors}")
         negative = mutate_invalid(positive)
         negative_errors = validator(negative)
         if not negative_errors:

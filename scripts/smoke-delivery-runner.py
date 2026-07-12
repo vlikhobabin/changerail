@@ -86,7 +86,7 @@ def write_fake_launcher(path: Path) -> None:
         "\n".join(
             [
                 "#!/usr/bin/env python3",
-                "import json, os, sys",
+                "import json, os, sys, time",
                 "call_log = os.environ.get('CHANGERAIL_FAKE_CALL_LOG')",
                 "if call_log:",
                 "    with open(call_log, 'a', encoding='utf-8') as handle:",
@@ -105,7 +105,15 @@ def write_fake_launcher(path: Path) -> None:
                 "    print(json.dumps({'terminal_outcome': 'delivered'}))",
                 "if mode == 'safety-stop-no-go':",
                 "    print(json.dumps({'type': 'assistant-message', 'content': 'safety stop after repeated no-go'}))",
-                "print(json.dumps({'usage': {'input_tokens': 3, 'output_tokens': 5, 'total_tokens': 8}}))",
+                "if mode == 'performance':",
+                "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'in_progress'}}), flush=True)",
+                "    time.sleep(0.01)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'completed', 'exit_code': 0}}), flush=True)",
+                "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'in_progress'}}), flush=True)",
+                "    time.sleep(0.01)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'completed', 'exit_code': 0}}), flush=True)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-1', 'type': 'agent_message', 'text': 'done'}}), flush=True)",
+                "print(json.dumps({'usage': {'input_tokens': 3, 'cached_input_tokens': 1, 'uncached_input_tokens': 2, 'output_tokens': 5, 'reasoning_tokens': 1, 'total_tokens': 8}}))",
                 "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
             ]
         )
@@ -295,6 +303,56 @@ def check_default_workspace_run(tmp: Path) -> None:
         raise AssertionError(f"default CODEX_HOME did not follow workspace: {first}")
     if "status: " + str(runtime / "default-workspace" / "status.json") not in result.stdout:
         raise AssertionError(f"default runtime root did not follow workspace: {result.stdout}")
+
+
+def check_performance_summary_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "performance-workspace")
+    launcher = tmp / "fake-codex-performance"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "performance",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("performance"),
+    )
+    require_ok(result, "runner performance")
+    status = load_status(runtime, "performance")
+    performance = status.get("performance")
+    if not isinstance(performance, dict):
+        raise AssertionError(f"performance summary missing from status: {status}")
+    if performance.get("command_execution_count") != 2:
+        raise AssertionError(f"command count was not captured: {performance}")
+    commands = performance.get("commands")
+    if not isinstance(commands, list) or len(commands) != 2:
+        raise AssertionError(f"command summaries missing: {performance}")
+    durations = [command.get("duration_seconds") for command in commands]
+    if not all(isinstance(duration, (int, float)) and duration >= 0 for duration in durations):
+        raise AssertionError(f"command durations were not measurable: {commands}")
+    if max(durations) <= 0:
+        raise AssertionError(f"expected at least one positive command duration: {commands}")
+    if performance.get("agent_message_count") != 1:
+        raise AssertionError(f"agent message count was not captured: {performance}")
+    if performance.get("file_change_count", -1) < 0:
+        raise AssertionError(f"file change count missing: {performance}")
+    slowest = performance.get("slowest_commands")
+    if not isinstance(slowest, list) or not slowest:
+        raise AssertionError(f"slowest command summary missing: {performance}")
+    timeline = performance.get("timeline")
+    if not isinstance(timeline, list) or not any(event.get("terminal_outcome") == "DELIVERED" for event in timeline):
+        raise AssertionError(f"terminal outcome timing missing from timeline: {timeline}")
+    if status["usage"].get("cached_input_tokens") != 1 or status["usage"].get("reasoning_tokens") != 1:
+        raise AssertionError(f"usage breakdown was not parsed: {status['usage']}")
 
 
 def check_no_go_run(tmp: Path) -> None:
@@ -683,6 +741,7 @@ def main() -> int:
         workspace = Path(tmp)
         check_success_run(workspace)
         check_default_workspace_run(workspace)
+        check_performance_summary_run(workspace)
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
         check_supervisor_stops_after_fallback_no_go(workspace)

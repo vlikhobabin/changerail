@@ -47,6 +47,16 @@ def seconds_between(start: object, end: object) -> str:
     return str(int((ended - started).total_seconds()))
 
 
+def display_number(value: object) -> str:
+    if isinstance(value, bool):
+        return UNKNOWN
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:g}"
+    return UNKNOWN
+
+
 def collect_runs(runs_dir: Path) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for path in sorted(runs_dir.glob("*/status.json")):
@@ -121,7 +131,72 @@ def usage_value(run: dict[str, Any], key: str) -> str:
     if not isinstance(usage, dict) or not usage.get("available"):
         return UNKNOWN
     value = usage.get(key)
-    return str(value) if isinstance(value, int) else UNKNOWN
+    if isinstance(value, int):
+        return str(value)
+    if key == "total_tokens":
+        input_tokens = usage.get("input_tokens")
+        output_tokens = usage.get("output_tokens")
+        if isinstance(input_tokens, int) and isinstance(output_tokens, int):
+            return str(input_tokens + output_tokens)
+    return UNKNOWN
+
+
+def performance(run: dict[str, Any]) -> dict[str, Any]:
+    value = run.get("performance")
+    return value if isinstance(value, dict) else {}
+
+
+def performance_value(run: dict[str, Any], key: str) -> str:
+    return display_number(performance(run).get(key))
+
+
+def wall_time_value(run: dict[str, Any], timestamps: dict[str, Any]) -> str:
+    value = performance_value(run, "wall_time_seconds")
+    if value != UNKNOWN:
+        return value
+    return seconds_between(timestamps.get("started_at"), timestamps.get("ended_at"))
+
+
+def slowest_commands_value(run: dict[str, Any]) -> str:
+    commands = performance(run).get("slowest_commands")
+    if not isinstance(commands, list) or not commands:
+        return UNKNOWN
+    parts: list[str] = []
+    for command in commands:
+        if not isinstance(command, dict):
+            continue
+        text = command.get("command")
+        duration = display_number(command.get("duration_seconds"))
+        if isinstance(text, str) and text and duration != UNKNOWN:
+            parts.append(f"{text}:{duration}s")
+    return ";".join(parts) if parts else UNKNOWN
+
+
+def review_performance(run: dict[str, Any]) -> dict[str, Any]:
+    review = performance(run).get("review")
+    return review if isinstance(review, dict) else {}
+
+
+def review_timeline_value(history: dict[str, Any] | None, run: dict[str, Any]) -> str:
+    cycles = history.get("cycles") if isinstance(history, dict) else None
+    if not isinstance(cycles, list) or not cycles:
+        cycles = review_performance(run).get("cycles")
+    if not isinstance(cycles, list) or not cycles:
+        return UNKNOWN
+    parts: list[str] = []
+    for cycle in cycles:
+        if not isinstance(cycle, dict):
+            continue
+        review_cycle = cycle.get("review_cycle")
+        result = cycle.get("result", UNKNOWN)
+        reviewed_at = cycle.get("reviewed_at")
+        if isinstance(review_cycle, int) and isinstance(result, str) and isinstance(reviewed_at, str):
+            parts.append(f"{review_cycle}:{result}@{reviewed_at}")
+    return ";".join(parts) if parts else UNKNOWN
+
+
+def review_performance_value(run: dict[str, Any], key: str) -> str:
+    return display_number(review_performance(run).get(key))
 
 
 def row_for_run(run: dict[str, Any], history: dict[str, Any] | None) -> dict[str, Any]:
@@ -131,12 +206,26 @@ def row_for_run(run: dict[str, Any], history: dict[str, Any] | None) -> dict[str
         "run_id": run.get("run_id", UNKNOWN),
         "card_id": card.get("id", UNKNOWN),
         "result": run.get("result", UNKNOWN),
-        "wall_time_seconds": seconds_between(timestamps.get("started_at"), timestamps.get("ended_at")),
+        "wall_time_seconds": wall_time_value(run, timestamps),
         "input_tokens": usage_value(run, "input_tokens"),
+        "cached_input_tokens": usage_value(run, "cached_input_tokens"),
+        "uncached_input_tokens": usage_value(run, "uncached_input_tokens"),
         "output_tokens": usage_value(run, "output_tokens"),
+        "reasoning_tokens": usage_value(run, "reasoning_tokens"),
         "total_tokens": usage_value(run, "total_tokens"),
+        "agent_message_count": performance_value(run, "agent_message_count"),
+        "command_execution_count": performance_value(run, "command_execution_count"),
+        "file_change_count": performance_value(run, "file_change_count"),
+        "slowest_commands": slowest_commands_value(run),
+        "review_timeline": review_timeline_value(history, run),
+        "first_review_latency_seconds": review_performance_value(run, "first_review_latency_seconds"),
+        "time_to_final_go_seconds": review_performance_value(run, "time_to_final_go_seconds"),
     }
     row.update(summarize_history(history))
+    if row["review_cycles"] == UNKNOWN:
+        review_cycle_count = review_performance(run).get("cycle_count")
+        if isinstance(review_cycle_count, int):
+            row["review_cycles"] = str(review_cycle_count)
     return row
 
 
@@ -170,7 +259,15 @@ def print_text(rows: list[dict[str, Any]], aggregate: dict[str, Any]) -> None:
         print(
             f"- {row['run_id']} card={row['card_id']} result={row['result']} "
             f"first_review={row['first_review_result']} latest_review={row['latest_review_result']} "
-            f"wall_time_seconds={row['wall_time_seconds']} total_tokens={row['total_tokens']} "
+            f"review_cycles={row['review_cycles']} wall_time_seconds={row['wall_time_seconds']} "
+            f"input_tokens={row['input_tokens']} cached_input_tokens={row['cached_input_tokens']} "
+            f"uncached_input_tokens={row['uncached_input_tokens']} output_tokens={row['output_tokens']} "
+            f"reasoning_tokens={row['reasoning_tokens']} total_tokens={row['total_tokens']} "
+            f"agent_message_count={row['agent_message_count']} command_execution_count={row['command_execution_count']} "
+            f"file_change_count={row['file_change_count']} slowest_commands={row['slowest_commands']} "
+            f"review_timeline={row['review_timeline']} "
+            f"first_review_latency_seconds={row['first_review_latency_seconds']} "
+            f"time_to_final_go_seconds={row['time_to_final_go_seconds']} "
             f"finding_ids={row['finding_ids']}"
         )
     print("aggregate:")
@@ -185,9 +282,19 @@ def print_csv(rows: list[dict[str, Any]]) -> None:
         "result",
         "wall_time_seconds",
         "input_tokens",
+        "cached_input_tokens",
+        "uncached_input_tokens",
         "output_tokens",
+        "reasoning_tokens",
         "total_tokens",
+        "agent_message_count",
+        "command_execution_count",
+        "file_change_count",
+        "slowest_commands",
         "review_cycles",
+        "review_timeline",
+        "first_review_latency_seconds",
+        "time_to_final_go_seconds",
         "first_review_result",
         "latest_review_result",
         "first_pass_go",
