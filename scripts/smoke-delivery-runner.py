@@ -88,12 +88,17 @@ def write_fake_launcher(path: Path) -> None:
                 "stdin = sys.stdin.read()",
                 "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME')}))",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
+                "if mode == 'non-terminal-error':",
+                "    print(json.dumps({'type': 'tool/result', 'data': {'status': 'failed', 'message': 'error'}}))",
                 "if mode == 'no-go':",
                 "    print(json.dumps({'type': 'external-review/no-go', 'data': {'result': 'no-go'}}))",
                 "if mode == 'awaiting-review':",
                 "    print(json.dumps({'type': 'awaiting-review', 'data': {'result': 'awaiting-review'}}))",
+                "if mode == 'ordered-conflict':",
+                "    print(json.dumps({'type': 'external-review/no-go'}))",
+                "    print(json.dumps({'terminal_outcome': 'delivered'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'output_tokens': 5, 'total_tokens': 8}}))",
-                "sys.exit(1 if mode == 'no-go' else 0)",
+                "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
             ]
         )
         + "\n",
@@ -222,6 +227,92 @@ def check_no_go_run(tmp: Path) -> None:
         raise AssertionError(f"structured external-review/no-go should be NO-GO: {status['result']}")
     if "terminal_outcome: NO-GO" not in result.stdout:
         raise AssertionError(f"NO-GO terminal outcome was not printed: {result.stdout}")
+
+
+def check_non_terminal_error_success_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "non-terminal-error-workspace")
+    launcher = tmp / "fake-codex-non-terminal-error"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "non-terminal-error",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("non-terminal-error"),
+    )
+    require_ok(result, "runner non-terminal error success")
+    status = load_status(runtime, "non-terminal-error")
+    if status["result"] != "DELIVERED":
+        raise AssertionError(f"non-terminal error string should not block delivery: {status['result']}")
+    if "terminal_outcome: DELIVERED" not in result.stdout:
+        raise AssertionError(f"DELIVERED terminal outcome was not printed: {result.stdout}")
+
+
+def check_ordered_conflict_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "ordered-conflict-workspace")
+    launcher = tmp / "fake-codex-ordered-conflict"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "ordered-conflict",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("ordered-conflict"),
+    )
+    require_ok(result, "runner ordered conflict")
+    status = load_status(runtime, "ordered-conflict")
+    if status["result"] != "DELIVERED":
+        raise AssertionError(f"last authoritative terminal event should win: {status['result']}")
+
+
+def check_nonzero_without_outcome_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "nonzero-workspace")
+    launcher = tmp / "fake-codex-nonzero"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "nonzero",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("nonzero"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("non-zero child exit unexpectedly returned success")
+    status = load_status(runtime, "nonzero")
+    if status["result"] != "BLOCKED":
+        raise AssertionError(f"non-zero exit without authoritative outcome should be BLOCKED: {status['result']}")
+    if "terminal_outcome: BLOCKED" not in result.stdout:
+        raise AssertionError(f"BLOCKED terminal outcome was not printed: {result.stdout}")
 
 
 def check_awaiting_review_run(tmp: Path) -> None:
@@ -371,6 +462,9 @@ def main() -> int:
         check_success_run(workspace)
         check_default_workspace_run(workspace)
         check_no_go_run(workspace)
+        check_non_terminal_error_success_run(workspace)
+        check_ordered_conflict_run(workspace)
+        check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
         check_run_preflight_failure(workspace)

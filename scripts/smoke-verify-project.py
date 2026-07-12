@@ -19,6 +19,13 @@ SPECIAL_OUTPUTS = {
     Path("mcp.json.tpl"): Path(".mcp.json"),
     Path("codex-config.toml.tpl"): Path(".codex/config.toml"),
 }
+EXPECTED_SCHEMAS = (
+    "schemas/changerail-review-verdict.schema.json",
+    "schemas/changerail-review-cycle-history.schema.json",
+    "schemas/changerail-delivery-manifest.schema.json",
+    "schemas/changerail-delivery-run.schema.json",
+    "schemas/changerail-evidence-index.schema.json",
+)
 
 
 @dataclass
@@ -130,6 +137,14 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "valid fixture passes",
             "pass" if verify.returncode == 0 else "fail",
             verify.stdout.strip(),
+        )
+    )
+    missing_schema_checks = [schema for schema in EXPECTED_SCHEMAS if schema not in verify.stdout]
+    checks.append(
+        Check(
+            "all contract schemas checked",
+            "pass" if verify.returncode == 0 and not missing_schema_checks else "fail",
+            "all expected schemas present" if not missing_schema_checks else "missing: " + ", ".join(missing_schema_checks),
         )
     )
 

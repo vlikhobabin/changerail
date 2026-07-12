@@ -24,6 +24,12 @@ schemas/changerail-review-cycle-history.schema.json
 
 Review verdict-файлы и public schemas должны использовать только
 `changerail.review-verdict.v1`; helper отклоняет другие schema ids.
+`verify-project` и release checks покрывают полный набор schemas выше.
+
+Runtime helpers валидируют указанные документы по tracked Draft 2020-12 schemas
+с проверкой `format`, `additionalProperties`, conditional required fields и
+nested types до применения semantic checks ChangeRail. Любая ошибка schema
+validation дает fail-closed non-zero результат со structured diagnostic.
 
 ## Review Verdict
 
@@ -50,6 +56,10 @@ python3 scripts/changerail_review_verdict.py fingerprint --workspace .
 python3 scripts/changerail_review_verdict.py validate \
   ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
 ```
+
+Validation сначала применяет `schemas/changerail-review-verdict.schema.json`,
+затем проверяет verdict semantics: согласованность `go`, reviewer independence
+и optional freshness.
 
 Consumer project может вызывать helper через wrapper:
 
@@ -93,11 +103,24 @@ python3 scripts/changerail_delivery_manifest.py staging-plan \
   .runtime/changerail/delivery-manifests/example.json --json
 ```
 
+Validation сначала применяет `schemas/changerail-delivery-manifest.schema.json`,
+затем проверяет manifest-specific semantic invariants.
+
 `committable_paths` может фиксировать `operation`: `add`, `modify`, `delete`,
 `rename` или `unknown`. Для удаления manifest сохраняет удаленный
 `source_path`; для rename - `source_path` и `target_path`, чтобы staging
 proposal включал оба пути board move или другого card-owned перемещения.
 Отсутствующая операция означает legacy entry и требует сверки с `git status`.
+
+Manifest derivation использует NUL-delimited git status data и записывает
+точные repository-relative paths без shell quoting artifacts. Paths со spaces,
+quotes, Unicode или literal ` -> ` text должны попадать в manifest как реальные
+repository paths. Paths с valid non-UTF-8 bytes сохраняются через
+`surrogateescape` round-trip и записываются в JSON в escaped форме, чтобы
+manifest оставался valid UTF-8 file и `os.fsencode` восстанавливал исходные
+path bytes. Untracked directories разворачиваются до точных non-ignored file
+paths; directory-wide untracked path отклоняется до попадания в staging
+proposal.
 
 После publish ignored manifest можно обновить без staging runtime state:
 

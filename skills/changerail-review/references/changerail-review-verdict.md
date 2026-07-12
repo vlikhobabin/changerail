@@ -69,6 +69,12 @@ bin/changerail-review-verdict validate \
 Exit codes: `0` valid, `1` validation failed, `2` input error. Consumers must
 fail closed on any non-zero exit.
 
+Validation first enforces the tracked Draft 2020-12 schema
+`schemas/changerail-review-verdict.schema.json`, including date-time formats,
+unknown-field rejection and nested field types. After schema validation, the
+helper applies ChangeRail semantic rules such as `go`/finding consistency and
+freshness.
+
 ## Freshness Fingerprint
 
 A verdict certifies one exact working-tree state. Compute the fingerprint with:

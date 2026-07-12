@@ -44,6 +44,12 @@ For `delete`, record `source_path`. For `rename`, record both `source_path` and
 `target_path`. `path` remains present for compatibility and should usually be
 the target path for adds/modifies/renames and the source path for deletes.
 
+Derived manifests must preserve exact repository-relative paths from
+machine-readable git status output. Spaces, quotes, Unicode and literal ` -> `
+text in filenames are valid path content, not parser delimiters. Untracked
+directories must be represented as exact untracked file paths or rejected before
+they become a staging proposal.
+
 ## Handoff
 
 `changerail-pub` uses the manifest as an initial staging proposal, not as proof.

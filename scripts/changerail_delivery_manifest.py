@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -12,7 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from changerail_contract_schema import validate_with_schema
+
 SCHEMA_ID = "changerail.delivery-manifest.v1"
+SCHEMA_FILE = "changerail-delivery-manifest.schema.json"
 OPERATIONS = {"add", "modify", "delete", "rename", "unknown"}
 CHANGE_RE = re.compile(r"^## Change\s+[0-9]+:\s*`?([a-z0-9][a-z0-9-]*)`?", re.MULTILINE)
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
@@ -39,7 +43,11 @@ def load_json(path: Path) -> Any:
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
+def json_line(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=True)
 
 
 def require_object(value: Any, label: str, errors: list[str]) -> dict[str, Any] | None:
@@ -58,46 +66,22 @@ def require_string(data: dict[str, Any], field: str, label: str, errors: list[st
 
 
 def validate_manifest(data: Any) -> list[str]:
+    errors = validate_with_schema(data, SCHEMA_FILE)
+    if errors:
+        return errors
+    return validate_manifest_semantics(data)
+
+
+def validate_manifest_semantics(data: Any) -> list[str]:
     errors: list[str] = []
     manifest = require_object(data, "manifest", errors)
     if manifest is None:
         return errors
-    if manifest.get("schema") != SCHEMA_ID:
-        errors.append(f"schema must be {SCHEMA_ID}")
-    for field in (
-        "workspace",
-        "card",
-        "changes",
-        "committable_paths",
-        "excluded_runtime_paths",
-        "preexisting_dirty",
-        "updated_at",
-    ):
-        if field not in manifest:
-            errors.append(f"manifest.{field} is required")
-    if isinstance(manifest.get("committable_paths"), list):
-        for index, entry in enumerate(manifest["committable_paths"]):
-            label = f"committable_paths[{index}]"
-            item = require_object(entry, label, errors)
-            if item is None:
-                continue
-            require_string(item, "path", label, errors)
-            require_string(item, "kind", label, errors)
-            require_string(item, "phase", label, errors)
-            operation = item.get("operation")
-            if operation is None:
-                continue
-            if operation not in OPERATIONS:
-                errors.append(f"{label}.operation must be one of: {', '.join(sorted(OPERATIONS))}")
-            if operation == "rename":
-                require_string(item, "source_path", label, errors)
-                require_string(item, "target_path", label, errors)
-            elif operation == "delete":
-                require_string(item, "source_path", label, errors)
-            elif operation in {"add", "modify"}:
-                require_string(item, "target_path", label, errors)
-    elif "committable_paths" in manifest:
-        errors.append("manifest.committable_paths must be an array")
+    for index, entry in enumerate(manifest["committable_paths"]):
+        operation = entry.get("operation")
+        label = f"committable_paths[{index}]"
+        if operation is not None and operation not in OPERATIONS:
+            errors.append(f"{label}.operation must be one of: {', '.join(sorted(OPERATIONS))}")
     return errors
 
 
@@ -135,6 +119,22 @@ def git_output(workspace: Path, args: list[str]) -> str:
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "git command failed"
+        raise ManifestError(f"git {' '.join(args)}: {detail}", 2)
+    return result.stdout
+
+
+def git_output_bytes(workspace: Path, args: list[str]) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(workspace), *args],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (
+            result.stderr.decode("utf-8", errors="replace").strip()
+            or result.stdout.decode("utf-8", errors="replace").strip()
+            or "git command failed"
+        )
         raise ManifestError(f"git {' '.join(args)}: {detail}", 2)
     return result.stdout
 
@@ -287,19 +287,39 @@ def operation_entry(path: str, status: str, source_path: str | None = None) -> d
     return entry
 
 
+def decode_git_path(raw_path: bytes) -> str:
+    return os.fsdecode(raw_path).rstrip("/")
+
+
+def ensure_safe_untracked_path(workspace: Path, path: str) -> None:
+    absolute = workspace / path
+    if absolute.is_dir():
+        raise ManifestError(f"untracked directory cannot be staged as a directory-wide path: {path}", 1)
+    if absolute.exists() and not (absolute.is_file() or absolute.is_symlink()):
+        raise ManifestError(f"untracked path is not a regular file: {path}", 1)
+
+
 def git_status_entries(workspace: Path) -> list[dict[str, Any]]:
-    output = git_output(workspace, ["status", "--porcelain"])
+    output = git_output_bytes(workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+    records = [record for record in output.split(b"\x00") if record]
     entries: list[dict[str, Any]] = []
-    for raw_line in output.splitlines():
-        if not raw_line:
-            continue
-        status = raw_line[:2]
-        path_part = raw_line[3:]
-        if " -> " in path_part:
-            source, target = path_part.split(" -> ", 1)
-            entries.append(operation_entry(target.rstrip("/"), status, source.rstrip("/")))
-        else:
-            entries.append(operation_entry(path_part.rstrip("/"), status))
+    index = 0
+    while index < len(records):
+        record = records[index]
+        if len(record) < 4:
+            raise ManifestError("git status produced an invalid porcelain record", 2)
+        status = record[:2].decode("ascii", errors="replace")
+        path = decode_git_path(record[3:])
+        source_path: str | None = None
+        if "R" in status or "C" in status:
+            index += 1
+            if index >= len(records):
+                raise ManifestError(f"git status missing source path for rename/copy target: {path}", 2)
+            source_path = decode_git_path(records[index])
+        if status == "??":
+            ensure_safe_untracked_path(workspace, path)
+        entries.append(operation_entry(path, status, source_path))
+        index += 1
     return entries
 
 
@@ -317,6 +337,22 @@ def add_unique_path(entries: list[dict[str, Any]], path: str, operation: str = "
     entries.append(entry)
 
 
+def add_unique_tree_paths(entries: list[dict[str, Any]], workspace: Path, path: str, operation: str = "unknown") -> None:
+    absolute = workspace / path
+    if not absolute.is_dir():
+        add_unique_path(entries, path, operation)
+        return
+    files = sorted(
+        candidate
+        for candidate in absolute.rglob("*")
+        if candidate.is_file() or candidate.is_symlink()
+    )
+    if not files:
+        raise ManifestError(f"directory path contains no committable files: {path}", 1)
+    for candidate in files:
+        add_unique_path(entries, relpath(candidate, workspace), operation)
+
+
 def default_manifest_path(workspace: Path, card: dict[str, Any]) -> Path:
     return workspace / ".runtime" / "changerail" / "delivery-manifests" / f"{card['id']}.json"
 
@@ -331,9 +367,9 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
         archive_path = change.get("archive_path")
         active_path = change.get("active_path")
         if isinstance(archive_path, str):
-            add_unique_path(committable_paths, archive_path, "add")
+            add_unique_tree_paths(committable_paths, workspace, archive_path, "add")
         elif isinstance(active_path, str):
-            add_unique_path(committable_paths, active_path, "add")
+            add_unique_tree_paths(committable_paths, workspace, active_path, "add")
     manifest_path = default_manifest_path(workspace, card)
     verdict_base = workspace / ".runtime" / "changerail" / "reviews" / f"{card['id']}.json"
     return {
@@ -449,7 +485,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         "manifest": str(args.manifest),
         "schema": SCHEMA_ID,
     }
-    print(json.dumps(payload, ensure_ascii=False) if args.json else f"ok: valid {SCHEMA_ID} manifest")
+    print(json_line(payload) if args.json else f"ok: valid {SCHEMA_ID} manifest")
     return 0
 
 
@@ -465,7 +501,11 @@ def cmd_staging_plan(args: argparse.Namespace) -> int:
         "manifest": str(args.manifest),
         "paths": paths,
     }
-    print(json.dumps(payload, ensure_ascii=False) if args.json else "\n".join(paths))
+    if args.json:
+        print(json_line(payload))
+    else:
+        for path in paths:
+            sys.stdout.buffer.write(os.fsencode(path) + b"\n")
     return 0
 
 
@@ -487,7 +527,7 @@ def cmd_derive(args: argparse.Namespace) -> int:
     }
     if args.json:
         payload["data"] = manifest
-        print(json.dumps(payload, ensure_ascii=False))
+        print(json_line(payload))
     else:
         print(f"ok: derived {SCHEMA_ID} manifest at {manifest_path}")
     return 0
@@ -501,7 +541,7 @@ def cmd_publish_update(args: argparse.Namespace) -> int:
         "manifest": str(args.manifest),
         "publish": manifest["publish"],
     }
-    print(json.dumps(payload, ensure_ascii=False) if args.json else f"ok: updated publish state at {args.manifest}")
+    print(json_line(payload) if args.json else f"ok: updated publish state at {args.manifest}")
     return 0
 
 
@@ -509,7 +549,7 @@ def cmd_finalize_card(args: argparse.Namespace) -> int:
     workspace = args.workspace.resolve(strict=False)
     paths = finalize_card(args.card, workspace, args)
     payload = {"ok": True, "command": "finalize-card", **paths}
-    print(json.dumps(payload, ensure_ascii=False) if args.json else f"ok: finalized {paths['target_path']}")
+    print(json_line(payload) if args.json else f"ok: finalized {paths['target_path']}")
     return 0
 
 
@@ -576,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
                         "command": getattr(args, "command", "unknown"),
                         "diagnostic": str(exc),
                     },
-                    ensure_ascii=False,
+                    ensure_ascii=True,
                 ),
                 file=sys.stderr,
             )

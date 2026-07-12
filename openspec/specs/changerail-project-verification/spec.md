@@ -19,6 +19,20 @@ project wiring and baseline configuration.
 - **WHEN** required ChangeRail wiring, config or ignore policy is missing
 - **THEN** `bin/verify-project` exits non-zero and reports the failed check
 
+### Requirement: Полное покрытие ChangeRail contract schemas
+`verify-project` и его smoke checks MUST валидировать reachability для каждой
+public ChangeRail contract schema, tracked в source repository.
+
+#### Scenario: Все public schemas существуют
+- **WHEN** `bin/verify-project <path>` запускается для consumer project
+- **THEN** он проверяет review verdict, review cycle history, delivery manifest,
+  delivery run и evidence index schema files
+
+#### Scenario: Public schema отсутствует
+- **WHEN** любой public ChangeRail contract schema file отсутствует в
+  ChangeRail source root
+- **THEN** verification завершается non-zero и указывает missing schema
+
 ### Requirement: ChangeRail source resolution
 Verification MUST accept ChangeRail-owned surfaces that resolve directly to
 `/opt/changerail` or through an explicitly documented aggregator path.

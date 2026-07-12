@@ -31,7 +31,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from changerail_contract_schema import validate_with_schema
+
 SCHEMA_ID = "changerail.review-verdict.v1"
+SCHEMA_FILE = "changerail-review-verdict.schema.json"
 ACCEPTED_SCHEMA_IDS = (SCHEMA_ID,)
 REVIEWER_KINDS = ("codex-exec", "claude-subagent", "external-session", "operator")
 RESULTS = ("go", "no-go")
@@ -73,115 +76,35 @@ def _require_str(errors: list[str], data: dict[str, Any], field: str, label: str
 
 
 def _validate_verdict(data: Any) -> list[str]:
+    errors = validate_with_schema(data, SCHEMA_FILE)
+    if errors:
+        return errors
+    return _validate_verdict_semantics(data)
+
+
+def _validate_verdict_semantics(data: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if not isinstance(data, dict):
-        return ["verdict must be a JSON object"]
-    if data.get("schema") not in ACCEPTED_SCHEMA_IDS:
-        accepted = "', '".join(ACCEPTED_SCHEMA_IDS)
-        errors.append(f"schema must be one of: '{accepted}'")
-    unknown = sorted(set(data) - TOP_LEVEL_KEYS)
-    if unknown:
-        errors.append(f"unknown top-level field(s): {', '.join(unknown)}")
-    _require_str(errors, data, "reviewed_at", "verdict")
-
-    card = data.get("card")
-    if not isinstance(card, dict):
-        errors.append("card must be an object with id and path")
-    else:
-        _require_str(errors, card, "id", "card")
-        _require_str(errors, card, "path", "card")
-
-    workspace = data.get("workspace")
-    if not isinstance(workspace, dict):
-        errors.append("workspace must be an object with root, head_commit and diff_fingerprint")
-    else:
-        _require_str(errors, workspace, "root", "workspace")
-        _require_str(errors, workspace, "head_commit", "workspace")
-        fingerprint = _require_str(errors, workspace, "diff_fingerprint", "workspace")
-        if fingerprint is not None and not FINGERPRINT_RE.match(fingerprint):
-            errors.append("workspace.diff_fingerprint must match 'sha256:<64 hex digits>'")
-
-    reviewer = data.get("reviewer")
-    if not isinstance(reviewer, dict):
-        errors.append("reviewer must be an object with kind and independence")
-    else:
-        if reviewer.get("kind") not in REVIEWER_KINDS:
-            errors.append(f"reviewer.kind must be one of: {', '.join(REVIEWER_KINDS)}")
-        independence = reviewer.get("independence")
-        if not isinstance(independence, dict):
-            errors.append("reviewer.independence must be an object")
-        else:
-            if independence.get("fresh_context") is not True:
-                errors.append("reviewer.independence.fresh_context must be true")
-            if independence.get("did_not_plan_or_implement") is not True:
-                errors.append("reviewer.independence.did_not_plan_or_implement must be true")
-            basis = independence.get("basis")
-            if not isinstance(basis, str) or not basis.strip():
-                errors.append("reviewer.independence.basis must be a non-empty string")
-
-    result = data.get("result")
-    if result not in RESULTS:
-        errors.append(f"result must be one of: {', '.join(RESULTS)}")
-
-    review_cycle = data.get("review_cycle")
-    if not isinstance(review_cycle, int) or isinstance(review_cycle, bool) or review_cycle < 1:
-        errors.append("review_cycle must be an integer >= 1")
 
     has_failed_acceptance = False
     acceptance = data.get("acceptance")
-    if not isinstance(acceptance, list) or not acceptance:
-        errors.append("acceptance must be a non-empty array of criterion verdicts")
-    else:
-        for index, entry in enumerate(acceptance):
-            label = f"acceptance[{index}]"
-            if not isinstance(entry, dict):
-                errors.append(f"{label} must be an object")
-                continue
-            _require_str(errors, entry, "criterion", label)
-            _require_str(errors, entry, "evidence", label)
-            verdict = entry.get("verdict")
-            if verdict not in ACCEPTANCE_VERDICTS:
-                errors.append(f"{label}.verdict must be one of: {', '.join(ACCEPTANCE_VERDICTS)}")
-            elif verdict == "fail":
-                has_failed_acceptance = True
+    for entry in acceptance:
+        if entry.get("verdict") == "fail":
+            has_failed_acceptance = True
 
     has_blocker = False
     findings = data.get("findings")
-    if not isinstance(findings, list):
-        errors.append("findings must be an array (empty when there are none)")
-    else:
-        seen_ids: set[str] = set()
-        for index, entry in enumerate(findings):
-            label = f"findings[{index}]"
-            if not isinstance(entry, dict):
-                errors.append(f"{label} must be an object")
-                continue
-            finding_id = entry.get("id")
-            if not isinstance(finding_id, str) or not FINDING_ID_RE.match(finding_id):
-                errors.append(f"{label}.id must match 'R<number>'")
-            elif finding_id in seen_ids:
-                errors.append(f"{label}.id duplicates {finding_id}")
-            else:
-                seen_ids.add(finding_id)
-            severity = entry.get("severity")
-            if severity not in SEVERITIES:
-                errors.append(f"{label}.severity must be one of: {', '.join(SEVERITIES)}")
-            elif severity == "blocker":
-                has_blocker = True
-            if entry.get("area") not in AREAS:
-                errors.append(f"{label}.area must be one of: {', '.join(AREAS)}")
-            _require_str(errors, entry, "summary", label)
-
-    audit = data.get("evidence_audit")
-    if audit is not None:
-        if not isinstance(audit, dict):
-            errors.append("evidence_audit must be an object")
+    seen_ids: set[str] = set()
+    for index, entry in enumerate(findings):
+        label = f"findings[{index}]"
+        finding_id = entry.get("id")
+        if finding_id in seen_ids:
+            errors.append(f"{label}.id duplicates {finding_id}")
         else:
-            for field in ("claims_checked", "claims_unbacked"):
-                value = audit.get(field)
-                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-                    errors.append(f"evidence_audit.{field} must be an integer >= 0")
+            seen_ids.add(finding_id)
+        if entry.get("severity") == "blocker":
+            has_blocker = True
 
+    result = data.get("result")
     if result == "go" and (has_blocker or has_failed_acceptance):
         errors.append("result 'go' is inconsistent with blocker findings or failed acceptance criteria")
     if result == "no-go" and not (has_blocker or has_failed_acceptance):

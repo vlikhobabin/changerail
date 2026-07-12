@@ -22,6 +22,7 @@ SCHEMA = "changerail.delivery-run.v1"
 AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
+TERMINAL_FIELD_KEYS = {"terminal_outcome", "terminal-outcome", "outcome", "result"}
 
 
 @dataclass
@@ -262,34 +263,37 @@ def parse_usage(stdout_path: Path) -> dict[str, Any]:
     return usage
 
 
-def normalize_terminal_value(value: str, key: str | None = None) -> str | None:
+def normalize_terminal_value(value: str) -> str | None:
     normalized = value.strip().lower().replace("_", "-").replace(" ", "-")
     if not normalized:
         return None
+    if normalized in {"delivered", "delivery/delivered"}:
+        return "DELIVERED"
     if normalized in {"no-go", "nogo"} or normalized.endswith("/no-go"):
         return "NO-GO"
     if "awaiting-review" in normalized or normalized in {"awaiting-external-review", "awaiting-review"}:
         return "BLOCKED"
-    if normalized in {"blocked", "failed", "error"}:
+    if normalized in {"blocked", "delivery/blocked"}:
         return "BLOCKED"
-    if key in {"terminal_outcome", "terminal-outcome", "outcome", "result"} and normalized == "delivered":
-        return "DELIVERED"
     return None
 
 
-def collect_terminal_outcomes(value: Any, key: str | None = None) -> list[str]:
-    outcomes: list[str] = []
-    if isinstance(value, str):
-        outcome = normalize_terminal_value(value, key)
-        if outcome:
-            outcomes.append(outcome)
-    elif isinstance(value, dict):
-        for child_key, child_value in value.items():
-            outcomes.extend(collect_terminal_outcomes(child_value, str(child_key)))
-    elif isinstance(value, list):
-        for item in value:
-            outcomes.extend(collect_terminal_outcomes(item, key))
-    return outcomes
+def event_terminal_outcome(event: Any) -> str | None:
+    if not isinstance(event, dict):
+        return None
+    for key in ("type", "event", "name"):
+        value = event.get(key)
+        if isinstance(value, str):
+            outcome = normalize_terminal_value(value)
+            if outcome:
+                return outcome
+    for key in TERMINAL_FIELD_KEYS:
+        value = event.get(key)
+        if isinstance(value, str):
+            outcome = normalize_terminal_value(value)
+            if outcome:
+                return outcome
+    return None
 
 
 def stdout_terminal_outcome(stdout_path: Path) -> str | None:
@@ -297,17 +301,16 @@ def stdout_terminal_outcome(stdout_path: Path) -> str | None:
         text = stdout_path.read_text(encoding="utf-8")
     except OSError:
         return None
-    observed: list[str] = []
+    outcome: str | None = None
     for line in text.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        observed.extend(collect_terminal_outcomes(event))
-    for outcome in TERMINAL_OUTCOMES:
-        if outcome in observed:
-            return outcome
-    return None
+        candidate = event_terminal_outcome(event)
+        if candidate:
+            outcome = candidate
+    return outcome
 
 
 def command_preflight(args: argparse.Namespace) -> int:

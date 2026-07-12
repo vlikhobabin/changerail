@@ -98,6 +98,17 @@ Migration source of truth живет в [migration guide](migration-guide.md).
 8. Запустить smoke checks, которые относятся к измененной поверхности.
 9. Выполнить independent review gate перед publish.
 
+Schema coverage в release и project verification включает все публичные
+contract schemas:
+
+```text
+schemas/changerail-review-verdict.schema.json
+schemas/changerail-review-cycle-history.schema.json
+schemas/changerail-delivery-manifest.schema.json
+schemas/changerail-delivery-run.schema.json
+schemas/changerail-evidence-index.schema.json
+```
+
 Минимальный локальный baseline:
 
 ```bash

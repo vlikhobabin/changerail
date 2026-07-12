@@ -39,7 +39,9 @@ FORBIDDEN_TRACKED_EXACT = {
 }
 SCHEMAS = (
     "changerail-review-verdict.schema.json",
+    "changerail-review-cycle-history.schema.json",
     "changerail-delivery-manifest.schema.json",
+    "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
 )
 STALE_OPSX_PATHS = (

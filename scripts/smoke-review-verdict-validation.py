@@ -100,7 +100,7 @@ def main() -> int:
         missing_path = verdict_dir / "missing-independence.json"
         write_json(missing_path, missing)
         missing_result = validate(missing_path, workspace)
-        if missing_result.returncode != 1 or "reviewer.independence" not in missing_result.stderr:
+        if missing_result.returncode != 1 or "independence" not in missing_result.stderr:
             sys.stderr.write("missing independence verdict did not fail as expected\n")
             sys.stderr.write(missing_result.stderr)
             return 1
@@ -110,7 +110,7 @@ def main() -> int:
         false_fresh_path = verdict_dir / "false-fresh-context.json"
         write_json(false_fresh_path, false_fresh)
         false_fresh_result = validate(false_fresh_path, workspace)
-        if false_fresh_result.returncode != 1 or "fresh_context must be true" not in false_fresh_result.stderr:
+        if false_fresh_result.returncode != 1 or "fresh_context" not in false_fresh_result.stderr:
             sys.stderr.write("false fresh_context verdict did not fail as expected\n")
             sys.stderr.write(false_fresh_result.stderr)
             return 1
@@ -122,10 +122,57 @@ def main() -> int:
         false_worker_result = validate(false_worker_path, workspace)
         if (
             false_worker_result.returncode != 1
-            or "did_not_plan_or_implement must be true" not in false_worker_result.stderr
+            or "did_not_plan_or_implement" not in false_worker_result.stderr
         ):
             sys.stderr.write("false did_not_plan_or_implement verdict did not fail as expected\n")
             sys.stderr.write(false_worker_result.stderr)
+            return 1
+
+        extra_nested = deepcopy(valid)
+        extra_nested["reviewer"]["independence"]["unexpected"] = True  # type: ignore[index]
+        extra_nested_path = verdict_dir / "extra-nested-field.json"
+        write_json(extra_nested_path, extra_nested)
+        extra_nested_result = validate(extra_nested_path, workspace)
+        if extra_nested_result.returncode != 1 or "Additional properties" not in extra_nested_result.stderr:
+            sys.stderr.write("extra nested field verdict did not fail as expected\n")
+            sys.stderr.write(extra_nested_result.stderr)
+            return 1
+
+        bad_time = deepcopy(valid)
+        bad_time["reviewed_at"] = "not-a-date-time"
+        bad_time_path = verdict_dir / "bad-reviewed-at.json"
+        write_json(bad_time_path, bad_time)
+        bad_time_result = validate(bad_time_path, workspace)
+        if bad_time_result.returncode != 1 or "date-time" not in bad_time_result.stderr:
+            sys.stderr.write("bad reviewed_at verdict did not fail as expected\n")
+            sys.stderr.write(bad_time_result.stderr)
+            return 1
+
+        bad_type = deepcopy(valid)
+        bad_type["evidence_audit"]["claims_checked"] = "1"  # type: ignore[index]
+        bad_type_path = verdict_dir / "bad-nested-type.json"
+        write_json(bad_type_path, bad_type)
+        bad_type_result = validate(bad_type_path, workspace)
+        if bad_type_result.returncode != 1 or "$.evidence_audit.claims_checked" not in bad_type_result.stderr:
+            sys.stderr.write("bad nested type verdict did not fail as expected\n")
+            sys.stderr.write(bad_type_result.stderr)
+            return 1
+
+        malformed_go = deepcopy(valid)
+        malformed_go["findings"] = [
+            {
+                "id": "R1",
+                "severity": "blocker",
+                "area": "code",
+                "summary": "blocker must make go invalid",
+            }
+        ]
+        malformed_go_path = verdict_dir / "malformed-go.json"
+        write_json(malformed_go_path, malformed_go)
+        malformed_go_result = validate(malformed_go_path, workspace, check_fresh=True)
+        if malformed_go_result.returncode != 1 or "result 'go' is inconsistent" not in malformed_go_result.stderr:
+            sys.stderr.write("malformed go verdict did not fail freshness gate as expected\n")
+            sys.stderr.write(malformed_go_result.stderr)
             return 1
 
     print("SMOKE_REVIEW_VERDICT_VALIDATION_OK")
