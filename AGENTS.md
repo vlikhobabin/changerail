@@ -110,4 +110,9 @@ git status --short --ignored
 ```
 
 Before public commit, also scan for local/private names appropriate to this
-machine and confirm ignored files stay ignored.
+machine and confirm ignored files stay ignored. Prefer the tracked helper when
+available:
+
+```bash
+python3 scripts/public-surface-scan.py
+```

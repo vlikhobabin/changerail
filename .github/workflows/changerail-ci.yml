@@ -43,14 +43,25 @@ jobs:
             bin/bootstrap-project \
             bin/verify-project \
             scripts/changerail_review_verdict.py \
+            scripts/changerail_delivery_manifest.py \
+            scripts/public-surface-scan.py \
             scripts/smoke-bootstrap-project.py \
+            scripts/smoke-delivery-manifest.py \
+            scripts/smoke-delivery-manifest-derive.py \
             scripts/smoke-drift.py \
+            scripts/smoke-openspec-archive-diagnostics.py \
+            scripts/smoke-review-verdict-validation.py \
             scripts/smoke-release-ci.py \
             scripts/smoke-verify-project.py \
             scripts/smoke-wiring-discovery.py
 
       - name: CI contract smoke
         run: python3 scripts/smoke-release-ci.py
+
+      - name: Public surface scan
+        run: |
+          python3 scripts/public-surface-scan.py --self-test
+          python3 scripts/public-surface-scan.py
 
       - name: Wiring discovery smoke
         run: python3 scripts/smoke-wiring-discovery.py
@@ -60,6 +71,14 @@ jobs:
 
       - name: Bootstrap smoke
         run: python3 scripts/smoke-bootstrap-project.py
+
+      - name: Delivery manifest smoke
+        run: |
+          python3 scripts/smoke-delivery-manifest.py
+          python3 scripts/smoke-delivery-manifest-derive.py
+
+      - name: OpenSpec archive diagnostics smoke
+        run: python3 scripts/smoke-openspec-archive-diagnostics.py
 
       - name: Drift smoke with generated fixture
         run: |

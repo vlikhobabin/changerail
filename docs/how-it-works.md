@@ -88,6 +88,26 @@ ignored runtime state, а карточка, tasks или manifest содержа
 регрессе; для docs/config-only changes можно явно указать, что RED evidence
 неприменима.
 
+Для card-level handoff manifest можно строить helper-ом:
+
+```bash
+python3 scripts/changerail_delivery_manifest.py derive \
+  openspec/board/3.inprogress/example.md --write --json
+```
+
+`staging-plan` по manifest дает reviewable список путей для scoped publish, но
+publish все равно повторно сверяет scope с `git status`.
+
+Перед публичным commit используйте единый scanner вместо ad hoc regex:
+
+```bash
+python3 scripts/public-surface-scan.py
+```
+
+Default mode scans the tracked public surface including `openspec/changes/archive`,
+so archived OpenSpec artifacts are checked together with docs, skills, scripts,
+templates and board/spec files.
+
 ## Non-interactive runner и status
 
 Для длительных supervised запусков ChangeRail предоставляет tracked helper
@@ -179,6 +199,11 @@ CSV mode предназначен для внешней аналитики; от
 
 Publish работает **fail-closed**: без валидного свежего `go`-вердикта публикация
 не происходит.
+
+После успешного payload commit `changerail-pub` может использовать helper для
+детерминированной board finalization: move `3.inprogress -> 4.done`, обновление
+`Result`/`Log`/`Next` и card-only amend. Такие edits являются metadata, а не
+содержательным изменением reviewed payload.
 
 ## Что делает пользователь
 

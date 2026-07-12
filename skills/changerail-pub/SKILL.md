@@ -147,6 +147,22 @@ conventions require it. This post-publish card metadata is deterministic
 finalization, not a substantive change to the reviewed payload. If this creates
 a new card-only diff before push, amend only the card with explicit staging.
 
+When the workspace provides `scripts/changerail_delivery_manifest.py`, prefer
+helper-assisted finalization:
+
+```bash
+python3 scripts/changerail_delivery_manifest.py finalize-card "<card-path>" \
+  --commit "<commit>" --remote "<remote>" --branch "<branch>" \
+  --push-status pending --timestamp "<utc>"
+git add -- <old-card-path> <new-card-path>
+git commit --amend --no-edit
+```
+
+This helper may only move/update board metadata: `Status`, `Owner`,
+`OpenSpec Stage`, `Result`, `Next` and `Log`. If finalization would require
+substantive code, docs, specs, schemas, scripts or tests changes, stop and send
+the card back through delivery/review.
+
 ### 6. Push
 
 Skip only with `--no-push`.
@@ -159,6 +175,17 @@ git push
 
 If no upstream exists and project policy permits it, use `git push -u origin
 HEAD`. Never force-push.
+
+After push, update ignored manifest publish metadata when the helper exists:
+
+```bash
+python3 scripts/changerail_delivery_manifest.py publish-update \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --status pushed --commit "<commit>" --remote "<remote>" --branch "<branch>" \
+  --pushed-at "<utc>" --mode review-gated
+```
+
+Never stage the ignored manifest.
 
 ## Safety Stops
 

@@ -56,6 +56,35 @@ def contains_placeholder(project: Path) -> list[str]:
     return offenders
 
 
+def missing_workflow_guidance(project: Path) -> list[str]:
+    checks = {
+        "AGENTS.md": [
+            "explore -> ff -> do -> review -> pub",
+            "## Supervised Roles",
+            "Reviewer работает в fresh context",
+            "3.inprogress",
+            "4.done",
+        ],
+        "openspec/board/README.md": [
+            "explore -> ff -> do -> review -> pub",
+            "fresh independent `go` verdict",
+            "`3.inprogress -> 4.done`",
+            "`review` должен быть fresh context",
+        ],
+    }
+    missing: list[str] = []
+    for rel_path, needles in checks.items():
+        path = project / rel_path
+        if not path.is_file():
+            missing.append(f"{rel_path}: file missing")
+            continue
+        text = path.read_text(encoding="utf-8")
+        for needle in needles:
+            if needle not in text:
+                missing.append(f"{rel_path}: missing {needle!r}")
+    return missing
+
+
 def check_bootstrap_success(changerail_root: Path, run_dir: Path) -> Check:
     project = run_dir / "example-project"
     result = run(
@@ -77,6 +106,9 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path) -> Check:
     verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root)
     if verify.returncode != 0:
         return Check("bootstrap valid project", "fail", verify.stdout.strip())
+    workflow_missing = missing_workflow_guidance(project)
+    if workflow_missing:
+        return Check("bootstrap workflow guidance", "fail", "; ".join(workflow_missing))
     return Check("bootstrap valid project", "pass", "project generated and verified")
 
 

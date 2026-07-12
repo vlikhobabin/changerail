@@ -83,11 +83,30 @@ runtime paths, preexisting dirty state и publish handoff details. Publish
 использует manifest как initial staging proposal, но обязан повторно сверить
 его с `git status` и не stage-ить runtime files.
 
+Helper может вывести или обновить manifest из текущей карточки и workspace
+state:
+
+```bash
+python3 scripts/changerail_delivery_manifest.py derive \
+  openspec/board/3.inprogress/example.md --write --json
+python3 scripts/changerail_delivery_manifest.py staging-plan \
+  .runtime/changerail/delivery-manifests/example.json --json
+```
+
 `committable_paths` может фиксировать `operation`: `add`, `modify`, `delete`,
 `rename` или `unknown`. Для удаления manifest сохраняет удаленный
 `source_path`; для rename - `source_path` и `target_path`, чтобы staging
 proposal включал оба пути board move или другого card-owned перемещения.
 Отсутствующая операция означает legacy entry и требует сверки с `git status`.
+
+После publish ignored manifest можно обновить без staging runtime state:
+
+```bash
+python3 scripts/changerail_delivery_manifest.py publish-update \
+  .runtime/changerail/delivery-manifests/example.json \
+  --status pushed --commit <commit> --remote origin --branch main \
+  --pushed-at <utc> --mode review-gated
+```
 
 ## Evidence Index
 

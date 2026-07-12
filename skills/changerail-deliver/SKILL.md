@@ -153,6 +153,41 @@ On `no-go`, fix blocker findings in card scope using `changerail-do`, then reque
 one re-review. Default `--max-review-cycles` is `1`; a second consecutive
 `no-go` is a safety stop.
 
+When launching a fresh reviewer context, use this review contract as the prompt
+body and fill in the card path and id:
+
+```text
+You are an independent ChangeRail reviewer for <workspace>.
+Run the fresh-context review gate for:
+<card-path>
+
+Boundaries:
+- You did not plan or implement this payload.
+- Do not stage, commit, push or modify tracked reviewed payload files.
+- Read AGENTS.md, AGENTS.shared.md, skills/changerail-review/SKILL.md and
+  skills/changerail-review/references/changerail-review-verdict.md before
+  writing a verdict.
+- Review the card, delivery manifest, archived OpenSpec changes, synced specs
+  and full working-tree diff for the manifest scope.
+- Audit acceptance criteria, evidence claims, mandatory verification, test
+  adequacy, scope and public-safety risks.
+- Write only .runtime/changerail/reviews/<card-id>.json and optional ignored
+  review history.
+- Include reviewer.independence with fresh_context true,
+  did_not_plan_or_implement true and a non-empty basis.
+- Compute the workspace fingerprint and validate the verdict with:
+  python3 scripts/changerail_review_verdict.py validate \
+    .runtime/changerail/reviews/<card-id>.json --json
+```
+
+After the reviewer returns, the orchestrator MUST validate the canonical verdict
+with `--check-fresh` before publish:
+
+```bash
+python3 scripts/changerail_review_verdict.py validate \
+  ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
+```
+
 ### 4. Publish
 
 Run `changerail-pub` for the re-resolved card. Pass `--no-push` when supplied. Do not

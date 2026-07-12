@@ -4,5 +4,49 @@ set -euo pipefail
 openspec_version="${OPENSPEC_VERSION:-1.3.1}"
 
 cd "${OPENSPEC_WORKDIR:-$PWD}"
+
+is_archive=false
+skip_specs=false
+if [[ "${1:-}" == "archive" ]]; then
+  is_archive=true
+  for arg in "$@"; do
+    if [[ "$arg" == "--skip-specs" ]]; then
+      skip_specs=true
+      break
+    fi
+  done
+fi
+
+if [[ "$is_archive" == "true" && "$skip_specs" == "false" ]]; then
+  output_file="$(mktemp)"
+  cleanup() {
+    rm -f "$output_file"
+  }
+  trap cleanup EXIT
+
+  set +e
+  env OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}" \
+    npx -y "@fission-ai/openspec@${openspec_version}" "$@" \
+    > >(tee "$output_file") \
+    2> >(tee -a "$output_file" >&2)
+  status=$?
+  set -e
+
+  if grep -q 'ADDED failed for header "### Requirement: .*" - already exists' "$output_file" \
+    && grep -q 'Aborted\. No files were changed\.' "$output_file"; then
+    cat >&2 <<'EOF'
+
+ChangeRail diagnostic: OpenSpec archive detected an already-synced requirement
+duplicate and aborted without changing files. If you intentionally synced the
+delta specs into main specs before archive, rerun the archive command with
+--skip-specs. Otherwise inspect the duplicate requirement and resolve the spec
+sync conflict before archiving.
+EOF
+    exit 1
+  fi
+
+  exit "$status"
+fi
+
 exec env OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}" \
   npx -y "@fission-ai/openspec@${openspec_version}" "$@"

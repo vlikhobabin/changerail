@@ -65,6 +65,12 @@ OPENSPEC_VERSION=1.3.1 /opt/changerail/bin/openspec validate --all
 Wrapper выключает telemetry по умолчанию через `OPENSPEC_TELEMETRY=0`, если
 operator явно не задал другое значение.
 
+Для `archive` wrapper также делает fail-closed диагностику известного случая:
+если OpenSpec CLI сообщает, что `ADDED` requirement уже есть в main spec и
+архивация aborted без изменений, wrapper возвращает non-zero и предлагает
+повторить команду с `--skip-specs` только после проверки, что specs уже
+синхронизированы намеренно.
+
 ## Consumer Wiring
 
 Consumer project может подключать `openspec-*` skills так же, как `changerail-*`:
