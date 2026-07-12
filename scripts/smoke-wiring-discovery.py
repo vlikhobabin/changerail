@@ -57,6 +57,11 @@ SHORT_COMMANDS = {
     "deliver": "chrl-deliver",
 }
 FORBIDDEN_CONSUMER_ROOT_SKILLS = re.compile(r"(^|[\s`'\"])(\./)?skills/")
+DELIVER_REVIEW_CYCLE_CONTRACT = (
+    "$changerail-deliver <path> --max-review-cycles 2",
+    "Default `--max-review-cycles` is `2`",
+    "a third consecutive `no-go` is",
+)
 
 
 @dataclass
@@ -188,9 +193,14 @@ def check_skill_contract(
             failures.append(f"SKILL.md cannot be read: {exc}")
     if actual_name != expected_name:
         failures.append(f"frontmatter name is {actual_name!r}, expected {expected_name!r}")
+    if expected_name == "changerail-deliver" and not failures:
+        text = skill_md.read_text(encoding="utf-8")
+        missing = [fragment for fragment in DELIVER_REVIEW_CYCLE_CONTRACT if fragment not in text]
+        if missing:
+            failures.append("changerail-deliver review rescue budget contract missing: " + ", ".join(missing))
 
     status = "fail" if failures else "pass"
-    message = "; ".join(failures) if failures else "SKILL.md frontmatter name matches"
+    message = "; ".join(failures) if failures else "SKILL.md contract matches"
     return Check(
         name=f"{surface} {mode} {expected_name} skill contract",
         path=str(skill_md),

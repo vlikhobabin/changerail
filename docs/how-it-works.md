@@ -163,8 +163,10 @@ over-claim -> no-go -> scoped rescue -> re-review -> go -> pub
 Если review находит over-claim, missing evidence или out-of-scope файл,
 reviewer пишет `no-go` с blocker finding. Implementing session исправляет
 только scoped blocker, обновляет evidence и снова передает карточку на свежий
-review. Когда re-review возвращает `go`, publish может продолжать. Предыдущий
-`no-go` сохраняется в review-cycle history, а latest canonical verdict остается
+review. Дефолтный `deliver` допускает два таких scoped rescue-подхода после
+первого `no-go`; третий подряд `no-go` останавливает workflow safety stop-ом.
+Когда re-review возвращает `go`, publish может продолжать. Предыдущий `no-go`
+сохраняется в review-cycle history, а latest canonical verdict остается
 совместимым с publish freshness gate.
 
 `bin/changerail-delivery-metrics` читает `.runtime/changerail/delivery-runs/*/status.json`

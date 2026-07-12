@@ -213,6 +213,8 @@ findings, а не молчаливым pass.
 Review-cycle history сохраняется как ignored runtime evidence отдельно от
 latest canonical verdict. Это позволяет видеть цепочку `no-go -> fix ->
 re-review -> go` в метриках, не меняя fail-closed publish gate.
+Дефолтный `deliver` допускает два scoped rescue-подхода после первого `no-go`;
+третий подряд `no-go` должен становиться safety stop-ом, а не публикацией.
 
 ## Publish
 

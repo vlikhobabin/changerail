@@ -106,6 +106,12 @@ while preserving phase safety stops and scoped publish behavior.
 - **THEN** `changerail-deliver` stops at the review gate and prints the review and
   resume commands without publishing
 
+#### Scenario: Deliver uses the default review rescue budget
+- **WHEN** `changerail-deliver` receives consecutive `no-go` review verdicts
+- **THEN** the default policy allows two scoped rescue attempts after the first
+  `no-go`
+- **AND** the third consecutive `no-go` is a safety stop instead of publish
+
 ### Requirement: Delivery skills preserve review-gated lifecycle
 ChangeRail lifecycle skills MUST keep implementation, independent review and publish
 as separate gates with explicit card-state responsibilities.

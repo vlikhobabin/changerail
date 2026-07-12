@@ -212,8 +212,10 @@ fresh reviewer пишет go/no-go verdict
 ```
 
 Если review вернул `no-go`, worker исправляет только scoped blocker, затем
-нужен fresh re-review. Старый `go` нельзя использовать после содержательных
-изменений code/docs/specs/scripts/tests.
+нужен fresh re-review. Дефолтный `deliver` допускает два scoped rescue-подхода
+после первого `no-go`; третий подряд `no-go` становится safety stop. Старый
+`go` нельзя использовать после содержательных изменений
+code/docs/specs/scripts/tests.
 
 ## Batch delivery и очередь карточек
 

@@ -50,7 +50,7 @@ $changerail-deliver <path> --max-cards 3
 $changerail-deliver <path> --no-push
 $changerail-deliver <path> --max-fix-cycles 2
 $changerail-deliver <path> --no-review
-$changerail-deliver <path> --max-review-cycles 1
+$changerail-deliver <path> --max-review-cycles 2
 ```
 
 Accept legacy prompt forms such as `/changerail:deliver`, `changerail:deliver`,
@@ -149,9 +149,10 @@ Preferred order:
    $changerail-deliver <card-path>      # resume; completed phases no-op
    ```
 
-On `no-go`, fix blocker findings in card scope using `changerail-do`, then request
-one re-review. Default `--max-review-cycles` is `1`; a second consecutive
-`no-go` is a safety stop.
+On `no-go`, fix blocker findings in card scope using `changerail-do`, then
+request a fresh re-review. Default `--max-review-cycles` is `2`, allowing two
+scoped rescue attempts after the first `no-go`; a third consecutive `no-go` is
+a safety stop.
 
 When launching a fresh reviewer context, use this review contract as the prompt
 body and fill in the card path and id:
