@@ -224,6 +224,7 @@ python3 /opt/changerail/scripts/smoke-drift.py \
 Основные документы:
 
 - [Как это работает](docs/how-it-works.md)
+- [Гайд по доскам и двум агентам при разработке фичи](docs/board-and-two-agent-feature-flow.md)
 - [Runbook подключения существующего проекта](docs/consumer-adoption-runbook.md)
 - [ChangeRail как единый source of truth разработки](docs/changerail-source-of-truth-architecture.md)
 - [OpenSpec lifecycle source](docs/openspec-lifecycle.md)

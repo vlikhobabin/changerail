@@ -186,5 +186,6 @@ Publish работает **fail-closed**: без валидного свежег
 ## Дальше
 
 - [Общая методология ChangeRail для агентов](../AGENTS.shared.md)
+- [Гайд по доскам и двум агентам при разработке фичи](board-and-two-agent-feature-flow.md)
 - [ChangeRail contracts](changerail-contracts.md) — схемы verdict/manifest/evidence
 - [Архитектура: единый source of truth](changerail-source-of-truth-architecture.md)
