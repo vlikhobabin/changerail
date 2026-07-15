@@ -112,3 +112,46 @@ derive display totals when enough structured usage data exists.
 - **WHEN** a run record has cached input, uncached input, output or reasoning
   token counts
 - **THEN** metrics output displays those counts in text and CSV output
+
+### Requirement: Queue observability records
+ChangeRail delivery observability MUST treat aggregate queue status as a
+structured metrics input alongside existing delivery run records and review
+history.
+
+#### Scenario: Queue status is available
+- **WHEN** metrics read a `changerail.delivery-plan-status.v1` record
+- **THEN** they can report queue result, card counts, child run references,
+  terminal outcome and push/no-push mode without scraping raw logs
+
+#### Scenario: Queue status is unavailable
+- **WHEN** only existing child delivery run records are available
+- **THEN** existing delivery metrics behavior remains compatible
+- **AND** missing queue-level values are rendered as `unknown`
+
+### Requirement: Queue metrics from structured records
+The delivery metrics helper MUST read aggregate queue status and child delivery
+run records to report queue outcomes without parsing arbitrary text.
+
+#### Scenario: Queue status is present
+- **WHEN** metrics receive a queue status directory or default queue runtime
+  path containing `changerail.delivery-plan-status.v1` records
+- **THEN** metrics report queue id, result, terminal outcome, completed cards,
+  blocked/no-go cards, child run ids and push/no-push mode
+
+#### Scenario: Child records provide details
+- **WHEN** a queue status references child delivery run records
+- **THEN** metrics use the existing child record and review-cycle fields for
+  token usage, timing, findings and acceptance details
+
+#### Scenario: Queue details are missing
+- **WHEN** queue status is missing optional timing or child references
+- **THEN** metrics render those values as `unknown`
+
+### Requirement: Queue runtime paths
+ChangeRail observability MUST use ignored queue runtime paths for aggregate
+status, locks and logs.
+
+#### Scenario: Queue runner writes runtime state
+- **WHEN** a plan command writes aggregate status or locks
+- **THEN** the default path is under `.runtime/changerail/delivery-plans/`
+- **AND** raw logs and locks remain ignored runtime state

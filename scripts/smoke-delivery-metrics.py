@@ -64,11 +64,51 @@ def history(card_id: str, cycles: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def queue_status() -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-plan-status.v1",
+        "run_id": "queue-1",
+        "updated_at": "2026-07-11T00:00:30Z",
+        "plan": {
+            "id": "example-plan",
+            "path": "delivery-plan.json",
+            "fingerprint": "sha256:" + ("1" * 64),
+        },
+        "phase": "terminal",
+        "result": "DELIVERED",
+        "terminal_outcome": "DELIVERED",
+        "mode": "no-push",
+        "timestamps": {"started_at": "2026-07-11T00:00:00Z", "ended_at": "2026-07-11T00:00:30Z"},
+        "cards": [
+            {
+                "id": "card-a",
+                "workspace": "service-a",
+                "card": "card-a.md",
+                "state": "delivered",
+                "run_id": "run-1",
+                "run_status_path": "runs/run-1/status.json",
+                "result": "DELIVERED",
+            },
+            {
+                "id": "card-b",
+                "workspace": "service-b",
+                "card": "card-b.md",
+                "state": "delivered",
+                "run_id": "run-2",
+                "run_status_path": "runs/run-2/status.json",
+                "result": "DELIVERED",
+            },
+        ],
+        "summary": {"total_cards": 2, "delivered": 2, "blocked": 0, "no_go": 0, "skipped": 0},
+    }
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-delivery-metrics-") as tmp:
         root = Path(tmp)
         runs = root / "runs"
         reviews = root / "reviews"
+        plans = root / "plans"
         write_json(
             runs / "run-1" / "status.json",
             run_record(
@@ -167,11 +207,16 @@ def main() -> int:
                 ],
             ),
         )
+        write_json(plans / "queue-1" / "status.json", queue_status())
 
-        text = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews)])
+        text = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews), "--plans-dir", str(plans)])
         require_ok(text, "metrics text")
         if "first_pass_go_rate: 1/2" not in text.stdout or "findings_blocker: 1" not in text.stdout:
             raise AssertionError(f"unexpected text metrics: {text.stdout}")
+        if "queues:" not in text.stdout or "queue-1 plan=example-plan result=DELIVERED" not in text.stdout:
+            raise AssertionError(f"queue metrics were not reported: {text.stdout}")
+        if "child_run_ids=run-1;run-2" not in text.stdout:
+            raise AssertionError(f"queue child run references were not reported: {text.stdout}")
         if "finding_ids=R1;R2;R3" not in text.stdout:
             raise AssertionError(f"prior no-go finding details were not surfaced: {text.stdout}")
         for expected in (
@@ -185,7 +230,13 @@ def main() -> int:
             if expected not in text.stdout:
                 raise AssertionError(f"metrics text missing {expected}: {text.stdout}")
 
-        csv_result = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews), "--csv"])
+        json_result = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews), "--plans-dir", str(plans), "--json"])
+        require_ok(json_result, "metrics json")
+        json_payload = json.loads(json_result.stdout)
+        if json_payload["queue_aggregate"]["queues_delivered"] != 1:
+            raise AssertionError(f"queue aggregate missing from JSON metrics: {json_result.stdout}")
+
+        csv_result = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews), "--plans-dir", str(plans), "--csv"])
         require_ok(csv_result, "metrics csv")
         lines = csv_result.stdout.splitlines()
         for header in ("total_tokens", "cached_input_tokens", "slowest_commands", "review_timeline"):

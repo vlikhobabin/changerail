@@ -13,6 +13,7 @@ from typing import Any
 
 RUN_SCHEMA = "changerail.delivery-run.v1"
 HISTORY_SCHEMA = "changerail.review-cycle-history.v1"
+PLAN_STATUS_SCHEMA = "changerail.delivery-plan-status.v1"
 SEVERITIES = ("blocker", "major", "minor")
 ACCEPTANCE = ("pass", "fail", "unverifiable", "not_applicable")
 UNKNOWN = "unknown"
@@ -78,6 +79,51 @@ def collect_histories(reviews_dir: Path) -> dict[str, dict[str, Any]]:
             data["_path"] = str(path)
             histories[card["id"]] = data
     return histories
+
+
+def collect_plan_statuses(plans_dir: Path) -> list[dict[str, Any]]:
+    statuses: list[dict[str, Any]] = []
+    for path in sorted(plans_dir.glob("*/status.json")):
+        data = load_json(path)
+        if data and data.get("schema") == PLAN_STATUS_SCHEMA:
+            data["_path"] = str(path)
+            statuses.append(data)
+    return statuses
+
+
+def row_for_plan_status(status: dict[str, Any]) -> dict[str, Any]:
+    plan = status.get("plan") if isinstance(status.get("plan"), dict) else {}
+    summary = status.get("summary") if isinstance(status.get("summary"), dict) else {}
+    cards = status.get("cards") if isinstance(status.get("cards"), list) else []
+    child_run_ids = [
+        card.get("run_id")
+        for card in cards
+        if isinstance(card, dict) and isinstance(card.get("run_id"), str)
+    ]
+    return {
+        "queue_run_id": status.get("run_id", UNKNOWN),
+        "plan_id": plan.get("id", UNKNOWN),
+        "queue_result": status.get("result", UNKNOWN),
+        "terminal_outcome": status.get("terminal_outcome", UNKNOWN),
+        "mode": status.get("mode", UNKNOWN),
+        "total_cards": display_number(summary.get("total_cards")),
+        "delivered": display_number(summary.get("delivered")),
+        "blocked": display_number(summary.get("blocked")),
+        "no_go": display_number(summary.get("no_go")),
+        "skipped": display_number(summary.get("skipped")),
+        "child_run_ids": ";".join(child_run_ids) if child_run_ids else UNKNOWN,
+    }
+
+
+def plan_rows_and_aggregate(statuses: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    rows = [row_for_plan_status(status) for status in statuses]
+    aggregate = {
+        "queues": len(rows),
+        "queues_delivered": sum(1 for row in rows if row["queue_result"] == "DELIVERED"),
+        "queues_blocked": sum(1 for row in rows if row["queue_result"] == "BLOCKED"),
+        "queues_no_go": sum(1 for row in rows if row["queue_result"] == "NO-GO"),
+    }
+    return rows, aggregate
 
 
 def summarize_history(history: dict[str, Any] | None) -> dict[str, Any]:
@@ -253,7 +299,7 @@ def rows_and_aggregate(runs: list[dict[str, Any]], histories: dict[str, dict[str
     return rows, aggregate
 
 
-def print_text(rows: list[dict[str, Any]], aggregate: dict[str, Any]) -> None:
+def print_text(rows: list[dict[str, Any]], aggregate: dict[str, Any], queue_rows: list[dict[str, Any]], queue_aggregate: dict[str, Any]) -> None:
     print("per-run:")
     for row in rows:
         print(
@@ -273,6 +319,18 @@ def print_text(rows: list[dict[str, Any]], aggregate: dict[str, Any]) -> None:
     print("aggregate:")
     for key in sorted(aggregate):
         print(f"- {key}: {aggregate[key]}")
+    print("queues:")
+    for row in queue_rows:
+        print(
+            f"- {row['queue_run_id']} plan={row['plan_id']} result={row['queue_result']} "
+            f"terminal_outcome={row['terminal_outcome']} mode={row['mode']} "
+            f"total_cards={row['total_cards']} delivered={row['delivered']} "
+            f"blocked={row['blocked']} no_go={row['no_go']} skipped={row['skipped']} "
+            f"child_run_ids={row['child_run_ids']}"
+        )
+    print("queue_aggregate:")
+    for key in sorted(queue_aggregate):
+        print(f"- {key}: {queue_aggregate[key]}")
 
 
 def print_csv(rows: list[dict[str, Any]]) -> None:
@@ -318,6 +376,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runs-dir", type=Path, default=root / ".runtime" / "changerail" / "delivery-runs")
     parser.add_argument("--reviews-dir", type=Path, default=root / ".runtime" / "changerail" / "reviews")
+    parser.add_argument("--plans-dir", type=Path, default=root / ".runtime" / "changerail" / "delivery-plans")
     parser.add_argument("--csv", action="store_true", help="emit per-run CSV")
     parser.add_argument("--json", action="store_true", help="emit rows and aggregate as JSON")
     return parser.parse_args(argv)
@@ -326,12 +385,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     rows, aggregate = rows_and_aggregate(collect_runs(args.runs_dir), collect_histories(args.reviews_dir))
+    queue_rows, queue_aggregate = plan_rows_and_aggregate(collect_plan_statuses(args.plans_dir))
     if args.csv:
         print_csv(rows)
     elif args.json:
-        print(json.dumps({"rows": rows, "aggregate": aggregate}, ensure_ascii=False, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {"rows": rows, "aggregate": aggregate, "queues": queue_rows, "queue_aggregate": queue_aggregate},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
     else:
-        print_text(rows, aggregate)
+        print_text(rows, aggregate, queue_rows, queue_aggregate)
     return 0
 
 

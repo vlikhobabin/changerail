@@ -79,6 +79,15 @@ pipeline останавливается на review gate до внешнего r
 integration commits, submodule/gitlink updates или общий manifest публикуются
 отдельным сериализованным gate после завершения child-repo payloads.
 
+Для non-interactive dependency-ordered очередей через несколько child repos
+используйте tracked queue plan runner: `plan`, `preflight-plan`, `run-plan`,
+`resume-plan` и `status-plan`. Plan принадлежит consumer-у, использует
+workspace aliases и relative paths, а каждый live card всё равно запускается
+existing single-card runner-ом и пишет отдельный `changerail.delivery-run.v1`
+record. Queue aggregate status, logs и locks остаются under ignored
+`.runtime/changerail/`; stale lock-и не удаляются автоматически без явного
+operator action.
+
 Не объединяйте `review` с `do`. Review gate нужен потому, что контекст, который
 планировал и реализовывал изменение, недостаточно независим для финального
 quality gate.

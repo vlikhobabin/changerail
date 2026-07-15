@@ -10,6 +10,8 @@
 - `changerail.delivery-manifest.v1`
 - `changerail.evidence-index.v1`
 - `changerail.delivery-run.v1`
+- `changerail.delivery-plan.v1`
+- `changerail.delivery-plan-status.v1`
 - `changerail.review-cycle-history.v1`
 
 Schemas находятся в `schemas/`:
@@ -19,6 +21,8 @@ schemas/changerail-review-verdict.schema.json
 schemas/changerail-delivery-manifest.schema.json
 schemas/changerail-evidence-index.schema.json
 schemas/changerail-delivery-run.schema.json
+schemas/changerail-delivery-plan.schema.json
+schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-review-cycle-history.schema.json
 ```
 
@@ -218,6 +222,104 @@ truth; если их нет, fallback по `exit_code == 0` допустим т�
 успешный fallback как `BLOCKED`. Игнорируемый stale verdict сам по себе не
 переопределяет успешный fallback, если card уже опубликована и находится под
 `openspec/board/4.done`.
+
+## Delivery Plan
+
+Delivery plan является consumer-owned JSON-файлом:
+
+```text
+delivery-plan.json
+```
+
+Schema id: `changerail.delivery-plan.v1`. Plan описывает bounded queue через
+workspace aliases, consumer-root-relative workspace paths, card ids, card
+filenames или board paths, dependencies, waves, `max_parallel`,
+`per_workspace_parallelism` и optional per-card model/reasoning overrides.
+Required format is JSON, чтобы core runner не получал обязательную YAML
+dependency. YAML может быть добавлен позднее только как optional extension.
+
+Plan-файл является public-safe input contract. Он не должен содержать
+credentials, secrets, raw remotes, auth state, `.runtime/` state или
+machine-specific absolute workspace paths. Public examples должны использовать
+generic paths such as `/opt/example-a` only outside the plan itself; inside the
+plan workspace paths are relative to an operator-supplied consumer root:
+
+```json
+{
+  "schema": "changerail.delivery-plan.v1",
+  "id": "example-plan",
+  "max_parallel": 2,
+  "per_workspace_parallelism": 1,
+  "push_mode": "push",
+  "workspaces": [
+    {"alias": "service-a", "path": "service-a"},
+    {"alias": "service-b", "path": "service-b"}
+  ],
+  "waves": [
+    {"id": 1},
+    {"id": 2, "depends_on": [1]}
+  ],
+  "cards": [
+    {
+      "id": "service-a-card",
+      "workspace": "service-a",
+      "card": "openspec/board/3.inprogress/service-a-card.md",
+      "wave": 1
+    },
+    {
+      "id": "service-b-card",
+      "workspace": "service-b",
+      "card": "service-b-card.md",
+      "depends_on": ["service-a-card"],
+      "wave": 2
+    }
+  ]
+}
+```
+
+Schema validation checks shape and public-safe path fields. Runner semantic
+validation must additionally fail closed on cycles, duplicate aliases or card
+ids, missing workspaces/cards/dependencies, invalid wave/dependency relations
+and incompatible concurrency settings before the first live child launch.
+
+## Delivery Plan Status
+
+Delivery plan status является ignored runtime-файлом:
+
+```text
+.runtime/changerail/delivery-plans/<run-id>/status.json
+```
+
+Schema id: `changerail.delivery-plan-status.v1`. Status содержит plan id,
+plan fingerprint, phase, aggregate result, terminal outcome, push/no-push mode,
+resolved workspace/card state, preflight checks, locks, summary counts and
+references to each child card's `changerail.delivery-run.v1` status record.
+
+Queue status does not replace child delivery run records. Every live card still
+uses the existing single-card runner and keeps its own
+`.runtime/changerail/delivery-runs/<run-id>/status.json`. Queue status stores
+references such as child run ids and status paths; raw stdout/stderr logs stay
+ignored runtime evidence and are not embedded in aggregate status.
+
+Tracked queue runner commands:
+
+```bash
+bin/changerail-delivery-runner plan delivery-plan.json --consumer-root /opt/example-workspace --json
+bin/changerail-delivery-runner preflight-plan delivery-plan.json --consumer-root /opt/example-workspace --json
+bin/changerail-delivery-runner run-plan delivery-plan.json --consumer-root /opt/example-workspace
+bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /opt/example-workspace \
+  --status-path /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json
+bin/changerail-delivery-runner status-plan \
+  /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json --json
+```
+
+`preflight-plan` fails closed before live launch on invalid schema,
+cycle/duplicate/missing dependency, missing or ambiguous card, canceled card,
+invalid wave relation, invalid concurrency or workspace readiness failure.
+`run-plan` and `resume-plan` create ignored workspace locks, invoke the existing
+single-card runner for each live card and update aggregate status without
+scraping free-text logs. Locks that appear stale are diagnostic evidence only
+and are not automatically removed.
 
 ## Review Cycle History
 

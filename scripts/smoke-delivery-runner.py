@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import http.server
+import hashlib
 import json
 import os
 import subprocess
@@ -67,7 +68,7 @@ def create_workspace(root: Path, name: str) -> Path:
     (workspace / ".codex" / "config.toml").write_text("# smoke config\n", encoding="utf-8")
     (workspace / ".codex" / "auth.json").write_text("{}\n", encoding="utf-8")
     (workspace / "README.md").write_text("smoke workspace\n", encoding="utf-8")
-    (workspace / ".gitignore").write_text(".runtime/\n", encoding="utf-8")
+    (workspace / ".gitignore").write_text(".runtime/\n.codex/\n", encoding="utf-8")
     git(["init"], workspace)
     git(["add", ".gitignore", "README.md"], workspace)
     git(
@@ -123,6 +124,87 @@ def write_fake_launcher(path: Path) -> None:
     path.chmod(0o755)
 
 
+def write_fake_queue_runner(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import argparse, json, os, sys",
+                "from pathlib import Path",
+                "parser = argparse.ArgumentParser()",
+                "sub = parser.add_subparsers(dest='command', required=True)",
+                "run = sub.add_parser('run')",
+                "run.add_argument('card')",
+                "run.add_argument('--workspace', required=True)",
+                "run.add_argument('--runtime-root', required=True)",
+                "run.add_argument('--run-id', required=True)",
+                "run.add_argument('--model')",
+                "run.add_argument('--reasoning-effort')",
+                "run.add_argument('--deliver-arg', action='append', default=[])",
+                "preflight = sub.add_parser('preflight')",
+                "preflight.add_argument('card')",
+                "preflight.add_argument('--workspace', required=True)",
+                "preflight.add_argument('--runtime-root', required=True)",
+                "preflight.add_argument('--run-id', required=True)",
+                "preflight.add_argument('--json', action='store_true')",
+                "preflight.add_argument('--write-status', action='store_true')",
+                "args = parser.parse_args()",
+                "call_log = os.environ.get('CHANGERAIL_FAKE_CALL_LOG')",
+                "if call_log:",
+                "    with open(call_log, 'a', encoding='utf-8') as handle:",
+                "        handle.write(json.dumps({'argv': sys.argv, 'card': args.card}) + '\\n')",
+                "if args.command == 'preflight':",
+                "    status = {",
+                "        'schema': 'changerail.delivery-run.v1',",
+                "        'run_id': args.run_id,",
+                "        'updated_at': '2026-07-15T00:00:00Z',",
+                "        'workspace': {'root': args.workspace},",
+                "        'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
+                "        'phase': 'preflight',",
+                "        'result': 'DELIVERED',",
+                "        'timestamps': {'started_at': '2026-07-15T00:00:00Z', 'ended_at': '2026-07-15T00:00:01Z'},",
+                "        'command': {'argv': sys.argv, 'launcher': sys.argv[0], 'stdin': 'closed', 'json': True},",
+                "        'usage': {'available': False, 'reason': 'fake queue preflight'},",
+                "        'preflight': {'checks': [{'name': 'fake', 'status': 'pass', 'message': 'ready'}]},",
+                "    }",
+                "    path = Path(args.runtime_root) / args.run_id / 'status.json'",
+                "    path.parent.mkdir(parents=True, exist_ok=True)",
+                "    path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
+                "    print(json.dumps(status))",
+                "    sys.exit(0)",
+                "mode = os.environ.get('CHANGERAIL_QUEUE_FAKE_MODE')",
+                "result = 'DELIVERED'",
+                "if mode == 'no-go' and 'service-a-card' in args.card:",
+                "    result = 'NO-GO'",
+                "if mode == 'blocked' and 'service-a-card' in args.card:",
+                "    result = 'BLOCKED'",
+                "status = {",
+                "    'schema': 'changerail.delivery-run.v1',",
+                "    'run_id': args.run_id,",
+                "    'updated_at': '2026-07-15T00:00:00Z',",
+                "    'workspace': {'root': args.workspace},",
+                "    'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
+                "    'phase': 'terminal',",
+                "    'result': result,",
+                "    'terminal_outcome': result,",
+                "    'timestamps': {'started_at': '2026-07-15T00:00:00Z', 'ended_at': '2026-07-15T00:00:01Z'},",
+                "    'command': {'argv': sys.argv, 'launcher': sys.argv[0], 'stdin': 'closed', 'json': True},",
+                "    'usage': {'available': False, 'reason': 'fake queue runner'},",
+                "}",
+                "path = Path(args.runtime_root) / args.run_id / 'status.json'",
+                "path.parent.mkdir(parents=True, exist_ok=True)",
+                "path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
+                "print('terminal_outcome: ' + result)",
+                "print('status: ' + str(path))",
+                "sys.exit(0 if result == 'DELIVERED' else 1)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def load_status(runtime_root: Path, run_id: str) -> dict[str, Any]:
     return json.loads((runtime_root / run_id / "status.json").read_text(encoding="utf-8"))
 
@@ -145,6 +227,86 @@ def write_board_card(workspace: Path, card: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def write_queue_plan(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def queue_plan_fixture() -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-plan.v1",
+        "id": "queue-smoke",
+        "max_parallel": 2,
+        "per_workspace_parallelism": 1,
+        "push_mode": "push",
+        "workspaces": [
+            {"alias": "service-a", "path": "service-a"},
+            {"alias": "service-b", "path": "service-b"},
+        ],
+        "waves": [{"id": 1}, {"id": 2, "depends_on": [1]}],
+        "cards": [
+            {
+                "id": "service-a-card",
+                "workspace": "service-a",
+                "card": "service-a-card.md",
+                "wave": 1,
+                "model": "gpt-test",
+                "reasoning_effort": "low",
+            },
+            {
+                "id": "service-b-card",
+                "workspace": "service-b",
+                "card": "service-b-card.md",
+                "depends_on": ["service-a-card"],
+                "wave": 2,
+            },
+        ],
+    }
+
+
+def queue_plan_fingerprint(plan: dict[str, Any]) -> str:
+    encoded = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def configure_upstream_baseline(workspace: Path) -> None:
+    remote = workspace.parent / f"{workspace.name}.git"
+    git(["init", "--bare", str(remote)], workspace.parent)
+    git(["remote", "add", "origin", str(remote)], workspace)
+    git(["push", "-u", "origin", "HEAD"], workspace)
+
+
+def create_queue_consumer(tmp: Path, name: str, no_push_ready: bool = True) -> tuple[Path, Path, Path]:
+    consumer = tmp / name
+    consumer.mkdir()
+    service_a = create_workspace(consumer, "service-a")
+    service_b = create_workspace(consumer, "service-b")
+    if no_push_ready:
+        configure_upstream_baseline(service_a)
+        configure_upstream_baseline(service_b)
+    write_board_card(service_a, "openspec/board/3.inprogress/service-a-card.md")
+    write_board_card(service_a, "openspec/board/3.inprogress/duplicate-card.md")
+    write_board_card(service_a, "openspec/board/5.canceled/canceled-card.md")
+    write_board_card(service_b, "openspec/board/2.todo/service-b-card.md")
+    write_board_card(service_b, "openspec/board/2.todo/duplicate-card.md")
+    git(["add", "openspec"], service_a)
+    git(
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "cards"],
+        service_a,
+    )
+    git(["add", "openspec"], service_b)
+    git(
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "cards"],
+        service_b,
+    )
+    return consumer, service_a, service_b
 
 
 def review_fingerprint(workspace: Path) -> dict[str, str]:
@@ -736,6 +898,439 @@ def check_stale_symlink_preflight(tmp: Path) -> None:
         raise AssertionError(f"stale symlink was not reported: {checks['CODEX_HOME symlinks']}")
 
 
+def check_queue_plan_preflight(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-consumer")
+    plan = consumer / "delivery-plan.json"
+    runtime = tmp / "queue-runtime"
+    write_queue_plan(plan, queue_plan_fixture())
+
+    dry_run = run(
+        [
+            str(RUNNER),
+            "plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-dry-run",
+            "--launcher",
+            str(RUNNER),
+            "--json",
+            "--no-push",
+        ]
+    )
+    require_ok(dry_run, "queue plan dry-run")
+    payload = json.loads(dry_run.stdout)
+    if payload["result"] != "DELIVERED":
+        raise AssertionError(f"queue dry-run did not pass: {payload}")
+    commands = [card.get("command", []) for card in payload["cards"]]
+    if not any("--deliver-arg=--no-push" in command for command in commands):
+        raise AssertionError(f"dry-run did not propagate no-push to child command: {commands}")
+    if (service_a / ".runtime" / "changerail" / "delivery-runs").exists():
+        raise AssertionError("dry-run unexpectedly launched a child delivery")
+
+    preflight = run(
+        [
+            str(RUNNER),
+            "preflight-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-preflight",
+            "--launcher",
+            str(RUNNER),
+            "--json",
+        ]
+    )
+    require_ok(preflight, "queue preflight")
+    status = load_status(runtime, "queue-preflight")
+    if status["schema"] != "changerail.delivery-plan-status.v1" or status["result"] != "DELIVERED":
+        raise AssertionError(f"queue preflight status invalid: {status}")
+    if len(status["cards"]) != 2 or not all(card["state"] == "ready" for card in status["cards"]):
+        raise AssertionError(f"queue preflight did not resolve cards: {status['cards']}")
+
+    status_result = run(
+        [
+            str(RUNNER),
+            "status-plan",
+            str(runtime / "queue-preflight" / "status.json"),
+            "--json",
+        ]
+    )
+    require_ok(status_result, "queue status-plan")
+    status_payload = json.loads(status_result.stdout)
+    if status_payload["plan"]["id"] != "queue-smoke" or status_payload["result"] != "DELIVERED":
+        raise AssertionError(f"status-plan did not read aggregate status: {status_payload}")
+
+
+def check_queue_preflight_failures(tmp: Path) -> None:
+    cases: list[tuple[str, Any]] = [
+        (
+            "cycle",
+            lambda plan: (
+                plan["cards"][0].update({"depends_on": ["service-b-card"]}),
+                plan["cards"][1].update({"depends_on": ["service-a-card"]}),
+            ),
+        ),
+        ("duplicate-id", lambda plan: plan["cards"].append(dict(plan["cards"][0]))),
+        (
+            "duplicate-card",
+            lambda plan: plan["cards"].append(
+                {"id": "duplicate-card-copy", "workspace": "service-a", "card": "service-a-card.md", "wave": 1}
+            ),
+        ),
+        (
+            "duplicate-card-board-path",
+            lambda plan: plan["cards"].append(
+                {
+                    "id": "duplicate-card-path-copy",
+                    "workspace": "service-a",
+                    "card": "openspec/board/3.inprogress/service-a-card.md",
+                    "wave": 1,
+                }
+            ),
+        ),
+        ("missing-card", lambda plan: plan["cards"][0].update({"card": "missing-card.md"})),
+        ("missing-workspace", lambda plan: plan["cards"][0].update({"workspace": "missing-service"})),
+        ("missing-dependency", lambda plan: plan["cards"][1].update({"depends_on": ["missing-card"]})),
+        ("canceled-card", lambda plan: plan["cards"][0].update({"card": "canceled-card.md"})),
+        (
+            "invalid-wave",
+            lambda plan: (
+                plan["cards"][0].update({"wave": 1, "depends_on": ["service-b-card"]}),
+                plan["cards"][1].update({"wave": 2}),
+            ),
+        ),
+        ("invalid-concurrency", lambda plan: plan.update({"per_workspace_parallelism": 2})),
+    ]
+    for name, mutate in cases:
+        consumer, _service_a, _service_b = create_queue_consumer(tmp, f"queue-fail-{name}")
+        plan_payload = queue_plan_fixture()
+        mutate(plan_payload)
+        plan = consumer / "delivery-plan.json"
+        runtime = tmp / f"queue-fail-runtime-{name}"
+        write_queue_plan(plan, plan_payload)
+        result = run(
+            [
+                str(RUNNER),
+                "preflight-plan",
+                str(plan),
+                "--consumer-root",
+                str(consumer),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                name,
+                "--launcher",
+                str(RUNNER),
+                "--json",
+            ]
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"{name} preflight unexpectedly passed: {result.stdout}")
+        status = load_status(runtime, name)
+        if status["schema"] != "changerail.delivery-plan-status.v1" or status["result"] != "BLOCKED":
+            raise AssertionError(f"{name} did not write BLOCKED aggregate status: {status}")
+
+    dirty_consumer, dirty_service_a, _dirty_service_b = create_queue_consumer(tmp, "queue-fail-dirty")
+    (dirty_service_a / "DIRTY.txt").write_text("dirty\n", encoding="utf-8")
+    dirty_plan = dirty_consumer / "delivery-plan.json"
+    dirty_runtime = tmp / "queue-fail-runtime-dirty"
+    write_queue_plan(dirty_plan, queue_plan_fixture())
+    dirty_result = run(
+        [
+            str(RUNNER),
+            "preflight-plan",
+            str(dirty_plan),
+            "--consumer-root",
+            str(dirty_consumer),
+            "--runtime-root",
+            str(dirty_runtime),
+            "--run-id",
+            "dirty",
+            "--launcher",
+            str(RUNNER),
+            "--json",
+        ]
+    )
+    if dirty_result.returncode == 0:
+        raise AssertionError(f"dirty workspace preflight unexpectedly passed: {dirty_result.stdout}")
+    dirty_status = load_status(dirty_runtime, "dirty")
+    if dirty_status["result"] != "BLOCKED" or not any(check["name"] == "workspace dirty state" for check in dirty_status["checks"]):
+        raise AssertionError(f"dirty workspace did not produce structured BLOCKED status: {dirty_status}")
+
+
+def queue_lock_path(runtime: Path, workspace: Path) -> Path:
+    digest = hashlib.sha256(str(workspace.resolve(strict=False)).encode("utf-8")).hexdigest()[:16]
+    return runtime / "locks" / f"{digest}.lock"
+
+
+def queue_run_calls(call_log: Path) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for line in call_log.read_text(encoding="utf-8").splitlines():
+        call = json.loads(line)
+        argv = call.get("argv", [])
+        if len(argv) > 1 and argv[1] == "run":
+            calls.append(call)
+    return calls
+
+
+def check_queue_run_plan(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-run-consumer")
+    runner = tmp / "fake-queue-runner"
+    call_log = tmp / "queue-run-calls.jsonl"
+    runtime = tmp / "queue-run-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-run",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue run-plan")
+    status = load_status(runtime, "queue-run")
+    if status["result"] != "DELIVERED" or status["summary"]["delivered"] != 2:
+        raise AssertionError(f"queue run did not deliver both cards: {status}")
+    calls = queue_run_calls(call_log)
+    if len(calls) != 2:
+        raise AssertionError(f"queue run should invoke one child per card: {calls}")
+    first_call = calls[0]["argv"]
+    if "--model" not in first_call or "gpt-test" not in first_call:
+        raise AssertionError(f"per-card model override missing from live child invocation: {first_call}")
+    if "--reasoning-effort" not in first_call or "low" not in first_call:
+        raise AssertionError(f"per-card reasoning override missing from live child invocation: {first_call}")
+    if not all(Path(card["run_status_path"]).name == "status.json" for card in status["cards"]):
+        raise AssertionError(f"child status references missing: {status['cards']}")
+
+
+def check_queue_fail_fast_and_locks(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-fail-fast-consumer")
+    runner = tmp / "fake-queue-runner-fail"
+    call_log = tmp / "queue-fail-fast-calls.jsonl"
+    runtime = tmp / "queue-fail-fast-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "no-go"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-no-go",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("queue no-go unexpectedly passed")
+    status = load_status(runtime, "queue-no-go")
+    if status["result"] != "NO-GO" or status["summary"]["no_go"] != 1:
+        raise AssertionError(f"queue did not fail fast on NO-GO: {status}")
+    calls = queue_run_calls(call_log)
+    if len(calls) != 1:
+        raise AssertionError(f"dependent card should not launch after NO-GO: {calls}")
+
+    lock_consumer, lock_a, _lock_b = create_queue_consumer(tmp, "queue-lock-consumer")
+    lock_plan = lock_consumer / "delivery-plan.json"
+    lock_runtime = tmp / "queue-lock-runtime"
+    write_queue_plan(lock_plan, queue_plan_fixture())
+    lock_path = queue_lock_path(lock_runtime, lock_a)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("{}\n", encoding="utf-8")
+    lock_result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(lock_plan),
+            "--consumer-root",
+            str(lock_consumer),
+            "--runtime-root",
+            str(lock_runtime),
+            "--run-id",
+            "queue-lock",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=runner_env(),
+    )
+    if lock_result.returncode == 0:
+        raise AssertionError("queue lock conflict unexpectedly passed")
+    lock_status = load_status(lock_runtime, "queue-lock")
+    if lock_status["result"] != "BLOCKED" or not lock_path.exists():
+        raise AssertionError(f"queue lock was not fail-closed/preserved: {lock_status}")
+
+
+def check_queue_resume_plan(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-resume-consumer")
+    runner = tmp / "fake-queue-runner-resume"
+    call_log = tmp / "queue-resume-calls.jsonl"
+    runtime = tmp / "queue-resume-runtime"
+    plan_payload = queue_plan_fixture()
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, plan_payload)
+    previous = {
+        "schema": "changerail.delivery-plan-status.v1",
+        "run_id": "queue-resume",
+        "updated_at": "2026-07-15T00:00:00Z",
+        "plan": {"id": "queue-smoke", "path": "delivery-plan.json", "fingerprint": queue_plan_fingerprint(plan_payload)},
+        "phase": "terminal",
+        "result": "BLOCKED",
+        "terminal_outcome": "BLOCKED",
+        "mode": "no-push",
+        "timestamps": {"started_at": "2026-07-15T00:00:00Z", "ended_at": "2026-07-15T00:00:01Z"},
+        "cards": [
+            {
+                "id": "service-a-card",
+                "workspace": "service-a",
+                "card": "service-a-card.md",
+                "resolved_path": "openspec/board/3.inprogress/service-a-card.md",
+                "state": "delivered",
+                "result": "DELIVERED",
+                "wave": 1,
+            },
+            {
+                "id": "service-b-card",
+                "workspace": "service-b",
+                "card": "service-b-card.md",
+                "resolved_path": "openspec/board/2.todo/service-b-card.md",
+                "state": "blocked",
+                "wave": 2,
+                "depends_on": ["service-a-card"],
+            },
+        ],
+    }
+    previous_path = runtime / "previous" / "status.json"
+    write_json(previous_path, previous)
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-resume",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue resume-plan")
+    status = load_status(runtime, "queue-resume")
+    if status["summary"]["skipped"] != 1 or status["summary"]["delivered"] != 1:
+        raise AssertionError(f"resume did not skip prior delivered card and deliver remaining card: {status}")
+    calls = queue_run_calls(call_log)
+    if len(calls) != 1 or calls[0].get("card") != "openspec/board/2.todo/service-b-card.md":
+        raise AssertionError(f"resume should launch only unfinished card: {calls}")
+
+
+def check_queue_push_success_validation(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-push-validation-consumer")
+    runner = tmp / "fake-queue-runner-push"
+    runtime = tmp / "queue-push-validation-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-push-validation",
+            "--launcher",
+            str(runner),
+            "--json",
+        ],
+        env=runner_env(),
+    )
+    if result.returncode == 0:
+        raise AssertionError("push-enabled queue should block when fake child does not publish board card")
+    status = load_status(runtime, "queue-push-validation")
+    if status["result"] != "BLOCKED" or "done card location" not in status["cards"][0].get("reason", ""):
+        raise AssertionError(f"push success validation did not block inconsistent child success: {status}")
+
+
+def check_queue_no_push_requires_ahead(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-no-push-upstream-consumer", no_push_ready=False)
+    runner = tmp / "fake-queue-runner-no-push"
+    runtime = tmp / "queue-no-push-upstream-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-no-push-upstream",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=runner_env(),
+    )
+    if result.returncode == 0:
+        raise AssertionError("no-push queue without ahead-of-upstream state unexpectedly passed")
+    status = load_status(runtime, "queue-no-push-upstream")
+    first = status["cards"][0]
+    if status["result"] != "BLOCKED" or first.get("upstream_state") != "unknown":
+        raise AssertionError(f"no-push upstream enforcement did not block structurally: {status}")
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-delivery-runner-") as tmp:
         workspace = Path(tmp)
@@ -753,6 +1348,13 @@ def main() -> int:
         check_preflight_connectivity_failure_redaction(workspace)
         check_run_preflight_failure(workspace)
         check_stale_symlink_preflight(workspace)
+        check_queue_plan_preflight(workspace)
+        check_queue_preflight_failures(workspace)
+        check_queue_run_plan(workspace)
+        check_queue_fail_fast_and_locks(workspace)
+        check_queue_resume_plan(workspace)
+        check_queue_push_success_validation(workspace)
+        check_queue_no_push_requires_ahead(workspace)
     print("ok: delivery runner smoke passed")
     return 0
 

@@ -118,9 +118,35 @@ child-процесса и пишет
 `changerail.delivery-run.v1`. Supervisor наблюдает этот status record, а не `pgrep`
 или свободный текст лога.
 
-Очередь карточек остается ответственностью `$changerail-deliver` или внешнего
-оркестратора, который вызывает runner отдельно для каждой карточки. Один runner
-run пишет status для одной карточки.
+Для dependency-ordered очередей через несколько независимых workspaces runner
+поддерживает отдельный JSON plan contract и plan-oriented команды:
+
+```bash
+bin/changerail-delivery-runner plan delivery-plan.json --consumer-root /opt/example-workspace --json
+bin/changerail-delivery-runner preflight-plan delivery-plan.json --consumer-root /opt/example-workspace --json
+bin/changerail-delivery-runner run-plan delivery-plan.json --consumer-root /opt/example-workspace
+bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /opt/example-workspace \
+  --status-path /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json
+bin/changerail-delivery-runner status-plan \
+  /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json --json
+```
+
+Plan-файл использует `changerail.delivery-plan.v1`: workspace aliases,
+consumer-root-relative paths, card ids, dependencies, waves и concurrency
+limits. `plan`/`preflight-plan` полностью проверяют workspaces, git/card state,
+dependencies, waves и single-card runner readiness до первого live child.
+Aggregate status пишется под
+`.runtime/changerail/delivery-plans/<run-id>/status.json` с
+`changerail.delivery-plan-status.v1`; каждый live card по-прежнему запускает
+single-card `run` и сохраняет отдельный `changerail.delivery-run.v1` record.
+
+Workspace lock-и под ignored runtime state исключают два live child run в одном
+repository. Stale lock не удаляется автоматически: runner пишет structured
+diagnostic и ждет явного operator action. Queue fail-fast останавливает новые
+downstream cards на `NO-GO`, `BLOCKED`, stale/invalid verdict, push rejection,
+unexpected dirty scope или inconsistent card state. В push-enabled mode card
+success требует card в `4.done`, clean repository и `HEAD == upstream`; при
+`--no-push` требуется clean committed tree и recorded ahead/upstream state.
 
 Для workspace-агрегаторов с несколькими независимыми дочерними git-репозиториями
 default-модель - запускать runner в каждом дочернем репозитории через

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -21,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "changerail.delivery-run.v1"
+PLAN_SCHEMA = "changerail.delivery-plan.v1"
+PLAN_STATUS_SCHEMA = "changerail.delivery-plan-status.v1"
 AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
@@ -40,6 +43,17 @@ class Check:
 
 def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def schema_errors(payload: Any, schema_filename: str) -> list[str]:
+    scripts = repo_root_from_script() / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_contract_schema import validate_with_schema
+    except Exception as exc:
+        return [f"schema validation unavailable: {type(exc).__name__}: {exc}"]
+    return validate_with_schema(payload, schema_filename)
 
 
 def invocation_workspace() -> Path:
@@ -198,6 +212,476 @@ def current_card_locations(root: Path, card: str) -> list[str]:
 def card_is_published(root: Path, card: str) -> bool:
     locations = current_card_locations(root, card)
     return bool(locations) and all(path.startswith("openspec/board/4.done/") for path in locations)
+
+
+def load_plan(path: Path) -> tuple[dict[str, Any] | None, list[str]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return None, [f"plan cannot be read: {exc}"]
+    except json.JSONDecodeError as exc:
+        return None, [f"plan JSON is invalid: {exc}"]
+    if not isinstance(data, dict):
+        return None, ["plan must be a JSON object"]
+    errors = schema_errors(data, "changerail-delivery-plan.schema.json")
+    return data, errors
+
+
+def plan_fingerprint(data: dict[str, Any]) -> str:
+    encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def plan_mode(args: argparse.Namespace, data: dict[str, Any] | None) -> str:
+    if getattr(args, "no_push", False):
+        return "no-push"
+    if isinstance(data, dict) and data.get("push_mode") == "no-push":
+        return "no-push"
+    return "push"
+
+
+def safe_plan_id(value: Any) -> str:
+    text = str(value or "invalid-plan").strip().lower()
+    cleaned = "".join(char if char.isalnum() else "-" for char in text)
+    cleaned = "-".join(part for part in cleaned.split("-") if part)
+    if not cleaned or not cleaned[0].isalnum():
+        return "invalid-plan"
+    return cleaned
+
+
+def plan_runtime_root(args: argparse.Namespace) -> Path:
+    return args.runtime_root
+
+
+def plan_status_path(args: argparse.Namespace) -> Path:
+    return plan_runtime_root(args) / args.run_id / "status.json"
+
+
+def git_is_repo(root: Path) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def normalize_card_ref(card_ref: str) -> str:
+    return Path(card_ref).name
+
+
+def resolve_plan_card(workspace: Path, card_ref: str) -> tuple[str | None, list[str]]:
+    errors: list[str] = []
+    seen: set[str] = set()
+    matches: list[str] = []
+    direct = workspace / card_ref
+    if direct.exists():
+        relative = repository_relative(direct, workspace)
+        seen.add(relative)
+        matches.append(relative)
+    filename = Path(card_ref).name
+    for column in BOARD_COLUMNS:
+        candidate = workspace / "openspec" / "board" / column / filename
+        if not candidate.exists():
+            continue
+        relative = repository_relative(candidate, workspace)
+        if relative not in seen:
+            seen.add(relative)
+            matches.append(relative)
+    matches = sorted(matches)
+    if not matches:
+        errors.append(f"card not found: {card_ref}")
+        return None, errors
+    if len(matches) > 1:
+        errors.append(f"card is ambiguous: {card_ref}: {', '.join(matches)}")
+        return None, errors
+    resolved = matches[0]
+    if resolved.startswith("openspec/board/5.canceled/"):
+        errors.append(f"card is canceled: {resolved}")
+        return resolved, errors
+    return resolved, errors
+
+
+def check_plan_semantics(data: dict[str, Any], consumer_root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[Check]]:
+    checks: list[Check] = []
+    workspaces = data.get("workspaces") if isinstance(data.get("workspaces"), list) else []
+    cards = data.get("cards") if isinstance(data.get("cards"), list) else []
+    waves = data.get("waves") if isinstance(data.get("waves"), list) else []
+
+    workspace_by_alias: dict[str, dict[str, Any]] = {}
+    resolved_workspaces: list[dict[str, Any]] = []
+    seen_aliases: set[str] = set()
+    for workspace in workspaces:
+        if not isinstance(workspace, dict):
+            continue
+        alias = workspace.get("alias")
+        path = workspace.get("path")
+        if not isinstance(alias, str) or not isinstance(path, str):
+            continue
+        if alias in seen_aliases:
+            checks.append(Check("duplicate workspace alias", "fail", alias))
+        seen_aliases.add(alias)
+        root = (consumer_root / path).resolve(strict=False)
+        state = "preflighted"
+        if not root.is_dir():
+            state = "blocked"
+            checks.append(Check("workspace exists", "fail", f"{alias}: {root}"))
+        elif not git_is_repo(root):
+            state = "blocked"
+            checks.append(Check("workspace git repository", "fail", f"{alias}: {root}"))
+        else:
+            checks.append(Check("workspace", "pass", f"{alias}: {root}"))
+            clean, clean_reason = git_clean(root)
+            checks.append(Check("workspace dirty state", "pass" if clean else "fail", f"{alias}: {clean_reason}"))
+            if not clean:
+                state = "blocked"
+        entry = {"alias": alias, "path": path, "root": str(root), "state": state}
+        workspace_by_alias[alias] = entry
+        resolved_workspaces.append(entry)
+
+    max_parallel = data.get("max_parallel", 1)
+    if isinstance(max_parallel, int) and max_parallel >= 1:
+        checks.append(Check("max_parallel", "pass", str(max_parallel)))
+    else:
+        checks.append(Check("max_parallel", "fail", "must be >= 1"))
+    per_workspace = data.get("per_workspace_parallelism", 1)
+    if per_workspace == 1:
+        checks.append(Check("per_workspace_parallelism", "pass", "1"))
+    else:
+        checks.append(Check("per_workspace_parallelism", "fail", "must be 1"))
+
+    wave_ids: set[int] = set()
+    wave_deps: dict[int, list[int]] = {}
+    for wave in waves:
+        if not isinstance(wave, dict):
+            continue
+        wave_id = wave.get("id")
+        if not isinstance(wave_id, int):
+            continue
+        if wave_id in wave_ids:
+            checks.append(Check("duplicate wave", "fail", str(wave_id)))
+        wave_ids.add(wave_id)
+        dependencies = wave.get("depends_on", [])
+        wave_deps[wave_id] = dependencies if isinstance(dependencies, list) else []
+    for wave_id, dependencies in wave_deps.items():
+        for dependency in dependencies:
+            if dependency not in wave_ids:
+                checks.append(Check("wave dependency", "fail", f"wave {wave_id} depends on missing wave {dependency}"))
+            elif dependency >= wave_id:
+                checks.append(Check("wave dependency", "fail", f"wave {wave_id} depends on non-earlier wave {dependency}"))
+
+    card_ids: set[str] = set()
+    card_refs: set[tuple[str, str]] = set()
+    resolved_refs: set[tuple[str, str]] = set()
+    card_waves: dict[str, int] = {}
+    resolved_cards: list[dict[str, Any]] = []
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        card_id = card.get("id")
+        workspace_alias = card.get("workspace")
+        card_ref = card.get("card")
+        if not isinstance(card_id, str) or not isinstance(workspace_alias, str) or not isinstance(card_ref, str):
+            continue
+        if card_id in card_ids:
+            checks.append(Check("duplicate card id", "fail", card_id))
+        card_ids.add(card_id)
+        ref_key = (workspace_alias, normalize_card_ref(card_ref))
+        if ref_key in card_refs:
+            checks.append(Check("duplicate card", "fail", f"{workspace_alias}:{card_ref}"))
+        card_refs.add(ref_key)
+
+        workspace_entry = workspace_by_alias.get(workspace_alias)
+        entry: dict[str, Any] = {
+            "id": card_id,
+            "workspace": workspace_alias,
+            "card": card_ref,
+            "state": "ready",
+        }
+        if isinstance(card.get("depends_on"), list):
+            entry["depends_on"] = card["depends_on"]
+        wave = card.get("wave")
+        if isinstance(wave, int):
+            entry["wave"] = wave
+            card_waves[card_id] = wave
+            if wave_ids and wave not in wave_ids:
+                checks.append(Check("card wave", "fail", f"{card_id}: missing wave {wave}"))
+        if workspace_entry is None:
+            entry["state"] = "blocked"
+            entry["reason"] = "workspace not declared"
+            checks.append(Check("card workspace", "fail", f"{card_id}: {workspace_alias}"))
+            resolved_cards.append(entry)
+            continue
+        resolved_path, card_errors = resolve_plan_card(Path(workspace_entry["root"]), card_ref)
+        if resolved_path:
+            entry["resolved_path"] = resolved_path
+            resolved_key = (workspace_alias, resolved_path)
+            if resolved_key in resolved_refs:
+                entry["state"] = "blocked"
+                entry["reason"] = "duplicate resolved card"
+                checks.append(Check("duplicate resolved card", "fail", f"{workspace_alias}:{resolved_path}"))
+            resolved_refs.add(resolved_key)
+        if card_errors:
+            entry["state"] = "blocked"
+            entry["reason"] = "; ".join(card_errors)
+            for error in card_errors:
+                checks.append(Check("card resolution", "fail", f"{card_id}: {error}"))
+        else:
+            checks.append(Check("card resolution", "pass", f"{card_id}: {resolved_path}"))
+        resolved_cards.append(entry)
+
+    for card in cards:
+        if not isinstance(card, dict) or not isinstance(card.get("id"), str):
+            continue
+        card_id = card["id"]
+        wave = card_waves.get(card_id)
+        for dependency in card.get("depends_on", []) if isinstance(card.get("depends_on"), list) else []:
+            if dependency not in card_ids:
+                checks.append(Check("card dependency", "fail", f"{card_id}: missing {dependency}"))
+                continue
+            dependency_wave = card_waves.get(dependency)
+            if isinstance(wave, int) and isinstance(dependency_wave, int) and dependency_wave > wave:
+                checks.append(Check("card dependency", "fail", f"{card_id}: dependency {dependency} is in later wave"))
+    cycle = find_card_cycle(cards)
+    if cycle:
+        checks.append(Check("card dependency cycle", "fail", " -> ".join(cycle)))
+    elif cards:
+        checks.append(Check("card dependency cycle", "pass", "none"))
+
+    return resolved_workspaces, resolved_cards, checks
+
+
+def find_card_cycle(cards: list[Any]) -> list[str]:
+    graph: dict[str, list[str]] = {}
+    for card in cards:
+        if not isinstance(card, dict) or not isinstance(card.get("id"), str):
+            continue
+        graph[card["id"]] = [dep for dep in card.get("depends_on", []) if isinstance(dep, str)]
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    stack: list[str] = []
+
+    def visit(node: str) -> list[str] | None:
+        if node in visiting:
+            start = stack.index(node) if node in stack else 0
+            return stack[start:] + [node]
+        if node in visited:
+            return None
+        visiting.add(node)
+        stack.append(node)
+        for dependency in graph.get(node, []):
+            if dependency not in graph:
+                continue
+            cycle = visit(dependency)
+            if cycle:
+                return cycle
+        stack.pop()
+        visiting.remove(node)
+        visited.add(node)
+        return None
+
+    for node in graph:
+        cycle = visit(node)
+        if cycle:
+            return cycle
+    return []
+
+
+def child_run_id(args: argparse.Namespace, card: dict[str, Any]) -> str:
+    return f"{args.run_id}-{card['id']}"
+
+
+def child_runtime_root(workspace: dict[str, Any]) -> Path:
+    return Path(workspace["root"]) / ".runtime" / "changerail" / "delivery-runs"
+
+
+def child_status_path_for(args: argparse.Namespace, card: dict[str, Any], workspace: dict[str, Any]) -> Path:
+    return child_runtime_root(workspace) / child_run_id(args, card) / "status.json"
+
+
+def child_command_for_card(args: argparse.Namespace, card: dict[str, Any], workspace: dict[str, Any], mode: str) -> list[str]:
+    command = [
+        str(args.launcher),
+        "run",
+        card.get("resolved_path") or card["card"],
+        "--workspace",
+        workspace["root"],
+        "--runtime-root",
+        str(child_runtime_root(workspace)),
+        "--run-id",
+        child_run_id(args, card),
+    ]
+    if card.get("model"):
+        command.extend(["--model", str(card["model"])])
+    if card.get("reasoning_effort"):
+        command.extend(["--reasoning-effort", str(card["reasoning_effort"])])
+    if mode == "no-push":
+        command.append("--deliver-arg=--no-push")
+    return command
+
+
+def apply_plan_card_overrides(data: dict[str, Any], cards: list[dict[str, Any]]) -> None:
+    sources = {
+        item.get("id"): item
+        for item in data.get("cards", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    for card in cards:
+        source = sources.get(card["id"])
+        if not isinstance(source, dict):
+            continue
+        if isinstance(source.get("model"), str):
+            card["model"] = source["model"]
+        if isinstance(source.get("reasoning_effort"), str):
+            card["reasoning_effort"] = source["reasoning_effort"]
+
+
+def append_single_card_preflight_checks(
+    args: argparse.Namespace,
+    cards: list[dict[str, Any]],
+    workspaces: dict[str, dict[str, Any]],
+    checks: list[Check],
+) -> None:
+    for card in cards:
+        if card.get("state") == "blocked":
+            continue
+        workspace = workspaces.get(card["workspace"])
+        if not workspace:
+            continue
+        command = [
+            str(args.launcher),
+            "preflight",
+            card.get("resolved_path") or card["card"],
+            "--workspace",
+            workspace["root"],
+            "--runtime-root",
+            str(child_runtime_root(workspace)),
+            "--run-id",
+            child_run_id(args, card) + "-preflight",
+            "--json",
+            "--write-status",
+        ]
+        result = subprocess.run(command, cwd=Path(workspace["root"]), capture_output=True, text=True, check=False)
+        if result.returncode == 0:
+            checks.append(Check("single-card preflight", "pass", f"{card['id']}: ready"))
+        else:
+            detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+            card["state"] = "blocked"
+            card["reason"] = f"single-card preflight failed: {detail[:300]}"
+            checks.append(Check("single-card preflight", "fail", f"{card['id']}: {detail[:300]}"))
+
+
+def build_plan_view(
+    args: argparse.Namespace,
+    data: dict[str, Any],
+    include_child_preflight: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    workspaces, cards, checks = check_plan_semantics(data, args.consumer_root)
+    checks.append(Check("single-card runner exists", "pass" if args.launcher.is_file() else "fail", str(args.launcher)))
+    checks.append(Check("single-card runner executable", "pass" if os.access(args.launcher, os.X_OK) else "fail", str(args.launcher)))
+    workspace_by_alias = {workspace["alias"]: workspace for workspace in workspaces}
+    apply_plan_card_overrides(data, cards)
+    if include_child_preflight and all(check.status != "fail" for check in checks):
+        append_single_card_preflight_checks(args, cards, workspace_by_alias, checks)
+    mode = plan_mode(args, data)
+    status_result = "DELIVERED" if all(check.status != "fail" for check in checks) else "BLOCKED"
+    for card in cards:
+        workspace = workspace_by_alias.get(card["workspace"])
+        if workspace and card["state"] != "blocked":
+            card["command"] = child_command_for_card(args, card, workspace, mode)
+    status = plan_status_record(args, data, workspaces, cards, checks, "preflight", status_result)
+    view = {
+        "result": status_result,
+        "status_path": str(plan_status_path(args)),
+        "plan": status["plan"],
+        "mode": mode,
+        "workspaces": workspaces,
+        "cards": cards,
+        "checks": [asdict(check) for check in checks],
+    }
+    return view, status
+
+
+def plan_status_record(
+    args: argparse.Namespace,
+    data: dict[str, Any],
+    workspaces: list[dict[str, Any]],
+    cards: list[dict[str, Any]],
+    checks: list[Check],
+    phase: str,
+    result: str,
+    locks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    status_cards: list[dict[str, Any]] = []
+    for card in cards:
+        entry = {
+            key: card[key]
+            for key in (
+                "id",
+                "workspace",
+                "card",
+                "resolved_path",
+                "state",
+                "wave",
+                "depends_on",
+                "run_id",
+                "run_status_path",
+                "result",
+                "upstream_state",
+                "upstream_detail",
+                "started_at",
+                "ended_at",
+                "reason",
+            )
+            if key in card
+        }
+        if entry.get("state") == "ready" and result == "DELIVERED":
+            entry["state"] = "ready"
+        status_cards.append(entry)
+    status_workspaces = [
+        {key: workspace[key] for key in ("alias", "path", "state", "reason") if key in workspace}
+        for workspace in workspaces
+    ]
+    record: dict[str, Any] = {
+        "schema": PLAN_STATUS_SCHEMA,
+        "run_id": args.run_id,
+        "updated_at": utc_now(),
+        "plan": {
+            "id": data["id"],
+            "path": repository_relative(args.plan, args.consumer_root),
+            "fingerprint": plan_fingerprint(data),
+        },
+        "phase": phase,
+        "result": result,
+        "mode": plan_mode(args, data),
+        "timestamps": {
+            "started_at": args.started_at,
+            "ended_at": utc_now(),
+        },
+        "max_parallel": data.get("max_parallel", 1),
+        "per_workspace_parallelism": data.get("per_workspace_parallelism", 1),
+        "workspaces": status_workspaces,
+        "cards": status_cards,
+        "checks": [asdict(check) for check in checks],
+        "summary": {
+            "total_cards": len(status_cards),
+            "delivered": sum(1 for card in status_cards if card.get("state") == "delivered"),
+            "blocked": sum(1 for card in status_cards if card.get("state") == "blocked"),
+            "no_go": sum(1 for card in status_cards if card.get("state") == "no-go"),
+            "skipped": sum(1 for card in status_cards if card.get("state") == "skipped"),
+        },
+    }
+    if result != "RUNNING":
+        record["terminal_outcome"] = result
+    if locks:
+        record["locks"] = locks
+    errors = schema_errors(record, "changerail-delivery-plan-status.schema.json")
+    if errors:
+        record["checks"].append({"name": "status schema", "status": "fail", "message": "; ".join(errors)})
+        record["result"] = "BLOCKED"
+        record["terminal_outcome"] = "BLOCKED"
+    return record
 
 
 def changed_path_count(root: Path) -> int | None:
@@ -746,6 +1230,404 @@ def command_run(args: argparse.Namespace) -> int:
     return 0 if outcome == "DELIVERED" else 1
 
 
+def workspace_lock_path(args: argparse.Namespace, workspace: dict[str, Any]) -> Path:
+    digest = hashlib.sha256(str(Path(workspace["root"]).resolve(strict=False)).encode("utf-8")).hexdigest()[:16]
+    return plan_runtime_root(args) / "locks" / f"{digest}.lock"
+
+
+def create_workspace_lock(args: argparse.Namespace, workspace: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    path = workspace_lock_path(args, workspace)
+    if path.exists():
+        lock = {
+            "workspace": workspace["alias"],
+            "path": repository_relative(path, args.consumer_root),
+            "state": "stale",
+            "reason": "lock already exists; remove it only after proving no live queue child owns this workspace",
+        }
+        return lock, lock["reason"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"workspace": workspace["alias"], "run_id": args.run_id, "created_at": utc_now()}
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    return {
+        "workspace": workspace["alias"],
+        "path": repository_relative(path, args.consumer_root),
+        "state": "created",
+        "created_at": payload["created_at"],
+    }, None
+
+
+def release_workspace_lock(args: argparse.Namespace, workspace: dict[str, Any]) -> dict[str, Any]:
+    path = workspace_lock_path(args, workspace)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    return {
+        "workspace": workspace["alias"],
+        "path": repository_relative(path, args.consumer_root),
+        "state": "released",
+    }
+
+
+def git_clean(root: Path) -> tuple[bool, str]:
+    result = subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return False, result.stderr.strip() or "git status failed"
+    dirty = [line for line in result.stdout.splitlines() if line.strip()]
+    if dirty:
+        return False, f"dirty tree: {len(dirty)} paths: {', '.join(dirty[:5])}"
+    return True, "clean tree"
+
+
+def upstream_state(root: Path) -> tuple[str, str]:
+    upstream = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if upstream.returncode != 0:
+        return "unknown", "no upstream"
+    counts = subprocess.run(
+        ["git", "-C", str(root), "rev-list", "--left-right", "--count", f"{upstream.stdout.strip()}...HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if counts.returncode != 0:
+        return "unknown", counts.stderr.strip() or "cannot compare upstream"
+    parts = counts.stdout.strip().split()
+    if len(parts) != 2:
+        return "unknown", counts.stdout.strip() or "cannot parse upstream comparison"
+    behind, ahead = parts
+    if behind == "0" and ahead == "0":
+        return "equal", f"HEAD == {upstream.stdout.strip()}"
+    return "ahead" if behind == "0" else "diverged", f"behind={behind} ahead={ahead}"
+
+
+def queue_success_check(workspace: dict[str, Any], card: dict[str, Any], mode: str) -> tuple[bool, str, dict[str, str]]:
+    root = Path(workspace["root"])
+    clean, clean_reason = git_clean(root)
+    if not clean:
+        return False, clean_reason, {}
+    upstream, upstream_reason = upstream_state(root)
+    details = {"upstream_state": upstream, "upstream_detail": upstream_reason}
+    if mode == "no-push":
+        if upstream != "ahead":
+            return False, f"{clean_reason}; expected ahead-of-upstream for --no-push, got {upstream}: {upstream_reason}", details
+        return True, f"{clean_reason}; ahead_state={upstream}: {upstream_reason}", details
+    locations = current_card_locations(root, card.get("resolved_path") or card["card"])
+    done_locations = [path for path in locations if path.startswith("openspec/board/4.done/")]
+    if len(done_locations) != 1 or len(locations) != 1:
+        return False, f"expected exactly one done card location, got {locations}", details
+    if upstream != "equal":
+        return False, f"upstream check failed: {upstream_reason}", details
+    return True, f"{clean_reason}; {upstream_reason}; card={done_locations[0]}", details
+
+
+def ready_cards(cards: list[dict[str, Any]], completed: set[str], running_workspaces: set[str]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    active_waves = [
+        card.get("wave", 1)
+        for card in cards
+        if card.get("state") in {"pending", "ready", "running"}
+    ]
+    current_wave = min(active_waves) if active_waves else None
+    for card in cards:
+        if card.get("state") not in {"pending", "ready"}:
+            continue
+        if current_wave is not None and card.get("wave", 1) != current_wave:
+            continue
+        if card["workspace"] in running_workspaces:
+            continue
+        dependencies = card.get("depends_on", [])
+        if isinstance(dependencies, list) and all(dep in completed for dep in dependencies):
+            candidates.append(card)
+    return sorted(candidates, key=lambda item: (item.get("wave", 1), item["workspace"], item["id"]))
+
+
+def write_plan_status(
+    args: argparse.Namespace,
+    data: dict[str, Any],
+    workspaces: list[dict[str, Any]],
+    cards: list[dict[str, Any]],
+    checks: list[Check],
+    phase: str,
+    result: str,
+    locks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    status = plan_status_record(args, data, workspaces, cards, checks, phase, result, locks)
+    atomic_write_json(plan_status_path(args), status)
+    return status
+
+
+def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str, Any], int]:
+    args.started_at = utc_now()
+    data, errors = load_plan(args.plan)
+    if data is None or errors:
+        record = blocked_plan_status_for_errors(args, errors, data)
+        atomic_write_json(plan_status_path(args), record)
+        return record, 1
+    workspaces, cards, checks = check_plan_semantics(data, args.consumer_root)
+    checks.append(Check("single-card runner exists", "pass" if args.launcher.is_file() else "fail", str(args.launcher)))
+    checks.append(Check("single-card runner executable", "pass" if os.access(args.launcher, os.X_OK) else "fail", str(args.launcher)))
+    workspace_by_alias = {workspace["alias"]: workspace for workspace in workspaces}
+    apply_plan_card_overrides(data, cards)
+    if all(check.status != "fail" for check in checks):
+        append_single_card_preflight_checks(args, cards, workspace_by_alias, checks)
+    if any(check.status == "fail" for check in checks):
+        record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
+        return record, 1
+    previous = load_json_object(args.status_path) if resume and getattr(args, "status_path", None) else None
+    if resume and previous is None:
+        previous = load_json_object(plan_status_path(args))
+    if resume:
+        previous_fingerprint = previous.get("plan", {}).get("fingerprint") if isinstance(previous, dict) else None
+        if previous_fingerprint != plan_fingerprint(data):
+            checks.append(Check("resume fingerprint", "fail", "plan fingerprint differs from aggregate status"))
+            record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
+            return record, 1
+    previous_cards = {}
+    if isinstance(previous, dict) and isinstance(previous.get("cards"), list):
+        previous_cards = {card.get("id"): card for card in previous["cards"] if isinstance(card, dict)}
+    mode = plan_mode(args, data)
+    for card in cards:
+        card["state"] = "pending"
+        card["run_id"] = child_run_id(args, card)
+        workspace = workspace_by_alias[card["workspace"]]
+        card["run_status_path"] = repository_relative(child_status_path_for(args, card, workspace), args.consumer_root)
+        previous_card = previous_cards.get(card["id"])
+        if resume and isinstance(previous_card, dict) and previous_card.get("state") == "delivered":
+            ok, reason, details = queue_success_check(workspace, card, mode)
+            card.update(details)
+            if ok:
+                card["state"] = "skipped"
+                card["result"] = "DELIVERED"
+                card["reason"] = f"already delivered; {reason}"
+    completed = {card["id"] for card in cards if card.get("state") == "skipped"}
+    running: dict[str, tuple[subprocess.Popen[str], dict[str, Any], dict[str, Any]]] = {}
+    locks: list[dict[str, Any]] = []
+    result = "RUNNING"
+    status = write_plan_status(args, data, workspaces, cards, checks, "running" if not resume else "resuming", result, locks)
+    max_parallel = min(int(data.get("max_parallel", 1)), max(1, len(workspaces)))
+
+    while True:
+        running_workspaces = {card["workspace"] for _key, (_process, card, _workspace) in running.items()}
+        while result == "RUNNING" and len(running) < max_parallel:
+            candidates = ready_cards(cards, completed, running_workspaces)
+            if not candidates:
+                break
+            card = candidates[0]
+            workspace = workspace_by_alias[card["workspace"]]
+            lock, lock_error = create_workspace_lock(args, workspace)
+            locks.append(lock)
+            if lock_error:
+                card["state"] = "blocked"
+                card["result"] = "BLOCKED"
+                card["reason"] = lock_error
+                checks.append(Check("workspace lock", "fail", f"{card['workspace']}: {lock_error}"))
+                result = "BLOCKED"
+                break
+            command = child_command_for_card(args, card, workspace, mode)
+            card["state"] = "running"
+            card["started_at"] = utc_now()
+            process = subprocess.Popen(
+                command,
+                cwd=Path(workspace["root"]),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            running[card["id"]] = (process, card, workspace)
+            running_workspaces.add(card["workspace"])
+            status = write_plan_status(args, data, workspaces, cards, checks, "running" if not resume else "resuming", result, locks)
+
+        if not running:
+            unfinished = [card for card in cards if card.get("state") in {"pending", "ready"}]
+            if result == "RUNNING" and unfinished:
+                checks.append(Check("queue progress", "fail", "no runnable cards remain"))
+                result = "BLOCKED"
+            break
+
+        time.sleep(0.01)
+        for card_id, (process, card, workspace) in list(running.items()):
+            exit_code = process.poll()
+            if exit_code is None:
+                continue
+            running.pop(card_id)
+            locks.append(release_workspace_lock(args, workspace))
+            card["ended_at"] = utc_now()
+            child_status = load_json_object(child_status_path_for(args, card, workspace))
+            child_result = child_status.get("result") if isinstance(child_status, dict) else None
+            if child_result not in {"DELIVERED", "NO-GO", "BLOCKED"}:
+                child_result = "DELIVERED" if exit_code == 0 else "BLOCKED"
+            card["result"] = child_result
+            if child_result == "DELIVERED":
+                ok, reason, details = queue_success_check(workspace, card, mode)
+                card.update(details)
+                if ok:
+                    card["state"] = "delivered"
+                    card["reason"] = reason
+                    completed.add(card["id"])
+                else:
+                    card["state"] = "blocked"
+                    card["result"] = "BLOCKED"
+                    card["reason"] = reason
+                    result = "BLOCKED"
+            elif child_result == "NO-GO":
+                card["state"] = "no-go"
+                card["reason"] = "child returned NO-GO"
+                result = "NO-GO"
+            else:
+                card["state"] = "blocked"
+                card["reason"] = "child returned BLOCKED"
+                result = "BLOCKED"
+            status = write_plan_status(args, data, workspaces, cards, checks, "running" if not resume else "resuming", result, locks)
+
+    while running:
+        for card_id, (process, card, workspace) in list(running.items()):
+            if process.poll() is None:
+                time.sleep(0.01)
+                continue
+            running.pop(card_id)
+            locks.append(release_workspace_lock(args, workspace))
+            card["ended_at"] = utc_now()
+    if result == "RUNNING":
+        result = "DELIVERED"
+    status = write_plan_status(args, data, workspaces, cards, checks, "terminal", result, locks)
+    return status, 0 if result == "DELIVERED" else 1
+
+
+def command_plan(args: argparse.Namespace) -> int:
+    args.started_at = utc_now()
+    data, errors = load_plan(args.plan)
+    if data is None:
+        record = blocked_plan_status_for_errors(args, errors)
+        atomic_write_json(plan_status_path(args), record)
+        print(json.dumps({"result": "BLOCKED", "errors": errors, "status_path": str(plan_status_path(args))}, ensure_ascii=False, indent=2))
+        return 1
+    if errors:
+        record = blocked_plan_status_for_errors(args, errors, data)
+        atomic_write_json(plan_status_path(args), record)
+        print(json.dumps({"result": "BLOCKED", "errors": errors, "status_path": str(plan_status_path(args))}, ensure_ascii=False, indent=2))
+        return 1
+    view, status = build_plan_view(args, data)
+    atomic_write_json(plan_status_path(args), status)
+    if args.json:
+        print(json.dumps(view, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"result: {view['result']}")
+        print(f"status: {view['status_path']}")
+        for card in view["cards"]:
+            command = " ".join(card.get("command", []))
+            print(f"- {card['id']} workspace={card['workspace']} card={card.get('resolved_path', card['card'])} command={command}")
+    return 0 if view["result"] == "DELIVERED" else 1
+
+
+def command_preflight_plan(args: argparse.Namespace) -> int:
+    args.started_at = utc_now()
+    data, errors = load_plan(args.plan)
+    if data is None or errors:
+        record = blocked_plan_status_for_errors(args, errors, data)
+        atomic_write_json(plan_status_path(args), record)
+        print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) if args.json else "terminal_outcome: BLOCKED")
+        if not args.json:
+            print(f"status: {plan_status_path(args)}")
+        return 1
+    _view, status = build_plan_view(args, data, include_child_preflight=True)
+    atomic_write_json(plan_status_path(args), status)
+    if args.json:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"terminal_outcome: {status['result']}")
+        print(f"status: {plan_status_path(args)}")
+    return 0 if status["result"] == "DELIVERED" else 1
+
+
+def command_run_plan(args: argparse.Namespace) -> int:
+    status, exit_code = run_queue(args, resume=False)
+    if args.json:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"terminal_outcome: {status.get('terminal_outcome', status['result'])}")
+        print(f"status: {plan_status_path(args)}")
+    return exit_code
+
+
+def command_resume_plan(args: argparse.Namespace) -> int:
+    status, exit_code = run_queue(args, resume=True)
+    if args.json:
+        print(json.dumps(status, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"terminal_outcome: {status.get('terminal_outcome', status['result'])}")
+        print(f"status: {plan_status_path(args)}")
+    return exit_code
+
+
+def blocked_plan_status_for_errors(
+    args: argparse.Namespace,
+    errors: list[str],
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    fallback = data or {"id": Path(getattr(args, "plan", "plan")).stem or "invalid-plan"}
+    if "schema" not in fallback:
+        fallback["schema"] = PLAN_SCHEMA
+    args.started_at = getattr(args, "started_at", utc_now())
+    checks = [Check("plan validation", "fail", "; ".join(errors) if errors else "invalid plan")]
+    record = {
+        "schema": PLAN_STATUS_SCHEMA,
+        "run_id": args.run_id,
+        "updated_at": utc_now(),
+        "plan": {
+            "id": safe_plan_id(fallback.get("id")),
+            "path": repository_relative(args.plan, args.consumer_root),
+            "fingerprint": plan_fingerprint(fallback),
+        },
+        "phase": "preflight",
+        "result": "BLOCKED",
+        "terminal_outcome": "BLOCKED",
+        "mode": plan_mode(args, data),
+        "timestamps": {
+            "started_at": args.started_at,
+            "ended_at": utc_now(),
+        },
+        "max_parallel": fallback.get("max_parallel", 1),
+        "per_workspace_parallelism": fallback.get("per_workspace_parallelism", 1),
+        "workspaces": [],
+        "cards": [],
+        "checks": [asdict(check) for check in checks],
+        "summary": {"total_cards": 0, "delivered": 0, "blocked": 0, "no_go": 0, "skipped": 0},
+    }
+    schema_check = schema_errors(record, "changerail-delivery-plan-status.schema.json")
+    if schema_check:
+        record["checks"].append({"name": "status schema", "status": "fail", "message": "; ".join(schema_check)})
+        record["max_parallel"] = 1
+        record["per_workspace_parallelism"] = 1
+    return record
+
+
+def command_status_plan(args: argparse.Namespace) -> int:
+    path = args.status_path or plan_status_path(args)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"status-plan failed: {exc}", file=sys.stderr)
+        return 1
+    errors = schema_errors(data, "changerail-delivery-plan-status.schema.json")
+    if errors:
+        print(json.dumps({"result": "BLOCKED", "errors": errors}, ensure_ascii=False, indent=2), file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        plan = data.get("plan", {}) if isinstance(data.get("plan"), dict) else {}
+        print(f"result: {data.get('result')}")
+        print(f"plan: {plan.get('id', 'unknown')}")
+        print(f"cards: {len(data.get('cards', [])) if isinstance(data.get('cards'), list) else 0}")
+    return 0 if data.get("result") != "BLOCKED" else 1
+
+
 def add_common(parser: argparse.ArgumentParser) -> None:
     root = repo_root_from_script()
     parser.add_argument("card", help="single repository-relative board card path")
@@ -755,6 +1637,17 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--launcher", type=Path, default=root / "bin" / "codex")
     parser.add_argument("--connectivity-url")
     parser.add_argument("--connectivity-timeout", type=float, default=5.0)
+
+
+def add_plan_common(parser: argparse.ArgumentParser) -> None:
+    root = repo_root_from_script()
+    parser.add_argument("plan", type=Path, help="delivery plan JSON path")
+    parser.add_argument("--consumer-root", type=Path)
+    parser.add_argument("--runtime-root", type=Path)
+    parser.add_argument("--run-id", default=utc_run_id())
+    parser.add_argument("--launcher", type=Path, default=root / "bin" / "changerail-delivery-runner")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--no-push", action="store_true")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -778,13 +1671,52 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     preflight.add_argument("--json", action="store_true")
     preflight.add_argument("--write-status", action="store_true")
     preflight.set_defaults(func=command_preflight, model=None, reasoning_effort=None, deliver_arg=[])
+
+    plan = subparsers.add_parser("plan", help="resolve a delivery plan without launching children")
+    add_plan_common(plan)
+    plan.set_defaults(func=command_plan)
+
+    preflight_plan = subparsers.add_parser("preflight-plan", help="validate a delivery plan and write aggregate status")
+    add_plan_common(preflight_plan)
+    preflight_plan.set_defaults(func=command_preflight_plan)
+
+    run_plan = subparsers.add_parser("run-plan", help="run a validated delivery plan")
+    add_plan_common(run_plan)
+    run_plan.set_defaults(func=command_run_plan)
+
+    resume_plan = subparsers.add_parser("resume-plan", help="resume an aggregate delivery plan run")
+    add_plan_common(resume_plan)
+    resume_plan.add_argument("--status-path", type=Path)
+    resume_plan.set_defaults(func=command_resume_plan)
+
+    status_plan = subparsers.add_parser("status-plan", help="read aggregate delivery plan status")
+    status_plan.add_argument("status_path", nargs="?", type=Path)
+    status_plan.add_argument("--consumer-root", type=Path)
+    status_plan.add_argument("--runtime-root", type=Path)
+    status_plan.add_argument("--run-id", default=utc_run_id())
+    status_plan.add_argument("--json", action="store_true")
+    status_plan.set_defaults(func=command_status_plan, no_push=False, plan=Path("delivery-plan.json"))
+
     args = parser.parse_args(argv)
-    args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
-    if args.runtime_root:
-        args.runtime_root = resolve_path(args.runtime_root, args.workspace)
+    if hasattr(args, "workspace"):
+        args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
+        if args.runtime_root:
+            args.runtime_root = resolve_path(args.runtime_root, args.workspace)
+        else:
+            args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
+        args.launcher = resolve_path(args.launcher)
     else:
-        args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
-    args.launcher = resolve_path(args.launcher)
+        args.consumer_root = resolve_path(args.consumer_root) if args.consumer_root else invocation_workspace()
+        if hasattr(args, "status_path") and args.status_path:
+            args.status_path = resolve_path(args.status_path, args.consumer_root)
+        if hasattr(args, "plan"):
+            args.plan = resolve_path(args.plan, args.consumer_root)
+        if args.runtime_root:
+            args.runtime_root = resolve_path(args.runtime_root, args.consumer_root)
+        else:
+            args.runtime_root = args.consumer_root / ".runtime" / "changerail" / "delivery-plans"
+        if hasattr(args, "launcher"):
+            args.launcher = resolve_path(args.launcher)
     return args
 
 

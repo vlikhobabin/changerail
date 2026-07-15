@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-delivery-plan-status.schema.json",
+  "title": "ChangeRail delivery plan status",
+  "type": "object",
+  "required": [
+    "schema",
+    "run_id",
+    "updated_at",
+    "plan",
+    "phase",
+    "result",
+    "timestamps",
+    "mode",
+    "cards"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "changerail.delivery-plan-status.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "plan": {
+      "$ref": "#/$defs/planReference"
+    },
+    "phase": {
+      "enum": ["preflight", "running", "resuming", "terminal"]
+    },
+    "result": {
+      "enum": ["RUNNING", "DELIVERED", "NO-GO", "BLOCKED"]
+    },
+    "terminal_outcome": {
+      "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
+    },
+    "mode": {
+      "enum": ["push", "no-push"]
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["started_at"],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "max_parallel": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "per_workspace_parallelism": {
+      "const": 1
+    },
+    "workspaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/workspaceStatus"
+      }
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cardStatus"
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "locks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/lock"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total_cards": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "delivered": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_go": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!.*\\$\\{).+$"
+    },
+    "planReference": {
+      "type": "object",
+      "required": ["id", "fingerprint"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "workspaceStatus": {
+      "type": "object",
+      "required": ["alias", "path", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "state": {
+          "enum": ["pending", "preflighted", "running", "delivered", "blocked"]
+        },
+        "head_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstream": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "cardStatus": {
+      "type": "object",
+      "required": ["id", "workspace", "card", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "workspace": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "card": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "resolved_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "state": {
+          "enum": ["pending", "ready", "running", "skipped", "delivered", "no-go", "blocked"]
+        },
+        "wave": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_status_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "result": {
+          "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
+        },
+        "upstream_state": {
+          "enum": ["equal", "ahead", "diverged", "unknown"]
+        },
+        "upstream_detail": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "required": ["name", "status", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["pass", "fail", "skip"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "card": {
+          "type": "string"
+        }
+      }
+    },
+    "lock": {
+      "type": "object",
+      "required": ["workspace", "path", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "state": {
+          "enum": ["created", "released", "blocked", "stale"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

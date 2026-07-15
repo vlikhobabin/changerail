@@ -117,8 +117,13 @@ Expected contract:
 
 - `bin/changerail-delivery-runner` launches one card through the repo launcher
   and writes structured runtime status under `.runtime/changerail/delivery-runs/`;
+- `bin/changerail-delivery-runner` also exposes explicit queue plan commands
+  `plan`, `preflight-plan`, `run-plan`, `resume-plan` and `status-plan` that
+  use `changerail.delivery-plan.v1` and
+  `changerail.delivery-plan-status.v1` without changing single-card `run`;
 - `bin/changerail-delivery-metrics` reads delivery run records and review-cycle
-  history and renders missing optional values as `unknown`;
+  history plus aggregate queue status and renders missing optional values as
+  `unknown`;
 - review verdict and delivery manifest helpers validate payloads against
   tracked Draft 2020-12 schemas before applying semantic checks.
 

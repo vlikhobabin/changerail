@@ -246,3 +246,220 @@ per-card records.
 - **WHEN** docs describe bounded batch delivery
 - **THEN** they distinguish `$changerail-deliver <board-column>` from
   `bin/changerail-delivery-runner run <single-card>`
+
+### Requirement: Queue plan input contract
+The delivery runner MUST accept queue plans only through the explicit
+`changerail.delivery-plan.v1` contract and MUST preserve existing single-card
+runner compatibility.
+
+#### Scenario: Single-card runner remains compatible
+- **WHEN** an operator invokes `bin/changerail-delivery-runner run <card>`
+- **THEN** the positional card argument is still treated as one card path
+- **AND** no queue semantics are inferred from that command
+
+#### Scenario: Queue plan is schema-backed
+- **WHEN** an operator invokes a plan-oriented command
+- **THEN** the runner validates the plan against
+  `schemas/changerail-delivery-plan.schema.json` before applying queue
+  semantics
+
+#### Scenario: Queue status is schema-backed
+- **WHEN** the runner writes aggregate queue status
+- **THEN** the JSON uses `changerail.delivery-plan-status.v1` and validates
+  against `schemas/changerail-delivery-plan-status.schema.json`
+
+### Requirement: Queue plan public-safety constraints
+The delivery runner MUST fail closed on queue plan values that would put
+credentials, secrets or machine-specific tracked state into public plans or
+status.
+
+#### Scenario: Workspace path is absolute
+- **WHEN** a queue plan workspace path is an absolute machine path
+- **THEN** plan validation fails before any child delivery can launch
+
+#### Scenario: Runtime status references logs indirectly
+- **WHEN** aggregate queue status includes child evidence
+- **THEN** it references structured child status paths and does not inline raw
+  stdout or stderr logs
+
+### Requirement: Plan-oriented dry-run commands
+The delivery runner MUST provide explicit plan-oriented commands that resolve a
+queue plan without launching live child deliveries.
+
+#### Scenario: Operator lists a plan
+- **WHEN** an operator invokes `bin/changerail-delivery-runner plan <plan.json>`
+- **THEN** the command prints or writes resolved workspaces, card ids, current
+  card locations, dependencies, waves and the single-card runner commands that
+  would be launched
+- **AND** no child delivery process is started
+
+#### Scenario: Plan command honors no-push mode
+- **WHEN** an operator passes `--no-push` to a plan-oriented dry run
+- **THEN** the resolved child commands include the corresponding delivery
+  argument that will be passed to each single-card invocation
+
+### Requirement: Queue preflight validation
+The delivery runner MUST fail closed during `preflight-plan` before launching
+any live child delivery when plan, workspace, git or card state is inconsistent.
+
+#### Scenario: Plan has invalid dependency graph
+- **WHEN** a plan contains a dependency cycle, missing dependency id or
+  dependency that points to an invalid later wave
+- **THEN** `preflight-plan` records `BLOCKED` aggregate status and exits
+  non-zero before any child launch
+
+#### Scenario: Plan has duplicate identifiers
+- **WHEN** a plan contains duplicate workspace aliases or duplicate card ids
+- **THEN** `preflight-plan` records `BLOCKED` aggregate status and exits
+  non-zero
+
+#### Scenario: Concurrency settings conflict
+- **WHEN** `max_parallel` is less than one or per-workspace parallelism allows
+  more than one live card in a workspace
+- **THEN** `preflight-plan` records `BLOCKED` aggregate status and exits
+  non-zero
+
+#### Scenario: Workspace readiness fails
+- **WHEN** a workspace is missing, is not a git repository, lacks the configured
+  single-card runner readiness, or has unsafe initial git/card state
+- **THEN** `preflight-plan` records the failing check in aggregate status and
+  exits non-zero
+
+### Requirement: Stable queue card resolution
+The delivery runner MUST resolve queue cards by stable filename or card id
+across board lanes before listing, preflighting, running or resuming a plan.
+
+#### Scenario: Card moved after plan was written
+- **WHEN** a plan references a card filename that currently exists in exactly
+  one board lane
+- **THEN** the runner uses the current card path in the resolved plan
+
+#### Scenario: Card is missing or duplicated
+- **WHEN** a plan card cannot be found or resolves to more than one board path
+- **THEN** the plan command fails closed before any child launch
+
+#### Scenario: Card is canceled
+- **WHEN** a plan card resolves under `openspec/board/5.canceled/`
+- **THEN** the plan command fails closed unless an explicit future operator
+  override is implemented and recorded
+
+### Requirement: Queue preflight aggregate status
+The delivery runner MUST write schema-backed aggregate status for plan preflight
+and status inspection.
+
+#### Scenario: Preflight succeeds
+- **WHEN** `preflight-plan` validates every workspace, card and dependency
+- **THEN** aggregate status records `DELIVERED` as the preflight result, the
+  plan fingerprint and all resolved card states without child run references
+
+#### Scenario: Operator reads status
+- **WHEN** an operator invokes `status-plan` for a prior queue run or preflight
+- **THEN** the command reads the aggregate status record and reports structured
+  queue state without parsing raw child stdout or stderr
+
+### Requirement: Live queue plan execution
+The delivery runner MUST execute `run-plan` by launching the existing
+single-card runner once for each live card that is ready by dependency and wave.
+
+#### Scenario: Child card starts
+- **WHEN** a card becomes runnable in `run-plan`
+- **THEN** the queue runner invokes `bin/changerail-delivery-runner run <card>`
+  for that card's resolved workspace
+- **AND** the child writes a separate `changerail.delivery-run.v1` status record
+
+#### Scenario: Queue preserves workspace serialization
+- **WHEN** multiple runnable cards belong to the same workspace
+- **THEN** at most one card from that workspace is live at a time
+
+#### Scenario: Queue allows cross-workspace parallelism
+- **WHEN** runnable cards belong to dependency-independent workspaces
+- **THEN** the queue runner may run them in parallel up to `max_parallel`
+
+### Requirement: Queue dependency and wave barriers
+The delivery runner MUST enforce plan dependencies and wave barriers
+deterministically during live and resumed queue execution.
+
+#### Scenario: Dependency is incomplete
+- **WHEN** a card depends on another card whose terminal outcome is not a
+  successful queue outcome
+- **THEN** the dependent card is not launched
+
+#### Scenario: Wave barrier blocks downstream cards
+- **WHEN** a later wave contains cards but an earlier wave has unfinished or
+  failed cards
+- **THEN** the later wave is not launched
+
+### Requirement: Queue fail-fast terminal outcomes
+The delivery runner MUST stop launching new downstream cards when a live child
+or queue validation reaches an unsafe terminal outcome.
+
+#### Scenario: Child returns no-go
+- **WHEN** a child delivery run returns `NO-GO`
+- **THEN** aggregate queue status records `NO-GO`
+- **AND** no new downstream cards are launched
+
+#### Scenario: Child returns blocked
+- **WHEN** a child delivery run returns `BLOCKED`
+- **THEN** aggregate queue status records `BLOCKED`
+- **AND** no new downstream cards are launched
+
+#### Scenario: Repository state is inconsistent after child success
+- **WHEN** child status reports `DELIVERED` but card location, git cleanliness,
+  upstream equality or no-push ahead-state success checks fail
+- **THEN** aggregate queue status records `BLOCKED`
+
+### Requirement: Queue workspace locks
+The delivery runner MUST use ignored workspace locks to prevent concurrent live
+queue children in the same repository.
+
+#### Scenario: Workspace lock exists
+- **WHEN** a queue attempts to launch a card in a workspace with an active lock
+- **THEN** the launch is blocked with structured diagnostics
+
+#### Scenario: Lock appears stale
+- **WHEN** a workspace lock appears older than the current run
+- **THEN** the runner reports stale-lock diagnostics
+- **AND** it does not delete the lock automatically without an explicit safe
+  operator action
+
+### Requirement: Safe queue resume
+The delivery runner MUST implement `resume-plan` without re-running already
+successful queue cards and without trusting stale plan or repository state.
+
+#### Scenario: Resume sees delivered card
+- **WHEN** aggregate status shows a card succeeded and current workspace state
+  still satisfies the selected push or no-push success criteria
+- **THEN** `resume-plan` skips that card
+
+#### Scenario: Resume sees moved unfinished card
+- **WHEN** an unfinished card has moved to another non-canceled board lane
+- **THEN** `resume-plan` re-resolves the current card path before launching it
+
+#### Scenario: Plan fingerprint changed
+- **WHEN** the current plan fingerprint differs from the aggregate status
+  fingerprint
+- **THEN** `resume-plan` records `BLOCKED` and exits non-zero before launching
+  unfinished cards
+
+### Requirement: Queue success criteria
+The delivery runner MUST distinguish push-enabled and explicit `--no-push`
+queue success criteria.
+
+#### Scenario: Push-enabled card succeeds
+- **WHEN** a child returns `DELIVERED` in push-enabled mode
+- **THEN** queue success for that card requires exactly one card location under
+  `openspec/board/4.done/`, a clean owning repository and `HEAD == upstream`
+
+#### Scenario: No-push card succeeds
+- **WHEN** a child returns `DELIVERED` in explicit `--no-push` mode
+- **THEN** queue success for that card requires a committed clean tree and the
+  expected ahead-of-upstream state recorded in aggregate status
+
+### Requirement: Per-card queue overrides
+The delivery runner MUST support per-card model and reasoning overrides from
+the plan without changing repository defaults.
+
+#### Scenario: Card override is declared
+- **WHEN** a plan card declares model or reasoning effort
+- **THEN** the corresponding single-card child invocation receives those
+  overrides for that run only

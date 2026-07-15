@@ -80,6 +80,50 @@ git -C PROJECT_PATH diff --check
   openspec/board/1.backlog/another-card.md
 ```
 
+Для dependency-ordered очереди через несколько child repos используйте
+consumer-owned JSON plan с workspace aliases и relative paths:
+
+```json
+{
+  "schema": "changerail.delivery-plan.v1",
+  "id": "example-plan",
+  "max_parallel": 2,
+  "per_workspace_parallelism": 1,
+  "workspaces": [
+    {"alias": "service-a", "path": "service-a"},
+    {"alias": "service-b", "path": "service-b"}
+  ],
+  "cards": [
+    {"id": "service-a-card", "workspace": "service-a", "card": "service-a-card.md", "wave": 1},
+    {
+      "id": "service-b-card",
+      "workspace": "service-b",
+      "card": "service-b-card.md",
+      "depends_on": ["service-a-card"],
+      "wave": 2
+    }
+  ]
+}
+```
+
+Typical queue lifecycle:
+
+```bash
+/opt/changerail/bin/changerail-delivery-runner plan delivery-plan.json \
+  --consumer-root /opt/example-workspace --json
+/opt/changerail/bin/changerail-delivery-runner preflight-plan delivery-plan.json \
+  --consumer-root /opt/example-workspace --json
+/opt/changerail/bin/changerail-delivery-runner run-plan delivery-plan.json \
+  --consumer-root /opt/example-workspace
+/opt/changerail/bin/changerail-delivery-runner status-plan \
+  /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json --json
+```
+
+При safety stop исправьте blocked workspace/card, затем используйте
+`resume-plan` с previous aggregate status. Runtime status, raw logs и locks
+остаются ignored under `.runtime/changerail/`; plan examples не должны
+содержать credentials, secrets или machine-specific absolute paths.
+
 Если root отслеживает child repos как submodules/gitlinks или содержит общий
 integration manifest, root-level update выполняйте после child-repo publish как
 отдельный serial step.
