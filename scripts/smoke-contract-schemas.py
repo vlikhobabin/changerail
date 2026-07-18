@@ -389,6 +389,17 @@ def main() -> int:
             minimal_errors = validator(delivery_run_minimal())
             if minimal_errors:
                 failures.append(f"{name}: minimal fixture without performance failed: {minimal_errors}")
+            reason_fixture = delivery_run_minimal()
+            reason_fixture["result"] = "BLOCKED"
+            reason_fixture["terminal_outcome"] = "BLOCKED"
+            reason_fixture["terminal_reason"] = "fix_budget_exhausted"
+            reason_errors = validator(reason_fixture)
+            if reason_errors:
+                failures.append(f"{name}: terminal reason fixture failed: {reason_errors}")
+            invalid_reason = copy.deepcopy(reason_fixture)
+            invalid_reason["terminal_reason"] = "free form reason"
+            if not validator(invalid_reason):
+                failures.append(f"{name}: invalid terminal reason unexpectedly passed")
         negative = mutate_invalid(positive)
         negative_errors = validator(negative)
         if not negative_errors:
@@ -403,6 +414,28 @@ def main() -> int:
     duplicate_plan["cards"].append(copy.deepcopy(duplicate_plan["cards"][0]))
     if not validate_delivery_plan(duplicate_plan):
         failures.append("changerail-delivery-plan.schema.json: duplicate card id unexpectedly passed")
+
+    recovery_plan = delivery_plan()
+    recovery_plan["cards"].append(
+        {
+            "id": "service-a-recovery",
+            "workspace": "service-a",
+            "card": "service-a-recovery.md",
+            "wave": 1,
+            "recovery_for": "service-a-card",
+        }
+    )
+    if validate_delivery_plan(recovery_plan):
+        failures.append("changerail-delivery-plan.schema.json: recovery card fixture failed")
+
+    recovery_status = delivery_plan_status()
+    recovery_status["cards"][0]["state"] = "recovered"
+    recovery_status["cards"][0]["result"] = "NO-GO"
+    recovery_status["cards"][0]["terminal_reason"] = "review_no_go"
+    recovery_status["cards"][0]["recovered_by"] = "service-a-recovery"
+    recovery_status["summary"]["recovered"] = 1
+    if validate_delivery_plan_status(recovery_status):
+        failures.append("changerail-delivery-plan-status.schema.json: recovery status fixture failed")
 
     if failures:
         for failure in failures:

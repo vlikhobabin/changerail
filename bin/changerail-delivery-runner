@@ -28,6 +28,7 @@ AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
 TERMINAL_FIELD_KEYS = {"terminal_outcome", "terminal-outcome", "outcome", "result"}
+TERMINAL_REASON_KEYS = {"terminal_reason", "terminal-reason", "reason_code", "reason-code"}
 BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 MAX_TIMELINE_EVENTS = 100
 MAX_COMMANDS = 50
@@ -39,6 +40,12 @@ class Check:
     name: str
     status: str
     message: str
+
+
+@dataclass
+class TerminalSignal:
+    outcome: str | None = None
+    reason: str | None = None
 
 
 def repo_root_from_script() -> Path:
@@ -169,6 +176,18 @@ def sanitized_endpoint(url: str) -> str:
     host = parts.hostname or "unknown-host"
     port = f":{parts.port}" if parts.port is not None else ""
     return f"{scheme}://{host}{port}"
+
+
+def connectivity_probe_url(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    if not parts.hostname:
+        return url
+    host = parts.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{parts.port}" if parts.port is not None else ""
+    netloc = f"{host}{port}"
+    return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def record_commit(record: dict[str, Any], root: Path) -> None:
@@ -401,6 +420,8 @@ def check_plan_semantics(data: dict[str, Any], consumer_root: Path) -> tuple[lis
         }
         if isinstance(card.get("depends_on"), list):
             entry["depends_on"] = card["depends_on"]
+        if isinstance(card.get("recovery_for"), str):
+            entry["recovery_for"] = card["recovery_for"]
         wave = card.get("wave")
         if isinstance(wave, int):
             entry["wave"] = wave
@@ -431,6 +452,12 @@ def check_plan_semantics(data: dict[str, Any], consumer_root: Path) -> tuple[lis
             checks.append(Check("card resolution", "pass", f"{card_id}: {resolved_path}"))
         resolved_cards.append(entry)
 
+    card_by_id = {
+        card.get("id"): card
+        for card in cards
+        if isinstance(card, dict) and isinstance(card.get("id"), str)
+    }
+    recovery_sources: set[str] = set()
     for card in cards:
         if not isinstance(card, dict) or not isinstance(card.get("id"), str):
             continue
@@ -443,6 +470,27 @@ def check_plan_semantics(data: dict[str, Any], consumer_root: Path) -> tuple[lis
             dependency_wave = card_waves.get(dependency)
             if isinstance(wave, int) and isinstance(dependency_wave, int) and dependency_wave > wave:
                 checks.append(Check("card dependency", "fail", f"{card_id}: dependency {dependency} is in later wave"))
+        recovery_for = card.get("recovery_for")
+        if isinstance(recovery_for, str):
+            if recovery_for == card_id:
+                checks.append(Check("card recovery", "fail", f"{card_id}: recovery_for points to itself"))
+            elif recovery_for not in card_ids:
+                checks.append(Check("card recovery", "fail", f"{card_id}: missing source {recovery_for}"))
+            elif recovery_for in recovery_sources:
+                checks.append(Check("card recovery", "fail", f"{recovery_for}: multiple recovery cards"))
+            else:
+                source = card_by_id[recovery_for]
+                if isinstance(source.get("recovery_for"), str):
+                    checks.append(Check("card recovery", "fail", f"{card_id}: recovery source cannot itself be a recovery"))
+                if card.get("workspace") != source.get("workspace"):
+                    checks.append(Check("card recovery", "fail", f"{card_id}: recovery must share source workspace"))
+                if card.get("wave", 1) != source.get("wave", 1):
+                    checks.append(Check("card recovery", "fail", f"{card_id}: recovery must share source wave"))
+                card_dependencies = card.get("depends_on", []) if isinstance(card.get("depends_on"), list) else []
+                source_dependencies = source.get("depends_on", []) if isinstance(source.get("depends_on"), list) else []
+                if card_dependencies != source_dependencies:
+                    checks.append(Check("card recovery", "fail", f"{card_id}: recovery must inherit source dependencies"))
+                recovery_sources.add(recovery_for)
     cycle = find_card_cycle(cards)
     if cycle:
         checks.append(Check("card dependency cycle", "fail", " -> ".join(cycle)))
@@ -625,9 +673,12 @@ def plan_status_record(
                 "state",
                 "wave",
                 "depends_on",
+                "recovery_for",
                 "run_id",
                 "run_status_path",
                 "result",
+                "terminal_reason",
+                "recovered_by",
                 "upstream_state",
                 "upstream_detail",
                 "started_at",
@@ -670,6 +721,7 @@ def plan_status_record(
             "blocked": sum(1 for card in status_cards if card.get("state") == "blocked"),
             "no_go": sum(1 for card in status_cards if card.get("state") == "no-go"),
             "skipped": sum(1 for card in status_cards if card.get("state") == "skipped"),
+            "recovered": sum(1 for card in status_cards if card.get("state") == "recovered"),
         },
     }
     if result != "RUNNING":
@@ -815,9 +867,11 @@ class PerformanceCollector:
         item_id = item.get("id")
         if isinstance(item_id, str) and item_id:
             timeline_entry["item_id"] = item_id
-        outcome = event_terminal_outcome(event)
-        if outcome:
-            timeline_entry["terminal_outcome"] = outcome
+        signal = event_terminal_signal(event)
+        if signal.outcome:
+            timeline_entry["terminal_outcome"] = signal.outcome
+        if signal.reason:
+            timeline_entry["terminal_reason"] = signal.reason
         if item_type == "command_execution":
             self.observe_command(item, event_type, observed_at, observed_monotonic, timeline_entry)
         self.append_timeline(timeline_entry)
@@ -878,14 +932,15 @@ class PerformanceCollector:
             self.timeline.pop(0)
         self.timeline.append(entry)
 
-    def record_terminal(self, outcome: str) -> None:
-        self.append_timeline(
-            {
-                "observed_at": utc_now(),
-                "event_type": "terminal_outcome",
-                "terminal_outcome": outcome,
-            }
-        )
+    def record_terminal(self, outcome: str, reason: str | None = None) -> None:
+        entry = {
+            "observed_at": utc_now(),
+            "event_type": "terminal_outcome",
+            "terminal_outcome": outcome,
+        }
+        if reason:
+            entry["terminal_reason"] = reason
+        self.append_timeline(entry)
 
     def summary(self, root: Path, card: str, started_at: str) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -988,7 +1043,7 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
     ]
     if args.connectivity_url:
         try:
-            with urllib.request.urlopen(args.connectivity_url, timeout=args.connectivity_timeout) as response:
+            with urllib.request.urlopen(connectivity_probe_url(args.connectivity_url), timeout=args.connectivity_timeout) as response:
                 checks.append(Check("connectivity", "pass", f"{sanitized_endpoint(args.connectivity_url)} status={response.status}"))
         except (OSError, urllib.error.URLError) as exc:
             checks.append(Check("connectivity", "fail", f"{sanitized_endpoint(args.connectivity_url)} error={exc.__class__.__name__}"))
@@ -1078,54 +1133,128 @@ def normalize_terminal_value(value: str) -> str | None:
     return None
 
 
-def event_terminal_outcome(event: Any) -> str | None:
-    if not isinstance(event, dict):
+def normalize_terminal_reason(value: str) -> str | None:
+    normalized = value.strip()
+    if not normalized:
         return None
+    if not all(character.isalnum() or character == "_" for character in normalized):
+        return None
+    if not normalized[0].isalnum() or normalized != normalized.lower():
+        return None
+    return normalized
+
+
+def event_type(event: dict[str, Any]) -> str:
+    for key in ("type", "event", "name"):
+        value = event.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return "unknown"
+
+
+def agent_message_text(event: dict[str, Any]) -> str | None:
+    if event_type(event) != "item.completed":
+        return None
+    item = event.get("item")
+    if not isinstance(item, dict) or item.get("type") != "agent_message":
+        return None
+    for key in ("text", "content", "message"):
+        value = item.get(key)
+        if isinstance(value, str):
+            return value
+    content = item.get("content")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        if parts:
+            return "\n".join(parts)
+    return None
+
+
+def terminal_signal_from_marker_lines(text: str) -> TerminalSignal:
+    signal = TerminalSignal()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("terminal_outcome: "):
+            signal.outcome = normalize_terminal_value(line.removeprefix("terminal_outcome: "))
+        elif line.startswith("terminal_reason: "):
+            signal.reason = normalize_terminal_reason(line.removeprefix("terminal_reason: "))
+    if signal.outcome is None:
+        signal.reason = None
+    return signal
+
+
+def event_terminal_signal(event: Any) -> TerminalSignal:
+    signal = TerminalSignal()
+    if not isinstance(event, dict):
+        return signal
     for key in ("type", "event", "name"):
         value = event.get(key)
         if isinstance(value, str):
             outcome = normalize_terminal_value(value)
             if outcome:
-                return outcome
+                signal.outcome = outcome
+                break
     for key in TERMINAL_FIELD_KEYS:
         value = event.get(key)
         if isinstance(value, str):
             outcome = normalize_terminal_value(value)
             if outcome:
-                return outcome
-    return None
+                signal.outcome = outcome
+                break
+    for key in TERMINAL_REASON_KEYS:
+        value = event.get(key)
+        if isinstance(value, str):
+            reason = normalize_terminal_reason(value)
+            if reason:
+                signal.reason = reason
+                break
+    marker = agent_message_text(event)
+    if marker:
+        marker_signal = terminal_signal_from_marker_lines(marker)
+        if marker_signal.outcome:
+            signal = marker_signal
+    return signal
 
 
-def stdout_terminal_outcome(stdout_path: Path) -> str | None:
+def event_terminal_outcome(event: Any) -> str | None:
+    return event_terminal_signal(event).outcome
+
+
+def stdout_terminal_signal(stdout_path: Path) -> TerminalSignal:
     try:
         text = stdout_path.read_text(encoding="utf-8")
     except OSError:
-        return None
-    outcome: str | None = None
+        return TerminalSignal()
+    signal = TerminalSignal()
     for line in text.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        candidate = event_terminal_outcome(event)
-        if candidate:
-            outcome = candidate
-    return outcome
+        candidate = event_terminal_signal(event)
+        if candidate.outcome:
+            signal = candidate
+    return signal
 
 
 def review_verdict_path(root: Path, card: str) -> Path:
     return root / ".runtime" / "changerail" / "reviews" / f"{card_id(card)}.json"
 
 
-def review_verdict_fallback_outcome(args: argparse.Namespace) -> str | None:
+def review_verdict_fallback_signal(args: argparse.Namespace) -> TerminalSignal:
     root = args.workspace.resolve(strict=False)
     verdict = review_verdict_path(root, args.card)
     if not verdict.is_file() or card_is_published(root, args.card):
-        return None
+        return TerminalSignal()
 
     helper = repo_root_from_script() / "scripts" / "changerail_review_verdict.py"
     if not helper.is_file():
-        return "BLOCKED"
+        return TerminalSignal("BLOCKED", "review_verdict_helper_unavailable")
     result = subprocess.run(
         [
             sys.executable,
@@ -1142,16 +1271,30 @@ def review_verdict_fallback_outcome(args: argparse.Namespace) -> str | None:
         check=False,
     )
     if result.returncode != 0:
-        return "BLOCKED"
+        return TerminalSignal("BLOCKED", "review_verdict_invalid")
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
-        return "BLOCKED"
+        return TerminalSignal("BLOCKED", "review_verdict_invalid")
     if payload.get("result") == "no-go":
-        return "NO-GO"
+        return TerminalSignal("NO-GO")
     if payload.get("result") == "go":
-        return "BLOCKED"
-    return None
+        return TerminalSignal("BLOCKED", "unpublished_go_verdict")
+    return TerminalSignal()
+
+
+def fallback_terminal_signal(args: argparse.Namespace, exit_code: int, structured_signal: TerminalSignal) -> TerminalSignal:
+    if structured_signal.outcome:
+        return structured_signal
+    review_signal = review_verdict_fallback_signal(args)
+    if review_signal.outcome:
+        return review_signal
+    if exit_code != 0:
+        return TerminalSignal("BLOCKED")
+    root = args.workspace.resolve(strict=False)
+    if card_is_published(root, args.card):
+        return TerminalSignal("DELIVERED")
+    return TerminalSignal("BLOCKED", "unpublished_card")
 
 
 def command_preflight(args: argparse.Namespace) -> int:
@@ -1209,23 +1352,27 @@ def command_run(args: argparse.Namespace) -> int:
                 stdout.flush()
                 performance.observe_line(line)
         exit_code = process.wait()
-    structured_outcome = stdout_terminal_outcome(stdout_path)
-    fallback_outcome = review_verdict_fallback_outcome(args) if structured_outcome is None else None
-    outcome = structured_outcome or fallback_outcome or ("DELIVERED" if exit_code == 0 else "BLOCKED")
+    terminal_signal = fallback_terminal_signal(args, exit_code, stdout_terminal_signal(stdout_path))
+    outcome = terminal_signal.outcome or "BLOCKED"
     if exit_code != 0 and outcome == "DELIVERED":
         outcome = "BLOCKED"
+        terminal_signal.reason = "nonzero_child_exit"
     record["phase"] = "terminal"
     record["result"] = outcome
     record["terminal_outcome"] = outcome
+    if terminal_signal.reason:
+        record["terminal_reason"] = terminal_signal.reason
     record.setdefault("process", {})["exit_code"] = exit_code
     record["usage"] = parse_usage(stdout_path)
-    performance.record_terminal(outcome)
+    performance.record_terminal(outcome, terminal_signal.reason)
     record["performance"] = performance.summary(root, args.card, args.started_at)
     record["timestamps"]["ended_at"] = utc_now()
     record["updated_at"] = utc_now()
     record_commit(record, root)
     atomic_write_json(status_path(args), record)
     print(f"terminal_outcome: {outcome}")
+    if terminal_signal.reason:
+        print(f"terminal_reason: {terminal_signal.reason}")
     print(f"status: {status_path(args)}")
     return 0 if outcome == "DELIVERED" else 1
 
@@ -1325,7 +1472,118 @@ def queue_success_check(workspace: dict[str, Any], card: dict[str, Any], mode: s
     return True, f"{clean_reason}; {upstream_reason}; card={done_locations[0]}", details
 
 
+def dependency_list(card: dict[str, Any]) -> list[str]:
+    dependencies = card.get("depends_on", [])
+    if not isinstance(dependencies, list):
+        return []
+    return [dependency for dependency in dependencies if isinstance(dependency, str)]
+
+
+def recoverable_source(card: dict[str, Any]) -> bool:
+    if card.get("state") == "no-go" and card.get("result") == "NO-GO":
+        return True
+    return (
+        card.get("state") == "blocked"
+        and card.get("result") == "BLOCKED"
+        and card.get("terminal_reason") == "fix_budget_exhausted"
+    )
+
+
+def recovery_by_source(cards: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    linked: dict[str, dict[str, Any]] = {}
+    for card in cards:
+        source = card.get("recovery_for")
+        if isinstance(source, str):
+            linked[source] = card
+    return linked
+
+
+def valid_recovery_augmentation(
+    previous: dict[str, Any],
+    data: dict[str, Any],
+    cards: list[dict[str, Any]],
+    checks: list[Check],
+) -> bool:
+    previous_cards = {
+        card.get("id"): card
+        for card in previous.get("cards", [])
+        if isinstance(card, dict) and isinstance(card.get("id"), str)
+    }
+    current_cards = {card["id"]: card for card in cards if isinstance(card.get("id"), str)}
+    if not previous_cards:
+        checks.append(Check("resume recovery augmentation", "fail", "previous aggregate status has no cards"))
+        return False
+    previous_fingerprint = previous.get("plan", {}).get("fingerprint")
+    previous_ids = set(previous_cards)
+    base_plan = dict(data)
+    base_plan["cards"] = [
+        card
+        for card in data.get("cards", [])
+        if isinstance(card, dict) and card.get("id") in previous_ids
+    ]
+    if previous_fingerprint != plan_fingerprint(base_plan):
+        checks.append(Check("resume recovery augmentation", "fail", "plan changed outside added recovery cards"))
+        return False
+    recovery_sources: set[str] = set()
+    for card_id, previous_card in previous_cards.items():
+        current = current_cards.get(card_id)
+        if current is None:
+            checks.append(Check("resume recovery augmentation", "fail", f"missing prior card {card_id}"))
+            return False
+        for key in ("workspace", "card", "wave"):
+            if previous_card.get(key) != current.get(key):
+                checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: {key} changed"))
+                return False
+        if dependency_list(previous_card) != dependency_list(current):
+            checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: dependencies changed"))
+            return False
+    for card_id, current in current_cards.items():
+        if card_id in previous_cards:
+            continue
+        source_id = current.get("recovery_for")
+        if not isinstance(source_id, str):
+            checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: added card lacks recovery_for"))
+            return False
+        if source_id in recovery_sources:
+            checks.append(Check("resume recovery augmentation", "fail", f"{source_id}: multiple recovery cards"))
+            return False
+        source_previous = previous_cards.get(source_id)
+        source_current = current_cards.get(source_id)
+        if not isinstance(source_previous, dict) or not isinstance(source_current, dict):
+            checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: source {source_id} missing"))
+            return False
+        if not recoverable_source(source_previous):
+            checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: source {source_id} is not recoverable"))
+            return False
+        if current.get("workspace") != source_current.get("workspace") or current.get("wave") != source_current.get("wave"):
+            checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: recovery must share source workspace and wave"))
+            return False
+        if dependency_list(current) != dependency_list(source_current):
+            checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: recovery must inherit source dependencies"))
+            return False
+        recovery_sources.add(source_id)
+    if not recovery_sources:
+        checks.append(Check("resume recovery augmentation", "fail", "plan changed without added recovery card"))
+        return False
+    checks.append(Check("resume recovery augmentation", "pass", ", ".join(sorted(recovery_sources))))
+    return True
+
+
+def child_terminal_signal(child_status: dict[str, Any] | None) -> TerminalSignal:
+    if not isinstance(child_status, dict):
+        return TerminalSignal("BLOCKED", "missing_or_invalid_child_status")
+    errors = schema_errors(child_status, "changerail-delivery-run.schema.json")
+    if errors:
+        return TerminalSignal("BLOCKED", "missing_or_invalid_child_status")
+    result = child_status.get("result")
+    if result not in {"DELIVERED", "NO-GO", "BLOCKED"}:
+        return TerminalSignal("BLOCKED", "missing_or_invalid_child_status")
+    reason = child_status.get("terminal_reason")
+    return TerminalSignal(result, reason if isinstance(reason, str) else None)
+
+
 def ready_cards(cards: list[dict[str, Any]], completed: set[str], running_workspaces: set[str]) -> list[dict[str, Any]]:
+    cards_by_id = {card["id"]: card for card in cards if isinstance(card.get("id"), str)}
     candidates: list[dict[str, Any]] = []
     active_waves = [
         card.get("wave", 1)
@@ -1340,8 +1598,13 @@ def ready_cards(cards: list[dict[str, Any]], completed: set[str], running_worksp
             continue
         if card["workspace"] in running_workspaces:
             continue
-        dependencies = card.get("depends_on", [])
-        if isinstance(dependencies, list) and all(dep in completed for dep in dependencies):
+        recovery_for = card.get("recovery_for")
+        if isinstance(recovery_for, str):
+            source = cards_by_id.get(recovery_for)
+            if not isinstance(source, dict) or not recoverable_source(source):
+                continue
+        dependencies = dependency_list(card)
+        if all(dep in completed for dep in dependencies):
             candidates.append(card)
     return sorted(candidates, key=lambda item: (item.get("wave", 1), item["workspace"], item["id"]))
 
@@ -1383,7 +1646,9 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
         previous = load_json_object(plan_status_path(args))
     if resume:
         previous_fingerprint = previous.get("plan", {}).get("fingerprint") if isinstance(previous, dict) else None
-        if previous_fingerprint != plan_fingerprint(data):
+        if previous_fingerprint != plan_fingerprint(data) and not (
+            isinstance(previous, dict) and valid_recovery_augmentation(previous, data, cards, checks)
+        ):
             checks.append(Check("resume fingerprint", "fail", "plan fingerprint differs from aggregate status"))
             record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
             return record, 1
@@ -1404,7 +1669,26 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 card["state"] = "skipped"
                 card["result"] = "DELIVERED"
                 card["reason"] = f"already delivered; {reason}"
+        if resume and isinstance(previous_card, dict) and recoverable_source(previous_card):
+            recoveries = recovery_by_source(cards)
+            if card["id"] in recoveries:
+                card["state"] = "blocked" if previous_card.get("result") == "BLOCKED" else "no-go"
+                card["result"] = previous_card.get("result")
+                if isinstance(previous_card.get("terminal_reason"), str):
+                    card["terminal_reason"] = previous_card["terminal_reason"]
+                if isinstance(previous_card.get("reason"), str):
+                    card["reason"] = previous_card["reason"]
+                if isinstance(previous_card.get("run_status_path"), str):
+                    card["run_status_path"] = previous_card["run_status_path"]
     completed = {card["id"] for card in cards if card.get("state") == "skipped"}
+    cards_by_id = {card["id"]: card for card in cards if isinstance(card.get("id"), str)}
+    for card in cards:
+        source_id = card.get("recovery_for")
+        source = cards_by_id.get(source_id) if isinstance(source_id, str) else None
+        if card.get("state") in {"pending", "ready"} and isinstance(source, dict) and source.get("state") in {"delivered", "skipped"}:
+            card["state"] = "skipped"
+            card["reason"] = f"source {source_id} already delivered; recovery not required"
+            completed.add(card["id"])
     running: dict[str, tuple[subprocess.Popen[str], dict[str, Any], dict[str, Any]]] = {}
     locks: list[dict[str, Any]] = []
     result = "RUNNING"
@@ -1459,10 +1743,11 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
             locks.append(release_workspace_lock(args, workspace))
             card["ended_at"] = utc_now()
             child_status = load_json_object(child_status_path_for(args, card, workspace))
-            child_result = child_status.get("result") if isinstance(child_status, dict) else None
-            if child_result not in {"DELIVERED", "NO-GO", "BLOCKED"}:
-                child_result = "DELIVERED" if exit_code == 0 else "BLOCKED"
+            child_signal = child_terminal_signal(child_status)
+            child_result = child_signal.outcome or "BLOCKED"
             card["result"] = child_result
+            if child_signal.reason:
+                card["terminal_reason"] = child_signal.reason
             if child_result == "DELIVERED":
                 ok, reason, details = queue_success_check(workspace, card, mode)
                 card.update(details)
@@ -1470,6 +1755,25 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                     card["state"] = "delivered"
                     card["reason"] = reason
                     completed.add(card["id"])
+                    source_id = card.get("recovery_for")
+                    if isinstance(source_id, str):
+                        source = next((item for item in cards if item.get("id") == source_id), None)
+                        if isinstance(source, dict) and recoverable_source(source):
+                            source["state"] = "recovered"
+                            source["recovered_by"] = card["id"]
+                            prior_reason = source.get("reason")
+                            source["reason"] = (
+                                f"{prior_reason}; recovered by {card['id']}"
+                                if isinstance(prior_reason, str) and prior_reason
+                                else f"recovered by {card['id']}"
+                            )
+                            completed.add(source_id)
+                    else:
+                        for recovery in cards:
+                            if recovery.get("recovery_for") == card["id"] and recovery.get("state") in {"pending", "ready"}:
+                                recovery["state"] = "skipped"
+                                recovery["reason"] = f"source {card['id']} delivered; recovery not required"
+                                completed.add(recovery["id"])
                 else:
                     card["state"] = "blocked"
                     card["result"] = "BLOCKED"
@@ -1481,7 +1785,10 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 result = "NO-GO"
             else:
                 card["state"] = "blocked"
-                card["reason"] = "child returned BLOCKED"
+                reason = "child returned BLOCKED"
+                if child_signal.reason:
+                    reason += f": {child_signal.reason}"
+                card["reason"] = reason
                 result = "BLOCKED"
             status = write_plan_status(args, data, workspaces, cards, checks, "running" if not resume else "resuming", result, locks)
 

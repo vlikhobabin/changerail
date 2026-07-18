@@ -221,6 +221,15 @@ prior cycles и ставит ее перед downstream work. Если linked ca
 investigation/design. Старый `go` нельзя использовать после содержательных
 изменений code/docs/specs/scripts/tests.
 
+До independent review действует отдельный budget: `changerail-do`
+`--max-fix-cycles` ограничивает implement/verify attempts, а
+`changerail-deliver --max-review-cycles` считает только post-review rescue
+cycles. При `terminal_reason: fix_budget_exhausted` оркестратор выбирает
+bounded same-card micro-fix для того же capability/scope/authority, linked
+rescue/replacement карточку для самостоятельного scope или сохраняет external
+blocker как `BLOCKED`/`NOT-VERIFIABLE`. Ручное увеличение внутреннего budget не
+является default path, и этот safety stop не считается review `NO-GO`.
+
 ## Batch delivery и очередь карточек
 
 `$chrl-deliver` может принимать одну карточку или колонку/очередь. Контракт

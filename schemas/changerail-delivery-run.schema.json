@@ -130,6 +130,9 @@
     "terminal_outcome": {
       "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
     },
+    "terminal_reason": {
+      "$ref": "#/$defs/terminalReason"
+    },
     "commit": {
       "type": "string",
       "minLength": 1
@@ -314,6 +317,9 @@
         "terminal_outcome": {
           "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
         },
+        "terminal_reason": {
+          "$ref": "#/$defs/terminalReason"
+        },
         "duration_seconds": {
           "type": "number",
           "minimum": 0
@@ -383,6 +389,10 @@
           "format": "date-time"
         }
       }
+    },
+    "terminalReason": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_]*$"
     },
     "check": {
       "type": "object",

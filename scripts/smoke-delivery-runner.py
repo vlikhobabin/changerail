@@ -106,6 +106,12 @@ def write_fake_launcher(path: Path) -> None:
                 "    print(json.dumps({'terminal_outcome': 'delivered'}))",
                 "if mode == 'safety-stop-no-go':",
                 "    print(json.dumps({'type': 'assistant-message', 'content': 'safety stop after repeated no-go'}))",
+                "if mode == 'fix-budget-exhausted':",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-fix-budget', 'type': 'agent_message', 'text': 'Verification remains red.\\nterminal_outcome: BLOCKED\\nterminal_reason: fix_budget_exhausted'}}))",
+                "if mode == 'external-blocker':",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-external', 'type': 'agent_message', 'text': 'Target unavailable.\\nterminal_outcome: BLOCKED\\nterminal_reason: external_blocker'}}))",
+                "if mode == 'marker-like-prose':",
+                "    print(json.dumps({'type': 'assistant-message', 'content': 'terminal_outcome: DELIVERED and terminal_reason: ignored are prose'}))",
                 "if mode == 'performance':",
                 "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'in_progress'}}), flush=True)",
                 "    time.sleep(0.01)",
@@ -114,6 +120,8 @@ def write_fake_launcher(path: Path) -> None:
                 "    time.sleep(0.01)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'completed', 'exit_code': 0}}), flush=True)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-1', 'type': 'agent_message', 'text': 'done'}}), flush=True)",
+                "if mode not in {'unstructured-success', 'safety-stop-no-go', 'fix-budget-exhausted', 'external-blocker', 'marker-like-prose', 'no-go', 'awaiting-review', 'ordered-conflict'}:",
+                "    print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'cached_input_tokens': 1, 'uncached_input_tokens': 2, 'output_tokens': 5, 'reasoning_tokens': 1, 'total_tokens': 8}}))",
                 "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
             ]
@@ -173,11 +181,22 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    print(json.dumps(status))",
                 "    sys.exit(0)",
                 "mode = os.environ.get('CHANGERAIL_QUEUE_FAKE_MODE')",
+                "if mode == 'missing-status' and 'service-a-card' in args.card:",
+                "    sys.exit(0)",
                 "result = 'DELIVERED'",
+                "terminal_reason = None",
                 "if mode == 'no-go' and 'service-a-card' in args.card:",
                 "    result = 'NO-GO'",
                 "if mode == 'blocked' and 'service-a-card' in args.card:",
                 "    result = 'BLOCKED'",
+                "if mode == 'fix-budget' and 'service-a-card' in args.card:",
+                "    result = 'BLOCKED'",
+                "    terminal_reason = 'fix_budget_exhausted'",
+                "if mode == 'external-blocker' and 'service-a-card' in args.card:",
+                "    result = 'BLOCKED'",
+                "    terminal_reason = 'external_blocker'",
+                "if mode == 'recovery-no-go' and 'service-a-recovery' in args.card:",
+                "    result = 'NO-GO'",
                 "status = {",
                 "    'schema': 'changerail.delivery-run.v1',",
                 "    'run_id': args.run_id,",
@@ -191,6 +210,8 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    'command': {'argv': sys.argv, 'launcher': sys.argv[0], 'stdin': 'closed', 'json': True},",
                 "    'usage': {'available': False, 'reason': 'fake queue runner'},",
                 "}",
+                "if terminal_reason:",
+                "    status['terminal_reason'] = terminal_reason",
                 "path = Path(args.runtime_root) / args.run_id / 'status.json'",
                 "path.parent.mkdir(parents=True, exist_ok=True)",
                 "path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
@@ -292,9 +313,12 @@ def create_queue_consumer(tmp: Path, name: str, no_push_ready: bool = True) -> t
         configure_upstream_baseline(service_a)
         configure_upstream_baseline(service_b)
     write_board_card(service_a, "openspec/board/3.inprogress/service-a-card.md")
+    write_board_card(service_a, "openspec/board/2.todo/service-a-recovery.md")
+    write_board_card(service_a, "openspec/board/2.todo/service-a-recovery-two.md")
     write_board_card(service_a, "openspec/board/3.inprogress/duplicate-card.md")
     write_board_card(service_a, "openspec/board/5.canceled/canceled-card.md")
     write_board_card(service_b, "openspec/board/2.todo/service-b-card.md")
+    write_board_card(service_b, "openspec/board/2.todo/service-b-recovery.md")
     write_board_card(service_b, "openspec/board/2.todo/duplicate-card.md")
     git(["add", "openspec"], service_a)
     git(
@@ -626,6 +650,120 @@ def check_supervisor_stops_after_fallback_no_go(tmp: Path) -> None:
     status = load_status(runtime, "supervisor-1")
     if status["result"] != "NO-GO":
         raise AssertionError(f"first card should stop batch with NO-GO: {status}")
+
+
+def check_fix_budget_handoff_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "fix-budget-workspace")
+    launcher = tmp / "fake-codex-fix-budget"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "fix-budget",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("fix-budget-exhausted"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("fix-budget safety stop unexpectedly returned success")
+    status = load_status(runtime, "fix-budget")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "fix_budget_exhausted":
+        raise AssertionError(f"fix-budget terminal signal was not preserved: {status}")
+    if "terminal_reason: fix_budget_exhausted" not in result.stdout:
+        raise AssertionError(f"fix-budget reason was not printed: {result.stdout}")
+
+
+def check_external_blocker_handoff_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "external-blocker-workspace")
+    launcher = tmp / "fake-codex-external-blocker"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "external-blocker",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("external-blocker"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("external blocker unexpectedly returned success")
+    status = load_status(runtime, "external-blocker")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "external_blocker":
+        raise AssertionError(f"external blocker reason was not preserved: {status}")
+
+
+def check_unstructured_unpublished_success_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "unpublished-success-workspace")
+    launcher = tmp / "fake-codex-unpublished-success"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "unpublished-success",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("unstructured-success"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("unstructured unpublished exit 0 unexpectedly delivered")
+    status = load_status(runtime, "unpublished-success")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "unpublished_card":
+        raise AssertionError(f"unpublished exit 0 was not fail-closed: {status}")
+
+
+def check_marker_like_prose_is_not_authoritative(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "marker-prose-workspace")
+    launcher = tmp / "fake-codex-marker-prose"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "marker-prose",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("marker-like-prose"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("marker-like arbitrary prose unexpectedly delivered")
+    status = load_status(runtime, "marker-prose")
+    if status.get("terminal_reason") != "unpublished_card":
+        raise AssertionError(f"arbitrary prose was treated as authoritative: {status}")
 
 
 def check_non_terminal_error_success_run(tmp: Path) -> None:
@@ -1006,6 +1144,51 @@ def check_queue_preflight_failures(tmp: Path) -> None:
                 plan["cards"][1].update({"wave": 2}),
             ),
         ),
+        (
+            "invalid-recovery-wave",
+            lambda plan: plan["cards"].append(
+                {
+                    "id": "service-a-recovery",
+                    "workspace": "service-a",
+                    "card": "service-a-recovery.md",
+                    "wave": 2,
+                    "recovery_for": "service-a-card",
+                }
+            ),
+        ),
+        (
+            "invalid-recovery-workspace",
+            lambda plan: plan["cards"].append(
+                {
+                    "id": "service-b-recovery",
+                    "workspace": "service-b",
+                    "card": "service-b-recovery.md",
+                    "wave": 1,
+                    "recovery_for": "service-a-card",
+                }
+            ),
+        ),
+        (
+            "duplicate-recovery-source",
+            lambda plan: plan["cards"].extend(
+                [
+                    {
+                        "id": "service-a-recovery",
+                        "workspace": "service-a",
+                        "card": "service-a-recovery.md",
+                        "wave": 1,
+                        "recovery_for": "service-a-card",
+                    },
+                    {
+                        "id": "service-a-recovery-two",
+                        "workspace": "service-a",
+                        "card": "service-a-recovery-two.md",
+                        "wave": 1,
+                        "recovery_for": "service-a-card",
+                    },
+                ]
+            ),
+        ),
         ("invalid-concurrency", lambda plan: plan.update({"per_workspace_parallelism": 2})),
     ]
     for name, mutate in cases:
@@ -1194,6 +1377,255 @@ def check_queue_fail_fast_and_locks(tmp: Path) -> None:
         raise AssertionError(f"queue lock was not fail-closed/preserved: {lock_status}")
 
 
+def check_queue_terminal_reason_and_missing_status(tmp: Path) -> None:
+    for mode, expected_reason in (
+        ("fix-budget", "fix_budget_exhausted"),
+        ("external-blocker", "external_blocker"),
+        ("missing-status", "missing_or_invalid_child_status"),
+    ):
+        consumer, _service_a, _service_b = create_queue_consumer(tmp, f"queue-{mode}-consumer")
+        runner = tmp / f"fake-queue-runner-{mode}"
+        runtime = tmp / f"queue-{mode}-runtime"
+        plan = consumer / "delivery-plan.json"
+        write_fake_queue_runner(runner)
+        write_queue_plan(plan, queue_plan_fixture())
+        env = runner_env()
+        env["CHANGERAIL_QUEUE_FAKE_MODE"] = mode
+        result = run(
+            [
+                str(RUNNER),
+                "run-plan",
+                str(plan),
+                "--consumer-root",
+                str(consumer),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"queue-{mode}",
+                "--launcher",
+                str(runner),
+                "--no-push",
+                "--json",
+            ],
+            env=env,
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"queue {mode} unexpectedly passed")
+        status = load_status(runtime, f"queue-{mode}")
+        first = status["cards"][0]
+        if first.get("state") != "blocked" or first.get("terminal_reason") != expected_reason:
+            raise AssertionError(f"queue {mode} did not preserve fail-closed reason: {status}")
+
+
+def recovery_plan_fixture() -> tuple[dict[str, Any], dict[str, Any]]:
+    original = queue_plan_fixture()
+    augmented = json.loads(json.dumps(original))
+    augmented["cards"].append(
+        {
+            "id": "service-a-recovery",
+            "workspace": "service-a",
+            "card": "service-a-recovery.md",
+            "wave": 1,
+            "recovery_for": "service-a-card",
+        }
+    )
+    return original, augmented
+
+
+def recovery_previous_status(
+    original: dict[str, Any],
+    *,
+    source_state: str = "no-go",
+    source_result: str = "NO-GO",
+    terminal_reason: str | None = None,
+) -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "id": "service-a-card",
+        "workspace": "service-a",
+        "card": "service-a-card.md",
+        "resolved_path": "openspec/board/3.inprogress/service-a-card.md",
+        "state": source_state,
+        "result": source_result,
+        "wave": 1,
+        "reason": f"child returned {source_result}",
+    }
+    if terminal_reason:
+        source["terminal_reason"] = terminal_reason
+    return {
+        "schema": "changerail.delivery-plan-status.v1",
+        "run_id": "queue-recovery",
+        "updated_at": "2026-07-15T00:00:00Z",
+        "plan": {"id": "queue-smoke", "path": "delivery-plan.json", "fingerprint": queue_plan_fingerprint(original)},
+        "phase": "terminal",
+        "result": source_result,
+        "terminal_outcome": source_result,
+        "mode": "no-push",
+        "timestamps": {"started_at": "2026-07-15T00:00:00Z", "ended_at": "2026-07-15T00:00:01Z"},
+        "cards": [
+            source,
+            {
+                "id": "service-b-card",
+                "workspace": "service-b",
+                "card": "service-b-card.md",
+                "resolved_path": "openspec/board/2.todo/service-b-card.md",
+                "state": "blocked",
+                "wave": 2,
+                "depends_on": ["service-a-card"],
+            },
+        ],
+    }
+
+
+def check_queue_recovery_resume(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-recovery-consumer")
+    runner = tmp / "fake-queue-runner-recovery"
+    call_log = tmp / "queue-recovery-calls.jsonl"
+    runtime = tmp / "queue-recovery-runtime"
+    plan = consumer / "delivery-plan.json"
+    original, augmented = recovery_plan_fixture()
+    previous_path = runtime / "previous" / "status.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, augmented)
+    write_json(previous_path, recovery_previous_status(original))
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-recovery",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue recovery resume")
+    status = load_status(runtime, "queue-recovery")
+    cards = {card["id"]: card for card in status["cards"]}
+    if cards["service-a-card"].get("state") != "recovered":
+        raise AssertionError(f"source was not marked recovered: {status}")
+    if cards["service-a-card"].get("recovered_by") != "service-a-recovery":
+        raise AssertionError(f"source recovery lineage missing: {status}")
+    if status.get("summary", {}).get("recovered") != 1 or status.get("result") != "DELIVERED":
+        raise AssertionError(f"recovery aggregate status is inconsistent: {status}")
+    calls = queue_run_calls(call_log)
+    launched = [call.get("card") for call in calls]
+    if launched != [
+        "openspec/board/2.todo/service-a-recovery.md",
+        "openspec/board/2.todo/service-b-card.md",
+    ]:
+        raise AssertionError(f"recovery did not precede downstream or source was re-run: {launched}")
+
+
+def check_queue_recovery_fail_closed(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-recovery-fail-consumer")
+    runner = tmp / "fake-queue-runner-recovery-fail"
+    call_log = tmp / "queue-recovery-fail-calls.jsonl"
+    runtime = tmp / "queue-recovery-fail-runtime"
+    plan = consumer / "delivery-plan.json"
+    original, augmented = recovery_plan_fixture()
+    previous_path = runtime / "previous" / "status.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, augmented)
+    write_json(previous_path, recovery_previous_status(original))
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "recovery-no-go"
+    result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-recovery-fail",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("failed recovery unexpectedly resumed downstream")
+    calls = queue_run_calls(call_log)
+    if [call.get("card") for call in calls] != ["openspec/board/2.todo/service-a-recovery.md"]:
+        raise AssertionError(f"downstream launched after failed recovery: {calls}")
+
+
+def check_queue_recovery_rejects_external_and_unrelated_drift(tmp: Path) -> None:
+    for name, previous, mutate in (
+        (
+            "external",
+            lambda original: recovery_previous_status(
+                original,
+                source_state="blocked",
+                source_result="BLOCKED",
+                terminal_reason="external_blocker",
+            ),
+            lambda augmented: None,
+        ),
+        (
+            "unrelated-drift",
+            lambda original: recovery_previous_status(original),
+            lambda augmented: augmented["cards"][1].update({"depends_on": []}),
+        ),
+    ):
+        consumer, _service_a, _service_b = create_queue_consumer(tmp, f"queue-recovery-{name}-consumer")
+        runner = tmp / f"fake-queue-runner-recovery-{name}"
+        call_log = tmp / f"queue-recovery-{name}-calls.jsonl"
+        runtime = tmp / f"queue-recovery-{name}-runtime"
+        plan = consumer / "delivery-plan.json"
+        original, augmented = recovery_plan_fixture()
+        mutate(augmented)
+        previous_path = runtime / "previous" / "status.json"
+        write_fake_queue_runner(runner)
+        write_queue_plan(plan, augmented)
+        write_json(previous_path, previous(original))
+        env = runner_env()
+        env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+        result = run(
+            [
+                str(RUNNER),
+                "resume-plan",
+                str(plan),
+                "--consumer-root",
+                str(consumer),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"queue-recovery-{name}",
+                "--launcher",
+                str(runner),
+                "--status-path",
+                str(previous_path),
+                "--no-push",
+                "--json",
+            ],
+            env=env,
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"unsafe recovery plan {name} unexpectedly passed")
+        calls = queue_run_calls(call_log)
+        if calls:
+            raise AssertionError(f"unsafe recovery plan {name} launched live child: {calls}")
+
+
 def check_queue_resume_plan(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-resume-consumer")
     runner = tmp / "fake-queue-runner-resume"
@@ -1340,6 +1772,10 @@ def main() -> int:
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
         check_supervisor_stops_after_fallback_no_go(workspace)
+        check_fix_budget_handoff_run(workspace)
+        check_external_blocker_handoff_run(workspace)
+        check_unstructured_unpublished_success_run(workspace)
+        check_marker_like_prose_is_not_authoritative(workspace)
         check_non_terminal_error_success_run(workspace)
         check_ordered_conflict_run(workspace)
         check_nonzero_without_outcome_run(workspace)
@@ -1352,7 +1788,11 @@ def main() -> int:
         check_queue_preflight_failures(workspace)
         check_queue_run_plan(workspace)
         check_queue_fail_fast_and_locks(workspace)
+        check_queue_terminal_reason_and_missing_status(workspace)
         check_queue_resume_plan(workspace)
+        check_queue_recovery_resume(workspace)
+        check_queue_recovery_fail_closed(workspace)
+        check_queue_recovery_rejects_external_and_unrelated_drift(workspace)
         check_queue_push_success_validation(workspace)
         check_queue_no_push_requires_ahead(workspace)
     print("ok: delivery runner smoke passed")

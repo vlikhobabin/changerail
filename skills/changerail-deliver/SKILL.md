@@ -123,6 +123,27 @@ delivery manifest/card state is updated. For review-gated cards, the delivery
 phase must leave the card in `3.inprogress`; moving to `4.done` belongs to the
 post-publish finalization step.
 
+If `changerail-do` stops with `terminal_reason: fix_budget_exhausted`, keep that
+pre-review `--max-fix-cycles` budget separate from the post-review
+`--max-review-cycles` budget and classify the remaining work before continuing:
+
+- use a bounded same-card micro-fix only when the defect stays inside the
+  declared capability, acceptance scope and existing authority, and has one
+  concrete verification target;
+- create a linked rescue/replacement card when the work adds a capability,
+  deliverable, acceptance scope or independently reviewable risk; carry source
+  lineage, attempted fixes, findings, retained evidence and verification floor,
+  and put the card before blocked downstream work;
+- retain `BLOCKED` or `NOT-VERIFIABLE` with evidence and a resume condition for
+  unavailable infrastructure, credentials, external authority or another
+  blocker that implementation cannot remove.
+
+One bounded continuation does not authorize an unbounded local loop. If it
+cannot reach its verification target, stop or materialize the separate scope as
+a linked card. Do not request exceptional manual budget merely because the
+internal fix counter was exhausted, and do not count this handoff as an
+independent-review `NO-GO`.
+
 ### 3. Review
 
 Skip only when `--no-review` is supplied and record the operator rationale in
@@ -182,6 +203,9 @@ terminal event instead of relying only on assistant prose:
 
 - repeated or final external review `no-go`: `external-review/no-go`
 - awaiting external review: `awaiting-review` or `awaiting-external-review`
+- pre-review fix budget exhausted: exact completed agent-message lines
+  `terminal_outcome: BLOCKED` and
+  `terminal_reason: fix_budget_exhausted`
 - other blocked publish/review gate stop: `delivery/blocked` or explicit
   `terminal_outcome: BLOCKED`
 

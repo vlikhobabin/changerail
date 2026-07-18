@@ -118,6 +118,10 @@ def missing_workflow_guidance(project: Path) -> list[str]:
             "Reviewer работает в fresh context",
             "3.inprogress",
             "4.done",
+            "max-fix-cycles",
+            "max-review-cycles",
+            "fix_budget_exhausted",
+            "bounded same-card micro-fix",
         ],
         "openspec/board/README.md": [
             "explore -> ff -> do -> review -> pub",

@@ -55,6 +55,15 @@ git diff --check
 
 Add project-specific tests here as the project evolves.
 
+## Pre-review Delivery Budgets
+
+`changerail-do --max-fix-cycles` bounds pre-review implement/verify attempts;
+`changerail-deliver --max-review-cycles` separately bounds rescue/re-review
+after independent `NO-GO`. A `fix_budget_exhausted` handoff is non-delivered:
+classify it as a bounded same-card micro-fix, a linked rescue/replacement card
+before downstream work, or an external `BLOCKED`/`NOT-VERIFIABLE` condition.
+Exceptional manual budget is not the default continuation.
+
 <!-- CHANGERAIL_SHARED_AGENTS_BEGIN source="{{CHANGERAIL_SHARED_SOURCE}}" -->
 {{CHANGERAIL_SHARED_AGENTS}}
 <!-- CHANGERAIL_SHARED_AGENTS_END -->

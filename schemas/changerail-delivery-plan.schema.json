@@ -119,6 +119,10 @@
             "pattern": "^[a-z0-9][a-z0-9-]*$"
           }
         },
+        "recovery_for": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
         "wave": {
           "type": "integer",
           "minimum": 1

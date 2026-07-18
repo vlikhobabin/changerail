@@ -62,6 +62,16 @@ DELIVER_REVIEW_CYCLE_CONTRACT = (
     "Default `--max-review-cycles` is `5`",
     "rescue/replacement card",
 )
+DO_FIX_BUDGET_CONTRACT = (
+    "Default `--max-fix-cycles` is `2`",
+    "terminal_reason: fix_budget_exhausted",
+)
+DELIVER_FIX_BUDGET_CONTRACT = (
+    "bounded same-card micro-fix",
+    "fix_budget_exhausted",
+    "max-fix-cycles",
+    "max-review-cycles",
+)
 
 
 @dataclass
@@ -198,6 +208,14 @@ def check_skill_contract(
         missing = [fragment for fragment in DELIVER_REVIEW_CYCLE_CONTRACT if fragment not in text]
         if missing:
             failures.append("changerail-deliver review rescue budget contract missing: " + ", ".join(missing))
+        missing = [fragment for fragment in DELIVER_FIX_BUDGET_CONTRACT if fragment not in text]
+        if missing:
+            failures.append("changerail-deliver fix budget contract missing: " + ", ".join(missing))
+    if expected_name == "changerail-do" and not failures:
+        text = skill_md.read_text(encoding="utf-8")
+        missing = [fragment for fragment in DO_FIX_BUDGET_CONTRACT if fragment not in text]
+        if missing:
+            failures.append("changerail-do fix budget contract missing: " + ", ".join(missing))
 
     status = "fail" if failures else "pass"
     message = "; ".join(failures) if failures else "SKILL.md contract matches"

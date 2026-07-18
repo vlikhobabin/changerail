@@ -173,6 +173,22 @@ If verification finds actionable defects:
 4. Stop if the same finding repeats, fixes require unrelated scope, or the
    command cannot be made green within the allowed cycles.
 
+When this stop is caused by exhausting `--max-fix-cycles`, do not request an
+exceptional manual budget as the default continuation and do not describe the
+stop as a review `NO-GO`. Retain the remaining findings, attempted fixes,
+evidence paths and the concrete verification target, then end the final agent
+message with exact machine-readable lines:
+
+```text
+terminal_outcome: BLOCKED
+terminal_reason: fix_budget_exhausted
+```
+
+These pre-review fix cycles are distinct from `changerail-deliver`
+`--max-review-cycles`. The supervising lifecycle decides whether the remaining
+work is a bounded same-card micro-fix, a linked rescue/replacement card or an
+external blocker.
+
 ### 5. Sync Specs
 
 Before archiving, sync delta specs into main specs using the

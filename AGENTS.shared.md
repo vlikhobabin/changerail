@@ -200,6 +200,31 @@ delivery фиксирует, почему тест способен упасть
 наблюдает нужный источник поведения. Для docs-only/config-only changes можно
 записать, почему RED evidence неприменима.
 
+## Pre-review Fix Budget
+
+`changerail-do --max-fix-cycles` ограничивает pre-review implement/verify loop;
+`changerail-deliver --max-review-cycles` отдельно ограничивает same-card
+rescue/re-review после independent `NO-GO`. Эти counters не заменяют и не
+расходуют друг друга.
+
+Если `changerail-do` исчерпал fix budget, он сохраняет remaining findings,
+attempted fixes, evidence и concrete verification target, затем возвращает
+machine-readable non-delivered handoff:
+
+```text
+terminal_outcome: BLOCKED
+terminal_reason: fix_budget_exhausted
+```
+
+Supervising lifecycle выбирает одну bounded ветвь: локальный дефект в том же
+capability/scope/authority получает bounded same-card micro-fix; отдельный
+deliverable, acceptance scope или independently reviewable risk получает
+linked rescue/replacement карточку перед blocked downstream work; unavailable
+infrastructure, credentials, external authority или другой неустранимый кодом
+blocker остается `BLOCKED`/`NOT-VERIFIABLE` с evidence и resume condition.
+Exceptional manual budget не является default continuation, а fix-budget stop
+не считается review `NO-GO`.
+
 ## Review Gate
 
 Review gate независим от implementation session. Он аудитит:

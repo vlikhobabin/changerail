@@ -111,6 +111,10 @@
         "skipped": {
           "type": "integer",
           "minimum": 0
+        },
+        "recovered": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }
@@ -187,7 +191,7 @@
           "$ref": "#/$defs/relativePath"
         },
         "state": {
-          "enum": ["pending", "ready", "running", "skipped", "delivered", "no-go", "blocked"]
+          "enum": ["pending", "ready", "running", "skipped", "delivered", "no-go", "blocked", "recovered"]
         },
         "wave": {
           "type": "integer",
@@ -200,6 +204,10 @@
             "pattern": "^[a-z0-9][a-z0-9-]*$"
           }
         },
+        "recovery_for": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
         "run_id": {
           "type": "string",
           "minLength": 1
@@ -209,6 +217,13 @@
         },
         "result": {
           "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
+        },
+        "terminal_reason": {
+          "$ref": "#/$defs/terminalReason"
+        },
+        "recovered_by": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
         },
         "upstream_state": {
           "enum": ["equal", "ahead", "diverged", "unknown"]
@@ -251,6 +266,10 @@
           "type": "string"
         }
       }
+    },
+    "terminalReason": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_]*$"
     },
     "lock": {
       "type": "object",
