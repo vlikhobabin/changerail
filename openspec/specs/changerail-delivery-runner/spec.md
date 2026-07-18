@@ -391,12 +391,21 @@ deterministically during live and resumed queue execution.
 
 ### Requirement: Queue fail-fast terminal outcomes
 The delivery runner MUST stop launching new downstream cards when a live child
-or queue validation reaches an unsafe terminal outcome.
+or queue validation reaches an unsafe terminal outcome. Autonomous recovery
+after child `NO-GO` MUST be represented as a linked rescue/replacement or
+investigation card before dependent downstream cards resume.
 
 #### Scenario: Child returns no-go
 - **WHEN** a child delivery run returns `NO-GO`
 - **THEN** aggregate queue status records `NO-GO`
 - **AND** no new downstream cards are launched
+
+#### Scenario: Autonomous recovery is represented as a card
+- **WHEN** an autonomous agent continues after a terminal child `NO-GO`
+- **THEN** it MUST create or run a linked rescue/replacement or investigation
+  card rather than pushing the failed child payload
+- **AND** the original aggregate plan may resume only after the recovery card
+  publishes with a fresh independent `GO`
 
 #### Scenario: Child returns blocked
 - **WHEN** a child delivery run returns `BLOCKED`

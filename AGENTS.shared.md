@@ -222,8 +222,19 @@ findings, а не молчаливым pass.
 Review-cycle history сохраняется как ignored runtime evidence отдельно от
 latest canonical verdict. Это позволяет видеть цепочку `no-go -> fix ->
 re-review -> go` в метриках, не меняя fail-closed publish gate.
-Дефолтный `deliver` допускает два scoped rescue-подхода после первого `no-go`;
-третий подряд `no-go` должен становиться safety stop-ом, а не публикацией.
+Дефолтный autonomous `deliver` допускает пять bounded same-card
+rescue-подходов после первого `no-go`; каждый подход требует fresh independent
+re-review перед publish. Если budget исчерпан и latest review всё ещё
+`no-go`, agent не публикует dirty payload и не self-authorizes следующий
+same-card rescue. Он создает linked rescue/replacement карточку с source card,
+последним safe published reference, prior blocker findings, rescue attempts,
+evidence summaries, текущей гипотезой и required verification floor. Если две
+linked replacement/rescue карточки подряд возвращают тот же blocker class или
+unresolved invariant, следующая autonomous карточка должна быть
+investigation/design, а не implementation rescue. External blockers
+(credentials, network, license, stand access, required software) и
+unreproducible goals фиксируются как `BLOCKED`, `SUPERSEDED` или
+`NOT-VERIFIABLE` с concrete evidence.
 
 ## Publish
 

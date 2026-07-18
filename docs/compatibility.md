@@ -9,10 +9,15 @@ notes, migration guide и проверки.
 Current ChangeRail version:
 
 ```text
-0.1.0
+0.2.0
 ```
 
 Source: root `VERSION`.
+
+`0.2.0` changes ChangeRail workflow policy and release notes, but does not
+change Codex CLI, Claude Code, OpenSpec CLI or MCP npm package pins relative to
+the current tracked configuration. Existing consumers should still run
+project-local verification and restart active agent sessions after updating.
 
 ## Codex CLI
 

@@ -321,6 +321,12 @@ single-card runner for each live card and update aggregate status without
 scraping free-text logs. Locks that appear stale are diagnostic evidence only
 and are not automatically removed.
 
+Queue `NO-GO` остается fail-fast: aggregate run не запускает новые downstream
+cards после child `NO-GO` и не публикует failed child payload. Autonomous
+recovery должен быть представлен как linked rescue/replacement или
+investigation card; original plan можно resume только после того, как recovery
+card опубликована со fresh independent `GO`.
+
 ## Review Cycle History
 
 Latest canonical verdict остается:

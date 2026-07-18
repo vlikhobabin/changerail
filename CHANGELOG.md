@@ -8,6 +8,20 @@ changes помечаются префиксом `BREAKING:`.
 ## Unreleased
 
 ### Added
+- none
+
+### Changed
+- none
+
+### Fixed
+- none
+
+### Breaking
+- none
+
+## 0.2.0 - 2026-07-18
+
+### Added
 - Added release discipline docs: semver policy, compatibility notes and
   migration guide.
 - Added initial release CI plan through OpenSpec change
@@ -40,6 +54,10 @@ changes помечаются префиксом `BREAKING:`.
 - Clarified review-gated publish finalization: delivery leaves reviewed cards in
   `3.inprogress`, and publish records deterministic board metadata after a
   fresh `go` verdict and scoped commit.
+- Changed autonomous repeated `NO-GO` handling: default same-card rescue budget
+  is now five bounded rescue/review cycles, and exhausted budgets escalate to a
+  linked rescue/replacement or investigation card instead of a manual
+  exceptional-authorization stop.
 - Documented `scripts/smoke-drift.py` as an inventory-driven gate; release CI
   and the local baseline use generated public-safe fixtures.
 
@@ -54,6 +72,12 @@ changes помечаются префиксом `BREAKING:`.
   runtime namespace and schema ids are renamed to ChangeRail. Consumers must
   migrate `/opt/opsx`, `/opsx:*`, `$opsx-*`, `bin/opsx-*`,
   `.runtime/opsx` and `opsx.*.v1` wiring to the ChangeRail equivalents.
+- BREAKING: The default repeated `NO-GO` workflow contract changed from two
+  scoped rescue attempts plus manual exceptional authorization to five bounded
+  same-card rescue attempts followed by autonomous linked rescue/replacement
+  or investigation card escalation. Consumers with local copied skills or
+  runbooks must refresh them; active agent sessions must be restarted to load
+  the new policy.
 
 ## 0.1.0 - 2026-07-08
 

@@ -189,11 +189,23 @@ over-claim -> no-go -> scoped rescue -> re-review -> go -> pub
 Если review находит over-claim, missing evidence или out-of-scope файл,
 reviewer пишет `no-go` с blocker finding. Implementing session исправляет
 только scoped blocker, обновляет evidence и снова передает карточку на свежий
-review. Дефолтный `deliver` допускает два таких scoped rescue-подхода после
-первого `no-go`; третий подряд `no-go` останавливает workflow safety stop-ом.
-Когда re-review возвращает `go`, publish может продолжать. Предыдущий `no-go`
-сохраняется в review-cycle history, а latest canonical verdict остается
-совместимым с publish freshness gate.
+review. Дефолтный autonomous `deliver` допускает пять bounded same-card
+rescue-подходов после первого `no-go`; каждый из них требует fresh independent
+re-review. Когда re-review возвращает `go`, publish может продолжать.
+Предыдущий `no-go` сохраняется в review-cycle history, а latest canonical
+verdict остается совместимым с publish freshness gate.
+
+Если same-card budget исчерпан и review снова возвращает `no-go`, агент не
+публикует dirty payload и не self-authorizes следующий same-card rescue.
+Автономный путь - создать linked rescue/replacement карточку, перенести в нее
+source card, latest safe published reference, prior findings, rescue attempts,
+evidence summaries, текущую гипотезу и required verification floor, затем
+поставить эту карточку перед blocked downstream work. Если две linked
+replacement/rescue карточки подряд возвращают тот же blocker class или
+unresolved invariant, следующая карточка должна быть investigation/design.
+External blockers и цели, которые больше нельзя воспроизвести или проверить,
+фиксируются как `BLOCKED`, `SUPERSEDED` или `NOT-VERIFIABLE` с concrete
+evidence.
 
 `bin/changerail-delivery-metrics` читает `.runtime/changerail/delivery-runs/*/status.json`
 и `.runtime/changerail/reviews/*.history.json`, чтобы показать first-pass go rate,
@@ -230,7 +242,9 @@ CSV mode предназначен для внешней аналитики; от
   `reviewer.independence` attestation.
 - **Возврат к оркестратору**: verdict возвращается оркестратору. `go` →
   оркестратор запускает `pub`. `no-go` → оркестратор передаёт воркеру
-  fix-директиву, и цикл `do → review` повторяется, пока не будет свежего `go`.
+  fix-директиву, и цикл `do → review` повторяется в пределах same-card budget.
+  После исчерпания budget оркестратор переводит работу в linked replacement
+  или investigation card.
 
 Publish работает **fail-closed**: без валидного свежего `go`-вердикта публикация
 не происходит.

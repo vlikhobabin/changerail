@@ -48,9 +48,9 @@ $changerail-deliver <path> --from change-slug
 $changerail-deliver <path> --until change-slug
 $changerail-deliver <path> --max-cards 3
 $changerail-deliver <path> --no-push
-$changerail-deliver <path> --max-fix-cycles 2
+$changerail-deliver <path> --max-fix-cycles 5
 $changerail-deliver <path> --no-review
-$changerail-deliver <path> --max-review-cycles 2
+$changerail-deliver <path> --max-review-cycles 5
 ```
 
 Accept legacy prompt forms such as `/changerail:deliver`, `changerail:deliver`,
@@ -150,9 +150,31 @@ Preferred order:
    ```
 
 On `no-go`, fix blocker findings in card scope using `changerail-do`, then
-request a fresh re-review. Default `--max-review-cycles` is `2`, allowing two
-scoped rescue attempts after the first `no-go`; a third consecutive `no-go` is
-a safety stop.
+request a fresh re-review. Default `--max-review-cycles` is `5`, allowing five
+bounded same-card rescue attempts after the first `no-go`; each rescue attempt
+still requires a fresh independent re-review before publish.
+
+When the default same-card rescue budget is exhausted and the latest review
+still returns `no-go`, autonomous delivery MUST NOT ask for manual exceptional
+authorization as its default path, self-authorize another same-card rescue, or
+publish the dirty payload. Instead, create or request a linked
+rescue/replacement card and put it next before blocked downstream work. The
+card must carry:
+
+- source card and card lineage;
+- latest safe published reference;
+- prior `no-go` blocker findings and rescue attempts;
+- retained evidence paths or concise summaries;
+- current hypothesis;
+- required verification floor and fresh review requirement.
+
+If two linked replacement/rescue cards in the same lineage return the same
+blocker class or unresolved invariant, the next autonomous card MUST be an
+investigation/design card before further implementation rescue. If the blocker
+requires unavailable credentials, network, license, stand access, required
+software or an unreproducible target condition, record `BLOCKED`, `SUPERSEDED`
+or `NOT-VERIFIABLE` with concrete evidence instead of creating another
+implementation rescue.
 
 When the execution surface supports machine-readable JSONL events, every
 review-gated safety stop that returns without publish must emit a documented
@@ -214,7 +236,8 @@ Stop and report clearly when:
 - card discovery is empty or ambiguous;
 - a phase skill stops;
 - external review is required but no valid verdict is present;
-- a verdict is stale, invalid or `no-go` beyond allowed review cycles;
+- a verdict is stale, invalid or `no-go` beyond allowed same-card review cycles
+  and autonomous linked-card escalation cannot be created safely;
 - publish scope would include unrelated files;
 - unresolved staged changes or uncommitted card-owned files remain from a
   previous card;

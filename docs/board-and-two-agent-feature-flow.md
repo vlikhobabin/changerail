@@ -212,10 +212,14 @@ fresh reviewer пишет go/no-go verdict
 ```
 
 Если review вернул `no-go`, worker исправляет только scoped blocker, затем
-нужен fresh re-review. Дефолтный `deliver` допускает два scoped rescue-подхода
-после первого `no-go`; третий подряд `no-go` становится safety stop. Старый
-`go` нельзя использовать после содержательных изменений
-code/docs/specs/scripts/tests.
+нужен fresh re-review. Дефолтный autonomous `deliver` допускает пять bounded
+same-card rescue-подходов после первого `no-go`; каждый из них требует fresh
+independent re-review. После исчерпания budget dirty payload не публикуется:
+оркестратор создает linked rescue/replacement карточку с полной историей
+prior cycles и ставит ее перед downstream work. Если linked cards повторяют
+тот же blocker class или unresolved invariant, следующая карточка должна быть
+investigation/design. Старый `go` нельзя использовать после содержательных
+изменений code/docs/specs/scripts/tests.
 
 ## Batch delivery и очередь карточек
 

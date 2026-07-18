@@ -14,10 +14,10 @@ VERSION
 
 Формат строго `MAJOR.MINOR.PATCH`.
 
-Текущая начальная версия:
+Текущая подготовленная версия:
 
 ```text
-0.1.0
+0.2.0
 ```
 
 До `1.0.0` ChangeRail остается pre-stable. Это значит:
@@ -88,6 +88,11 @@ Migration source of truth живет в [migration guide](migration-guide.md).
 
 Если update не требует действий от consumer projects, запись все равно нужна и
 должна сказать, какие verification gates достаточно запустить.
+Если update меняет workflow contract, lifecycle skill behavior, review/publish
+gate или autonomous agent policy, migration notes обязательны даже когда
+symlink-based consumer projects не меняют tracked files. Такая запись должна
+назвать session restart, verification commands и refresh steps для проектов,
+которые держат локальные копии skills или runbooks.
 
 ## Release Checklist
 
@@ -105,6 +110,11 @@ Migration source of truth живет в [migration guide](migration-guide.md).
 9. Проверить, что [security policy](../SECURITY.md) существует, связан из
    публичных docs и не содержит private contact details или local paths.
 10. Выполнить independent review gate перед publish.
+
+Для pre-stable bootstrap releases факт выхода релиза публикуется reviewed
+payload-ом с обновленными `VERSION`, `CHANGELOG.md`, compatibility notes и
+migration guide. Git tag и packaged distribution metadata остаются отдельным
+release step, когда проект явно включает tag-based публикацию.
 
 Для executable supply-chain updates maintainer также обновляет tracked pins:
 

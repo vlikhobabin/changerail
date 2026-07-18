@@ -99,7 +99,8 @@ verdict is absent or stale.
 
 ### Requirement: Deliver skill orchestrates the lifecycle
 `changerail-deliver` MUST orchestrate the card-level flow `ff -> do -> review -> pub`
-while preserving phase safety stops and scoped publish behavior.
+while preserving phase safety stops, scoped publish behavior and autonomous
+repeated-`NO-GO` escalation.
 
 #### Scenario: Deliver reaches an external review stop
 - **WHEN** an operator requires external review instead of self-launched review
@@ -108,9 +109,24 @@ while preserving phase safety stops and scoped publish behavior.
 
 #### Scenario: Deliver uses the default review rescue budget
 - **WHEN** `changerail-deliver` receives consecutive `no-go` review verdicts
-- **THEN** the default policy allows two scoped rescue attempts after the first
-  `no-go`
-- **AND** the third consecutive `no-go` is a safety stop instead of publish
+- **THEN** the default autonomous policy allows five bounded same-card rescue
+  attempts after the first `no-go`
+- **AND** each rescue attempt still requires a fresh independent re-review
+  before publish
+
+#### Scenario: Deliver exhausts the same-card rescue budget
+- **WHEN** the default same-card rescue budget is exhausted and review still
+  returns `no-go`
+- **THEN** `changerail-deliver` MUST stop publishing that payload
+- **AND** the lifecycle instructions MUST direct the orchestrator to create a
+  linked rescue/replacement card with prior cycle history instead of requesting
+  manual exceptional authorization
+
+#### Scenario: Deliver detects repeated lineage blockers
+- **WHEN** linked replacement/rescue cards repeatedly return the same blocker
+  class or unresolved invariant
+- **THEN** lifecycle instructions MUST direct the orchestrator to create an
+  investigation/design card before further implementation rescue work
 
 ### Requirement: Delivery skills preserve review-gated lifecycle
 ChangeRail lifecycle skills MUST keep implementation, independent review and publish

@@ -6,6 +6,10 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
+No unreleased migration notes.
+
+## 0.1.0 -> 0.2.0
+
 ### What Changed
 
 - **BREAKING**: OPSX has been renamed to ChangeRail. The canonical source path
@@ -26,10 +30,23 @@ credentials, traces или machine-local inventory.
 - Release verification now includes pinned `ruff`/`jsonschema` tooling,
   contract schema smoke, inventory-based Python compile checks, public-surface
   scans and a single local release baseline command.
+- **BREAKING**: autonomous repeated `NO-GO` policy changed. Default
+  `changerail-deliver` same-card rescue budget is now five bounded rescue/review
+  cycles. When the budget is exhausted, the autonomous path is linked
+  rescue/replacement or investigation card escalation, not manual exceptional
+  authorization.
 
 ### Required Actions
 
-For operators maintaining the source checkout:
+For operators maintaining the source checkout at `/opt/changerail`:
+
+```bash
+cd /opt/changerail
+git pull --ff-only
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+If the local checkout still uses the old OPSX source path:
 
 ```bash
 cd /opt
@@ -53,16 +70,38 @@ For existing consumers, migrate one project at a time:
   `.runtime/opsx` or `opsx.*.v1`;
 - run `/opt/changerail/bin/verify-project /opt/example-project`.
 
-For consumers whose `bin/openspec` symlinks into `/opt/changerail`: none — they pick
-up `1.3.1` automatically. Re-run verification to confirm:
+For consumers whose `bin/openspec` and lifecycle skills symlink into
+`/opt/changerail`: no tracked file rewiring is required for the autonomous
+`NO-GO` policy. Re-run verification and restart active agent sessions so loaded
+skill text is refreshed:
 
 ```bash
 /opt/changerail/bin/verify-project /opt/example-project
 ```
 
+Stop or finish active Claude/Codex sessions before relying on the new
+five-cycle rescue policy. A long-lived session may still have the old
+two-cycle/manual authorization instructions in memory.
+
 Consumers that keep a local `openspec-*` copy (not a symlink into ChangeRail) can
 refresh it to `1.3.1` with `openspec update` in that project, or switch to the
 ChangeRail symlink to track the pin centrally.
+
+Consumers that keep local copied ChangeRail lifecycle skills or runbooks must
+refresh at least:
+
+- `changerail-deliver` / `chrl-deliver`;
+- any local instructions that mention `--max-review-cycles 2`, two rescue
+  attempts, third consecutive `no-go` safety stop, or manual exceptional
+  authorization as the default path;
+- local delivery runbooks that decide what to do after repeated `NO-GO`.
+
+After refresh, run:
+
+```bash
+/opt/changerail/bin/verify-project /opt/example-project
+python3 /opt/changerail/scripts/smoke-wiring-discovery.py
+```
 
 For maintainers preparing a ChangeRail release, install release-gate tooling in
 an ignored virtualenv and run the local baseline:
@@ -81,7 +120,16 @@ metrics.
 
 ### Rollback
 
-Override the pin for one command without changing the wrapper:
+Return `/opt/changerail` to the previous reviewed commit or release point and
+rerun project verification:
+
+```bash
+git -C /opt/changerail checkout <previous-reviewed-ref>
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+If the rollback is only for OpenSpec CLI compatibility, override the pin for one
+command without changing the wrapper:
 
 ```bash
 OPENSPEC_VERSION=1.3.0 /opt/changerail/bin/openspec validate --all --strict
