@@ -51,6 +51,8 @@ ChangeRail MUST document compatibility expectations for Codex CLI, Claude Code a
 OpenSpec CLI.
 Compatibility notes MUST document executable MCP dependency pins and their
 tracked integrity source and trusted setup verification.
+Compatibility notes MUST identify approved optional browser MCP package pins
+without presenting them as default bootstrap or root ChangeRail dependencies.
 
 #### Scenario: Operator prepares to update local tools
 - **WHEN** an operator reviews ChangeRail compatibility notes
@@ -63,6 +65,7 @@ tracked integrity source and trusted setup verification.
 - **WHEN** a maintainer reads ChangeRail compatibility notes
 - **THEN** the notes identify the exact npm MCP package pins and the tracked
   integrity lock used to audit them
+- **AND** the notes identify approved optional browser MCP package pins
 - **AND** the notes identify the `verify-project`/`npm view` trusted setup
   check that compares tracked integrity with npm registry metadata
 
@@ -90,9 +93,12 @@ checks for public ChangeRail releases.
 - **AND** changelog marks breaking workflow contract changes with `BREAKING:`
 
 #### Scenario: Maintainer updates executable dependency pins
-- **WHEN** a release updates npm MCP package pins or CI action SHAs
+- **WHEN** a release updates default or approved optional npm MCP package pins
+  or CI action SHAs
 - **THEN** release docs describe the update command, verification commands and
   review expectations
+- **AND** optional browser MCP package upgrades are documented as explicit
+  release work rather than silent consumer adoption changes
 
 #### Scenario: Release checks security disclosure policy
 - **WHEN** a maintainer prepares a public ChangeRail release

@@ -221,12 +221,41 @@ def parse_npm_package_arg(value: str) -> tuple[str, str] | None:
     if value.startswith("@"):
         index = value.rfind("@")
         if index <= 0:
-            return None
+            return value, ""
         return value[:index], value[index + 1 :]
     if "@" not in value:
         return None
     name, version = value.rsplit("@", 1)
     return name, version
+
+
+def parse_npx_package_args(args: list[object]) -> list[tuple[str, str]]:
+    package_args: list[tuple[str, str]] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if not isinstance(arg, str):
+            index += 1
+            continue
+        if arg in {"--package", "-p"}:
+            if index + 1 < len(args) and isinstance(args[index + 1], str):
+                package_spec = args[index + 1]
+                package_args.append(parse_npm_package_arg(package_spec) or (package_spec, ""))
+                index += 2
+                continue
+            package_args.append((arg, ""))
+            index += 1
+            continue
+        if arg.startswith("--package="):
+            package_spec = arg.split("=", 1)[1]
+            package_args.append(parse_npm_package_arg(package_spec) or (package_spec, ""))
+            index += 1
+            continue
+        parsed = parse_npm_package_arg(arg)
+        if parsed:
+            package_args.append(parsed)
+        index += 1
+    return package_args
 
 
 def load_mcp_npm_lock(changerail_root: Path) -> tuple[dict[tuple[str, str], LockedNpmPackage], str | None]:
@@ -288,7 +317,7 @@ def npm_mcp_pin_errors(
         if not isinstance(args, list):
             errors.append(f"{label}.{name}: args must be an array")
             continue
-        package_args = [parsed for arg in args if isinstance(arg, str) for parsed in [parse_npm_package_arg(arg)] if parsed]
+        package_args = parse_npx_package_args(args)
         if not package_args:
             errors.append(f"{label}.{name}: npx package argument is missing")
             continue

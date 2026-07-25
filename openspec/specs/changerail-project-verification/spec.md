@@ -55,11 +55,25 @@ Verification MUST fail closed when generated MCP config uses unpinned or
 unlocked automatically executed npm package references.
 Verification MUST compare tracked npm MCP integrity metadata with the npm
 registry during trusted setup verification.
+Verification MUST recognize exact MCP npm package pins passed to `npx` as the
+direct package argument, `--package=<package>@<version>` or
+`--package <package>@<version>`.
 
 #### Scenario: Config scope is project-local
 - **WHEN** verification inspects MCP and Codex config
 - **THEN** filesystem scope and trust settings cover the consumer project root
   instead of the ChangeRail repository root
+
+#### Scenario: Verifier accepts locked direct and package-option pins
+- **WHEN** `bin/verify-project <path>` inspects consumer MCP config containing
+  `npx` commands for `@playwright/mcp@0.0.68` or
+  `chrome-devtools-mcp@0.20.3`
+- **AND** each package is passed as a direct package argument,
+  `--package=<package>@<version>` or `--package <package>@<version>`
+- **AND** each package/version is present in `mcp-npm-lock.json` with matching
+  trusted npm registry integrity
+- **THEN** package pin verification passes for those optional browser MCP
+  entries
 
 #### Scenario: Verifier checks MCP npm package pins
 - **WHEN** `bin/verify-project <path>` inspects generated MCP config

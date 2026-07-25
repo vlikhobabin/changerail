@@ -121,6 +121,8 @@ release step, когда проект явно включает tag-based пуб
 ```bash
 npm view @modelcontextprotocol/server-filesystem version dist.integrity --json
 npm view @upstash/context7-mcp@2.1.6 version dist.integrity --json
+npm view @playwright/mcp@0.0.68 version dist.integrity --json
+npm view chrome-devtools-mcp@0.20.3 version dist.integrity --json
 git ls-remote https://github.com/actions/checkout.git refs/tags/v4
 git ls-remote https://github.com/actions/setup-node.git refs/tags/v4
 ```
@@ -128,6 +130,11 @@ git ls-remote https://github.com/actions/setup-node.git refs/tags/v4
 После обновления нужно проверить, что `.mcp.json`, `.codex/config.toml`,
 `templates/project/*`, `mcp-npm-lock.json`, `.github/workflows/changerail-ci.yml`
 и `scripts/smoke-release-ci.py` согласованы.
+Approved optional browser MCP pins are allowed in consumer-local config only:
+they must be present in `mcp-npm-lock.json`, covered by `verify-project` smoke
+fixtures and absent from root ChangeRail config and default project templates.
+Любой upgrade optional browser MCP package остается отдельной release-задачей с
+явным review of exact version and SRI metadata.
 
 Для MCP npm pins также нужно выполнить trusted setup check:
 
@@ -135,6 +142,8 @@ git ls-remote https://github.com/actions/setup-node.git refs/tags/v4
 /opt/changerail/bin/verify-project /opt/example-project
 npm view @modelcontextprotocol/server-filesystem@2026.7.10 dist.integrity --json
 npm view @upstash/context7-mcp@2.1.6 dist.integrity --json
+npm view @playwright/mcp@0.0.68 dist.integrity --json
+npm view chrome-devtools-mcp@0.20.3 dist.integrity --json
 ```
 
 `scripts/smoke-verify-project.py` проверяет tampered-integrity fixture через

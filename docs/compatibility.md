@@ -51,6 +51,21 @@ and generated consumer templates must include exact versions and appear in
 @upstash/context7-mcp@2.1.6
 ```
 
+Approved optional browser MCP packages for consumer-local tooling are locked in
+the same file, but are not part of root ChangeRail config or generated
+consumer templates:
+
+```text
+@playwright/mcp@0.0.68
+chrome-devtools-mcp@0.20.3
+```
+
+`verify-project` recognizes these optional packages when a consumer `npx`
+command passes the exact pin as a direct package argument,
+`--package=<package>@<version>` or `--package <package>@<version>`.
+Unversioned, non-exact, unlocked or integrity-mismatched optional browser MCP
+packages fail closed like default MCP packages.
+
 `bin/verify-project` treats the lock as a trusted setup gate: it parses
 `mcp-npm-lock.json`, requires SRI-shaped npm integrity values, and compares each
 referenced package/version with `npm view <package>@<version> dist.integrity
@@ -63,14 +78,17 @@ Refresh pins only in a reviewed release change:
 ```bash
 npm view @modelcontextprotocol/server-filesystem version dist.integrity --json
 npm view @upstash/context7-mcp@2.1.6 version dist.integrity --json
+npm view @playwright/mcp@0.0.68 version dist.integrity --json
+npm view chrome-devtools-mcp@0.20.3 version dist.integrity --json
 python3 scripts/smoke-verify-project.py
 python3 scripts/smoke-release-ci.py
 ```
 
 The smoke suite uses a local fake `npm view` fixture for determinism and includes
 a tampered-integrity case. Release review should still run `bin/verify-project`
-or the two `npm view ... dist.integrity` commands with real registry access
-before relying on new pins.
+or the relevant `npm view ... dist.integrity` commands with real registry access
+before relying on new pins. Upgrading optional browser MCP packages is separate
+release work and should not be folded silently into consumer adoption fixes.
 
 ## Claude Code
 

@@ -27,6 +27,7 @@ EXPECTED_SCHEMAS = (
     "schemas/changerail-evidence-index.schema.json",
 )
 MCP_FILES = (".mcp.json", ".codex/config.toml")
+OPTIONAL_BROWSER_MCP_NEEDLES = ("@playwright/mcp", "chrome-devtools-mcp")
 
 
 @dataclass
@@ -179,6 +180,50 @@ def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
     )
     npm.chmod(0o755)
     return {"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")}
+
+
+def add_json_mcp_server(project: Path, name: str, args: list[str]) -> None:
+    path = project / ".mcp.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.setdefault("mcpServers", {})[name] = {
+        "command": "npx",
+        "args": args,
+    }
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def add_codex_mcp_server(project: Path, name: str, args: list[str]) -> None:
+    path = project / ".codex" / "config.toml"
+    quoted_args = ", ".join(json.dumps(arg) for arg in args)
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        + "\n"
+        + f"[mcp_servers.{name}]\n"
+        + 'command = "npx"\n'
+        + f"args = [{quoted_args}]\n"
+        + "startup_timeout_sec = 60\n"
+        + "enabled = true\n",
+        encoding="utf-8",
+    )
+
+
+def browser_mcp_default_offenders(changerail_root: Path) -> list[str]:
+    files = [
+        changerail_root / ".mcp.json",
+        changerail_root / ".codex" / "config.toml",
+    ]
+    files.extend(
+        path
+        for path in sorted((changerail_root / "templates" / "project").rglob("*"))
+        if path.is_file()
+    )
+    offenders: list[str] = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for needle in OPTIONAL_BROWSER_MCP_NEEDLES:
+            if needle in text:
+                offenders.append(f"{path.relative_to(changerail_root)} contains {needle}")
+    return offenders
 
 
 def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
@@ -372,6 +417,91 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "tampered MCP integrity fails",
             "pass" if tampered.returncode != 0 and "registry integrity mismatch" in tampered.stdout else "fail",
             tampered.stdout.strip(),
+        )
+    )
+
+    optional_project = run_dir / "optional-browser-mcp-project"
+    shutil.copytree(good_project, optional_project, symlinks=True)
+    add_json_mcp_server(optional_project, "playwrightDirect", ["-y", "@playwright/mcp@0.0.68"])
+    add_json_mcp_server(
+        optional_project,
+        "chromePackageEquals",
+        ["-y", "--package=chrome-devtools-mcp@0.20.3", "chrome-devtools-mcp"],
+    )
+    add_codex_mcp_server(
+        optional_project,
+        "playwright_package_space",
+        ["-y", "--package", "@playwright/mcp@0.0.68", "playwright-mcp"],
+    )
+    optional = run([str(changerail_root / "bin" / "verify-project"), str(optional_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "optional browser MCP direct and package forms pass",
+            "pass" if optional.returncode == 0 else "fail",
+            optional.stdout.strip(),
+        )
+    )
+
+    missing_version_project = run_dir / "bad-optional-browser-missing-version"
+    shutil.copytree(good_project, missing_version_project, symlinks=True)
+    add_json_mcp_server(missing_version_project, "playwrightMissingVersion", ["-y", "--package=@playwright/mcp"])
+    missing_version = run(
+        [str(changerail_root / "bin" / "verify-project"), str(missing_version_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "optional browser MCP missing version fails",
+            "pass" if missing_version.returncode != 0 and "not exact-version pinned" in missing_version.stdout else "fail",
+            missing_version.stdout.strip(),
+        )
+    )
+
+    missing_lock_project = run_dir / "bad-optional-browser-missing-lock"
+    shutil.copytree(good_project, missing_lock_project, symlinks=True)
+    add_json_mcp_server(missing_lock_project, "playwrightMissingLock", ["-y", "@playwright/mcp@0.0.69"])
+    missing_lock = run(
+        [str(changerail_root / "bin" / "verify-project"), str(missing_lock_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "optional browser MCP missing lock fails",
+            "pass" if missing_lock.returncode != 0 and "absent from mcp-npm-lock.json" in missing_lock.stdout else "fail",
+            missing_lock.stdout.strip(),
+        )
+    )
+
+    optional_tampered_env = {
+        **fake_env,
+        "CHANGERAIL_FAKE_NPM_TAMPER": "@playwright/mcp@0.0.68",
+    }
+    optional_tampered = run(
+        [str(changerail_root / "bin" / "verify-project"), str(optional_project)],
+        changerail_root,
+        optional_tampered_env,
+    )
+    checks.append(
+        Check(
+            "optional browser MCP tampered integrity fails",
+            "pass"
+            if optional_tampered.returncode != 0
+            and "registry integrity mismatch for @playwright/mcp@0.0.68" in optional_tampered.stdout
+            else "fail",
+            optional_tampered.stdout.strip(),
+        )
+    )
+
+    default_offenders = browser_mcp_default_offenders(changerail_root)
+    checks.append(
+        Check(
+            "optional browser MCP absent from defaults",
+            "pass" if not default_offenders else "fail",
+            "no browser MCP packages in root config or templates"
+            if not default_offenders
+            else "; ".join(default_offenders),
         )
     )
 
