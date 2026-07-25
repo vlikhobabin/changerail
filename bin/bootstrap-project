@@ -168,6 +168,17 @@ def create_symlinks(changerail_root: Path, target: Path) -> None:
         create_symlink(source, link_path)
 
 
+def validate_codex_auth_source(source: Path) -> Path:
+    expanded = source.expanduser().resolve(strict=False)
+    if not expanded.is_file():
+        raise BootstrapError(f"Codex auth source must be an existing file: {expanded}")
+    return expanded
+
+
+def link_codex_auth(source: Path, target: Path) -> None:
+    create_symlink(source, target / ".codex" / "auth.json")
+
+
 def run_verify(changerail_root: Path, target: Path) -> None:
     verify = changerail_root / "bin" / "verify-project"
     result = subprocess.run(
@@ -184,13 +195,23 @@ def run_verify(changerail_root: Path, target: Path) -> None:
         raise BootstrapError(f"verify-project failed for {target}")
 
 
-def print_plan(template_root: Path, changerail_root: Path, target: Path, *, backup: Path | None, skip_verify: bool) -> None:
+def print_plan(
+    template_root: Path,
+    changerail_root: Path,
+    target: Path,
+    *,
+    backup: Path | None,
+    skip_verify: bool,
+    codex_auth_source: Path | None,
+) -> None:
     if backup is not None:
         print(f"PLAN backup {target} -> {backup}")
     for action, destination, source in collect_plan(template_root, target):
         print(f"PLAN {action} {source} -> {destination}")
     for source, link_path in symlink_plan(changerail_root, target):
         print(f"PLAN symlink {link_path} -> {source}")
+    if codex_auth_source is not None:
+        print(f"PLAN symlink {target / '.codex' / 'auth.json'} -> {codex_auth_source}")
     if not skip_verify:
         print(f"PLAN verify {changerail_root / 'bin' / 'verify-project'} {target}")
 
@@ -210,6 +231,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Print planned actions without writing files.")
     parser.add_argument("--backup-existing", action="store_true", help="Move an existing non-empty target aside first.")
     parser.add_argument("--skip-verify", action="store_true", help="Generate files without running verify-project.")
+    parser.add_argument(
+        "--link-codex-auth",
+        type=Path,
+        default=None,
+        metavar="AUTH_JSON",
+        help="Opt in to creating ignored .codex/auth.json as a symlink to an existing local Codex auth file.",
+    )
     return parser.parse_args(argv)
 
 
@@ -223,9 +251,17 @@ def main(argv: list[str]) -> int:
     try:
         if not template_root.is_dir():
             raise BootstrapError(f"template root missing: {template_root}")
+        codex_auth_source = validate_codex_auth_source(args.link_codex_auth) if args.link_codex_auth else None
         backup = ensure_target(target, backup_existing=args.backup_existing, dry_run=args.dry_run)
         if args.dry_run:
-            print_plan(template_root, changerail_root, target, backup=backup, skip_verify=args.skip_verify)
+            print_plan(
+                template_root,
+                changerail_root,
+                target,
+                backup=backup,
+                skip_verify=args.skip_verify,
+                codex_auth_source=codex_auth_source,
+            )
             print("dry-run: no files were written")
             return 0
 
@@ -238,11 +274,15 @@ def main(argv: list[str]) -> int:
             config_mode=args.config_mode,
         )
         create_symlinks(changerail_root, target)
+        if codex_auth_source is not None:
+            link_codex_auth(codex_auth_source, target)
         if not args.skip_verify:
             run_verify(changerail_root, target)
         print(f"bootstrapped: {target}")
         if backup is not None:
             print(f"backup: {backup}")
+        if codex_auth_source is not None:
+            print("auth linked: .codex/auth.json")
         print("next: git init")
         if args.config_mode == "local":
             print("warning: --config-mode local rendered machine-local absolute paths; review before git add")

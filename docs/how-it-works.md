@@ -174,9 +174,11 @@ auth state без чтения секретов, stale symlink-и внутри `
 executable permissions, наличие Codex binary и, если указан URL, делает
 реальную connectivity-проверку proxy/endpoint. Диагностика читается из status
 JSON; runtime logs остаются ignored state. Если status показывает
-`CODEX auth: fail`, обновите auth в проектном `CODEX_HOME` или задайте
-поддерживаемую auth env переменную; если `CODEX_HOME symlinks: fail`,
-пересоздайте устаревшие symlink-и до запуска.
+`CODEX auth: fail`, настройте ignored auth marker в проектном `CODEX_HOME`,
+запустите runner с explicit `CODEX_HOME` или задайте поддерживаемую auth env
+переменную; canonical remediation описан в
+`docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`. Если
+`CODEX_HOME symlinks: fail`, пересоздайте устаревшие symlink-и до запуска.
 
 ## Fix budget до review
 

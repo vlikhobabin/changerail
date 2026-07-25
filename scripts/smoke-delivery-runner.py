@@ -969,6 +969,45 @@ def check_preflight_connectivity_failure_redaction(tmp: Path) -> None:
             raise AssertionError(f"connectivity failure leaked raw URL data: {message}")
 
 
+def check_explicit_codex_home_preflight(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "explicit-codex-home-workspace")
+    launcher = tmp / "fake-codex-explicit-home"
+    runtime = tmp / "runtime"
+    external_home = tmp / "external-codex-home"
+    sentinel = "fake-secret-sentinel"
+    external_home.mkdir()
+    (external_home / "auth.json").write_text(sentinel + "\n", encoding="utf-8")
+    (workspace / ".codex" / "auth.json").unlink()
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "explicit-codex-home",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env={**runner_env(), "CODEX_HOME": str(external_home)},
+    )
+    require_ok(result, "explicit CODEX_HOME preflight")
+    if sentinel in result.stdout:
+        raise AssertionError("explicit CODEX_HOME preflight printed credential contents")
+    payload = json.loads(result.stdout)
+    checks = {check["name"]: check for check in payload["preflight"]["checks"]}
+    if checks["CODEX_HOME"]["status"] != "pass":
+        raise AssertionError(f"explicit CODEX_HOME did not pass: {checks['CODEX_HOME']}")
+    if checks["CODEX auth"]["status"] != "pass":
+        raise AssertionError(f"explicit CODEX_HOME auth marker did not pass: {checks['CODEX auth']}")
+
+
 def check_run_preflight_failure(tmp: Path) -> None:
     workspace = create_workspace(tmp, "run-preflight-failure-workspace")
     launcher = tmp / "fake-codex-run-preflight-failure"
@@ -995,6 +1034,13 @@ def check_run_preflight_failure(tmp: Path) -> None:
     status = load_status(runtime, "run-preflight-failure")
     if status["result"] != "BLOCKED" or status.get("terminal_outcome") != "BLOCKED":
         raise AssertionError(f"run preflight failure did not record BLOCKED: {status}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    auth_message = checks["CODEX auth"]["message"]
+    if "docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner" not in auth_message:
+        raise AssertionError(f"missing-auth remediation was not reported: {auth_message}")
+    for forbidden in ("fake-secret", "raw-token"):
+        if forbidden in auth_message:
+            raise AssertionError(f"missing-auth diagnostic leaked secret-like value: {auth_message}")
     lines = result.stdout.splitlines()
     if lines[:2] != [
         "terminal_outcome: BLOCKED",
@@ -1034,6 +1080,9 @@ def check_stale_symlink_preflight(tmp: Path) -> None:
     checks = {check["name"]: check for check in payload["preflight"]["checks"]}
     if checks["CODEX_HOME symlinks"]["status"] != "fail":
         raise AssertionError(f"stale symlink was not reported: {checks['CODEX_HOME symlinks']}")
+    stale_message = checks["CODEX_HOME symlinks"]["message"]
+    if "docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner" not in stale_message:
+        raise AssertionError(f"stale symlink remediation was not reported: {stale_message}")
 
 
 def check_queue_plan_preflight(tmp: Path) -> None:
@@ -1782,6 +1831,7 @@ def main() -> int:
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
         check_preflight_connectivity_failure_redaction(workspace)
+        check_explicit_codex_home_preflight(workspace)
         check_run_preflight_failure(workspace)
         check_stale_symlink_preflight(workspace)
         check_queue_plan_preflight(workspace)

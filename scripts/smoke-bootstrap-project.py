@@ -171,6 +171,8 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
     workflow_missing = missing_workflow_guidance(project)
     if workflow_missing:
         return Check("bootstrap workflow guidance", "fail", "; ".join(workflow_missing))
+    if (project / ".codex" / "auth.json").exists() or (project / ".codex" / "auth.json").is_symlink():
+        return Check("bootstrap valid project", "fail", "default bootstrap created auth marker")
     return Check("bootstrap valid project", "pass", "project generated and verified")
 
 
@@ -197,6 +199,93 @@ def check_dry_run(changerail_root: Path, run_dir: Path) -> Check:
     if missing:
         return Check("dry-run no-write", "fail", "dry-run omitted alias wiring: " + ", ".join(missing))
     return Check("dry-run no-write", "pass", "dry-run printed plan and left no target")
+
+
+def check_auth_link(changerail_root: Path, run_dir: Path, extra_env: dict[str, str]) -> Check:
+    project = run_dir / "auth-link-project"
+    auth_source = run_dir / "fake-auth.json"
+    sentinel = "fake-secret-sentinel"
+    auth_source.write_text("{\"token\":\"" + sentinel + "\"}\n", encoding="utf-8")
+    result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            "auth-link-project",
+            "--kind",
+            "generic",
+            "--link-codex-auth",
+            str(auth_source),
+        ],
+        changerail_root,
+        extra_env,
+    )
+    if result.returncode != 0:
+        return Check("auth link bootstrap", "fail", result.stdout.strip())
+    if sentinel in result.stdout:
+        return Check("auth link bootstrap", "fail", "bootstrap printed credential contents")
+    marker = project / ".codex" / "auth.json"
+    if not marker.is_symlink():
+        return Check("auth link bootstrap", "fail", "auth marker is not a symlink")
+    try:
+        if marker.resolve(strict=True) != auth_source:
+            return Check("auth link bootstrap", "fail", f"auth marker resolves to {marker.resolve(strict=False)}")
+    except OSError as exc:
+        return Check("auth link bootstrap", "fail", f"auth marker is broken: {exc}")
+    verify = run([str(changerail_root / "bin" / "verify-project"), str(project)], changerail_root, extra_env)
+    if verify.returncode != 0:
+        return Check("auth link bootstrap", "fail", verify.stdout.strip())
+    return Check("auth link bootstrap", "pass", "auth marker linked without exposing contents")
+
+
+def check_auth_link_missing_source(changerail_root: Path, run_dir: Path) -> Check:
+    project = run_dir / "missing-auth-source-project"
+    missing = run_dir / "missing-auth.json"
+    result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            "missing-auth-source-project",
+            "--kind",
+            "generic",
+            "--link-codex-auth",
+            str(missing),
+        ],
+        changerail_root,
+    )
+    if result.returncode == 0:
+        return Check("auth link missing source", "fail", "bootstrap unexpectedly succeeded")
+    if (project / ".codex" / "auth.json").exists() or (project / ".codex" / "auth.json").is_symlink():
+        return Check("auth link missing source", "fail", "dangling auth marker was created")
+    return Check("auth link missing source", "pass", "missing auth source refused without marker")
+
+
+def check_auth_link_dry_run(changerail_root: Path, run_dir: Path) -> Check:
+    project = run_dir / "auth-link-dry-run-project"
+    auth_source = run_dir / "dry-run-auth.json"
+    auth_source.write_text("{}\n", encoding="utf-8")
+    result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            "auth-link-dry-run-project",
+            "--kind",
+            "generic",
+            "--link-codex-auth",
+            str(auth_source),
+            "--dry-run",
+        ],
+        changerail_root,
+    )
+    if result.returncode != 0:
+        return Check("auth link dry-run", "fail", result.stdout.strip())
+    if project.exists():
+        return Check("auth link dry-run", "fail", f"target was created: {project}")
+    if ".codex/auth.json" not in result.stdout:
+        return Check("auth link dry-run", "fail", "dry-run omitted auth symlink plan")
+    return Check("auth link dry-run", "pass", "auth link dry-run planned without writes")
 
 
 def check_local_config_warning(changerail_root: Path, run_dir: Path) -> Check:
@@ -286,6 +375,9 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     checks = [
         check_bootstrap_success(changerail_root, run_dir, fake_env),
         check_dry_run(changerail_root, run_dir),
+        check_auth_link(changerail_root, run_dir, fake_env),
+        check_auth_link_missing_source(changerail_root, run_dir),
+        check_auth_link_dry_run(changerail_root, run_dir),
         check_local_config_warning(changerail_root, run_dir),
         check_refuse_existing(changerail_root, run_dir),
         check_backup_existing(changerail_root, run_dir, fake_env),

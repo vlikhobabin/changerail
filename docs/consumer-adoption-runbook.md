@@ -235,6 +235,73 @@ done
 проекта, verification baseline, public/private policy, локальные команды и
 ограничения.
 
+## Codex Auth For Delivery Runner
+
+`verify-project` проверяет wiring и ignore policy, но unattended delivery runner
+нуждается еще и в effective Codex auth source. Это относится к single-card
+команде `changerail-delivery-runner run` и к plan-oriented командам
+`preflight-plan`, `run-plan` и `resume-plan`: без auth preflight должен
+остановиться fail-closed до запуска delivery child.
+
+Runner выбирает auth location так:
+
+- если оператор явно задал `CODEX_HOME`, используется этот каталог;
+- иначе effective `CODEX_HOME` равен `<workspace>/.codex`, где `workspace` -
+  consumer repository из `--workspace` или текущий git-root;
+- auth считается готовым, если есть supported marker вроде `auth.json` или
+  `auth.toml` внутри effective `CODEX_HOME`, либо задана supported auth
+  environment variable.
+
+Project-local marker должен оставаться ignored local state. В generated
+`.gitignore` для consumer проекта есть `.codex/auth.json` и
+`.codex/auth.toml`; не добавляйте эти файлы в tracked payload, не публикуйте их
+в docs, status или logs и не копируйте credentials автоматически во время
+adoption.
+
+Безопасный локальный вариант - symlink на уже настроенный Codex auth:
+
+```bash
+mkdir -p /opt/example-project/.codex
+ln -sfn "$HOME/.codex/auth.json" /opt/example-project/.codex/auth.json
+/opt/changerail/bin/changerail-delivery-runner preflight \
+  openspec/board/3.inprogress/example-card.md \
+  --workspace /opt/example-project --json
+```
+
+Для нового пустого consumer project можно сделать тот же local symlink во время
+bootstrap, но только явным opt-in:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --name example-project \
+  --kind generic \
+  --link-codex-auth "$HOME/.codex/auth.json"
+```
+
+Если source auth file отсутствует, bootstrap должен остановиться без создания
+dangling auth marker. Default bootstrap не создает `.codex/auth.json` или
+`.codex/auth.toml`.
+
+Если auth должен жить вне проекта, запускайте runner с explicit `CODEX_HOME`:
+
+```bash
+CODEX_HOME="$HOME/.codex" /opt/changerail/bin/changerail-delivery-runner preflight \
+  openspec/board/3.inprogress/example-card.md \
+  --workspace /opt/example-project --json
+```
+
+Для queue plans сначала проверяйте readiness без live delivery:
+
+```bash
+/opt/changerail/bin/changerail-delivery-runner preflight-plan delivery-plan.json \
+  --consumer-root /opt/example-workspace --json
+```
+
+Если output содержит `CODEX auth: fail`, настройте project-local ignored marker,
+задайте explicit `CODEX_HOME` или используйте supported auth environment
+variable. Если output содержит `CODEX_HOME symlinks: fail`, пересоздайте stale
+symlink-и внутри effective `CODEX_HOME` перед `run-plan` или `resume-plan`.
+
 ## Проверка
 
 Минимальный gate после migration:

@@ -25,6 +25,7 @@ secrets/
 !.codex/skills/**
 .codex/tmp/
 .codex/auth.json
+.codex/auth.toml
 .codex/sessions/
 .codex/skills/.system/
 .claude/settings.local.json

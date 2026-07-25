@@ -136,6 +136,17 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
     )
 
 
+def git(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(project), *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=60,
+    )
+
+
 def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
     fake_bin.mkdir(parents=True, exist_ok=True)
     lock = json.loads((changerail_root / "mcp-npm-lock.json").read_text(encoding="utf-8"))
@@ -184,6 +195,17 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             verify.stdout.strip(),
         )
     )
+    checks.append(
+        Check(
+            "missing auth advisory warns",
+            "pass"
+            if verify.returncode == 0
+            and "WARN delivery runner auth readiness" in verify.stdout
+            and "codex-auth-for-delivery-runner" in verify.stdout
+            else "fail",
+            verify.stdout.strip(),
+        )
+    )
     missing_schema_checks = [schema for schema in EXPECTED_SCHEMAS if schema not in verify.stdout]
     checks.append(
         Check(
@@ -192,6 +214,70 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "all expected schemas present" if not missing_schema_checks else "missing: " + ", ".join(missing_schema_checks),
         )
     )
+
+    auth_marker_project = run_dir / "auth-marker-project"
+    shutil.copytree(good_project, auth_marker_project, symlinks=True)
+    sentinel = "fake-secret-sentinel"
+    (auth_marker_project / ".codex" / "auth.json").write_text(sentinel + "\n", encoding="utf-8")
+    auth_marker = run([str(changerail_root / "bin" / "verify-project"), str(auth_marker_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "auth marker advisory passes",
+            "pass"
+            if auth_marker.returncode == 0
+            and "INFO delivery runner auth readiness" in auth_marker.stdout
+            and ".codex/auth.json" in auth_marker.stdout
+            and sentinel not in auth_marker.stdout
+            else "fail",
+            auth_marker.stdout.strip(),
+        )
+    )
+
+    auth_env = {**fake_env, "CODEX_AUTH_TOKEN": sentinel}
+    auth_env_result = run([str(changerail_root / "bin" / "verify-project"), str(good_project)], changerail_root, auth_env)
+    checks.append(
+        Check(
+            "auth environment advisory passes",
+            "pass"
+            if auth_env_result.returncode == 0
+            and "INFO delivery runner auth readiness" in auth_env_result.stdout
+            and "CODEX_AUTH_TOKEN" in auth_env_result.stdout
+            and sentinel not in auth_env_result.stdout
+            else "fail",
+            auth_env_result.stdout.strip(),
+        )
+    )
+
+    tracked_auth_toml_project = run_dir / "bad-tracked-auth-toml"
+    shutil.copytree(good_project, tracked_auth_toml_project, symlinks=True)
+    (tracked_auth_toml_project / ".codex" / "auth.toml").write_text("token = \"fake-secret-sentinel\"\n", encoding="utf-8")
+    for git_args in (
+        ("init",),
+        ("add", ".gitignore"),
+        ("add", "-f", ".codex/auth.toml"),
+    ):
+        git_result = git(tracked_auth_toml_project, *git_args)
+        if git_result.returncode != 0:
+            checks.append(Check("tracked auth.toml fails", "fail", git_result.stdout.strip()))
+            break
+    else:
+        tracked_auth = run(
+            [str(changerail_root / "bin" / "verify-project"), str(tracked_auth_toml_project)],
+            changerail_root,
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "tracked auth.toml fails",
+                "pass"
+                if tracked_auth.returncode != 0
+                and "tracked runtime/auth files" in tracked_auth.stdout
+                and ".codex/auth.toml" in tracked_auth.stdout
+                and "fake-secret-sentinel" not in tracked_auth.stdout
+                else "fail",
+                tracked_auth.stdout.strip(),
+            )
+        )
 
     bad_project = run_dir / "bad-missing-runtime-ignore"
     shutil.copytree(good_project, bad_project, symlinks=True)

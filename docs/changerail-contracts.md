@@ -226,6 +226,11 @@ signals являются preferred source of truth; если их нет, fallba
 `terminal_reason: unpublished_card`. `fix_budget_exhausted`,
 `external_blocker` и другие stable reasons сохраняются в status как
 `terminal_reason`; ignored raw logs не являются источником этих reasons.
+Если preflight возвращает `CODEX auth: fail` или `CODEX_HOME symlinks: fail`,
+оператор должен использовать remediation из
+`docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`: ignored
+project-local marker, explicit `CODEX_HOME` или supported auth environment
+variable без публикации credentials.
 
 ## Delivery Plan
 

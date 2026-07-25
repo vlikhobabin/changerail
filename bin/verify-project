@@ -19,6 +19,7 @@ REQUIRED_IGNORES = (
     ".ai/",
     ".codex/tmp/",
     ".codex/auth.json",
+    ".codex/auth.toml",
     ".codex/sessions/",
     ".claude/settings.local.json",
 )
@@ -34,6 +35,7 @@ FORBIDDEN_TRACKED_PREFIXES = (
 )
 FORBIDDEN_TRACKED_EXACT = {
     ".codex/auth.json",
+    ".codex/auth.toml",
     ".claude/settings.local.json",
     ".mcp.local.json",
     "claude-trace-context.json",
@@ -45,6 +47,8 @@ SCHEMAS = (
     "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
 )
+AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
+AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 EXACT_NPM_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.\-]+)?$")
 SRI_INTEGRITY_RE = re.compile(r"^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$")
 STALE_OPSX_PATHS = (
@@ -59,6 +63,13 @@ STALE_OPSX_PATHS = (
 class Check:
     name: str
     ok: bool
+    message: str
+
+
+@dataclass
+class Advisory:
+    name: str
+    status: str
     message: str
 
 
@@ -81,6 +92,11 @@ def is_relative_to(path: Path, parent: Path) -> bool:
 def print_check(check: Check) -> None:
     status = "PASS" if check.ok else "FAIL"
     print(f"{status} {check.name}: {check.message}")
+
+
+def print_advisory(advisory: Advisory) -> None:
+    status = "INFO" if advisory.status == "pass" else "WARN"
+    print(f"{status} {advisory.name}: {advisory.message}")
 
 
 def skill_names(changerail_root: Path) -> list[str]:
@@ -453,6 +469,34 @@ def check_tracked_runtime(project: Path) -> Check:
     return Check("tracked runtime/auth files", True, "no tracked runtime/auth files")
 
 
+def delivery_auth_advisory(project: Path) -> Advisory:
+    for name in AUTH_ENV_VARS:
+        if os.environ.get(name):
+            return Advisory(
+                "delivery runner auth readiness",
+                "pass",
+                f"auth environment variable {name} is set",
+            )
+
+    explicit_home = os.environ.get("CODEX_HOME")
+    marker_root = Path(explicit_home).expanduser() if explicit_home else project / ".codex"
+    for name in AUTH_MARKER_FILES:
+        if (marker_root / name).is_file():
+            marker_label = f"$CODEX_HOME/{name}" if explicit_home else f".codex/{name}"
+            return Advisory(
+                "delivery runner auth readiness",
+                "pass",
+                f"supported auth marker is present at {marker_label}",
+            )
+
+    return Advisory(
+        "delivery runner auth readiness",
+        "warn",
+        "missing supported auth marker or auth environment variable; see "
+        "docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner",
+    )
+
+
 def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     skills = skill_names(changerail_root)
     checks: list[Check] = [
@@ -489,6 +533,10 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
     return checks
 
 
+def build_advisories(project: Path) -> list[Advisory]:
+    return [delivery_auth_advisory(project)]
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Verify a ChangeRail consumer project.")
     parser.add_argument("path", type=Path, help="Consumer project path.")
@@ -504,7 +552,9 @@ def main(argv: list[str]) -> int:
     changerail_root = args.changerail_root.resolve()
     aggregator_root = args.aggregator_root.resolve() if args.aggregator_root else None
     checks = build_checks(project, changerail_root, aggregator_root)
+    advisories = build_advisories(project)
     failed = [check for check in checks if not check.ok]
+    warnings = [advisory for advisory in advisories if advisory.status == "warn"]
 
     if args.json:
         print(
@@ -519,7 +569,12 @@ def main(argv: list[str]) -> int:
                         "passed": len(checks) - len(failed),
                         "failed": len(failed),
                     },
+                    "advisory_summary": {
+                        "total": len(advisories),
+                        "warnings": len(warnings),
+                    },
                     "checks": [check.__dict__ for check in checks],
+                    "advisories": [advisory.__dict__ for advisory in advisories],
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -529,6 +584,8 @@ def main(argv: list[str]) -> int:
     else:
         for check in checks:
             print_check(check)
+        for advisory in advisories:
+            print_advisory(advisory)
         print(f"summary: {'fail' if failed else 'pass'} ({len(checks) - len(failed)}/{len(checks)} passed)")
     return 1 if failed else 0
 

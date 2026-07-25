@@ -84,6 +84,13 @@ agent session and auth paths.
   Claude local settings are not ignored
 - **THEN** `bin/verify-project` exits non-zero
 
+#### Scenario: Supported auth marker is tracked
+- **WHEN** a consumer project force-tracks `.codex/auth.json`,
+  `.codex/auth.toml` or another supported Codex auth marker that belongs to
+  local auth state
+- **THEN** `bin/verify-project` exits non-zero
+- **AND** it reports the tracked runtime/auth file as forbidden
+
 ### Requirement: Verify ChangeRail consumer wiring
 `verify-project` MUST validate ChangeRail consumer wiring after the rename.
 
@@ -156,3 +163,29 @@ generated or migrated consumer projects.
   or `.claude/commands/chrl`
 - **THEN** `verify-project` exits non-zero
 - **AND** the output identifies the missing short alias wiring
+
+### Requirement: Delivery runner auth readiness advisory
+`verify-project` MUST report delivery runner Codex auth readiness as a
+non-fatal advisory while preserving existing mandatory verification gates.
+
+#### Scenario: Consumer has project-local auth marker
+- **WHEN** `bin/verify-project /opt/example-project` finds a supported auth
+  marker under `/opt/example-project/.codex`
+- **THEN** verification reports a passing delivery runner auth readiness
+  advisory
+- **AND** it does not read or print credential contents
+
+#### Scenario: Consumer relies on auth environment variable
+- **WHEN** verification runs with a supported Codex auth environment variable
+  set
+- **THEN** verification reports a passing delivery runner auth readiness
+  advisory
+- **AND** it identifies the environment variable name without printing the
+  value
+
+#### Scenario: Consumer is missing delivery auth
+- **WHEN** required ChangeRail wiring passes but no supported auth marker or
+  environment variable is present
+- **THEN** `verify-project` exits `0`
+- **AND** it reports a warning advisory with the next remediation step for
+  delivery runner readiness

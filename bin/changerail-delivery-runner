@@ -26,6 +26,11 @@ PLAN_SCHEMA = "changerail.delivery-plan.v1"
 PLAN_STATUS_SCHEMA = "changerail.delivery-plan-status.v1"
 AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
+AUTH_REMEDIATION = (
+    "create ignored .codex/auth.json marker, set CODEX_HOME, or set "
+    "CODEX_AUTH_TOKEN/OPENAI_API_KEY; see "
+    "docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner"
+)
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
 TERMINAL_FIELD_KEYS = {"terminal_outcome", "terminal-outcome", "outcome", "result"}
 TERMINAL_REASON_KEYS = {"terminal_reason", "terminal-reason", "reason_code", "reason-code"}
@@ -167,7 +172,7 @@ def auth_state(codex_home: Path, env: dict[str, str]) -> Check:
     for name in AUTH_MARKER_FILES:
         if (codex_home / name).is_file():
             return Check("CODEX auth", "pass", f"{codex_home / name}")
-    return Check("CODEX auth", "fail", "no auth marker or supported auth environment variable found")
+    return Check("CODEX auth", "fail", f"no auth marker or supported auth environment variable found; {AUTH_REMEDIATION}")
 
 
 def sanitized_endpoint(url: str) -> str:
@@ -1037,7 +1042,7 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
         Check(
             "CODEX_HOME symlinks",
             "pass" if not stale else "fail",
-            "no stale symlinks" if not stale else ", ".join(stale[:10]),
+            "no stale symlinks" if not stale else f"stale symlinks: {', '.join(stale[:10])}; {AUTH_REMEDIATION}",
         ),
         Check("codex binary", "pass" if shutil.which("codex") else "fail", shutil.which("codex") or "not found"),
     ]
