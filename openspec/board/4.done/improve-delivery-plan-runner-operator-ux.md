@@ -116,9 +116,9 @@ consumer names or local paths.
 - `scripts/public-surface-scan.py`
 
 ## Result
-implemented, verified, synced and archived; awaiting independent review
+implemented, verified, synced, archived, reviewed and published
 
-Published reviewed payload as `ceec5ab`; push status `pending` on `main`/`origin`.
+Published reviewed payload as `11d004e`; push status `pushed` on `main`/`origin`.
 
 ## Next
 - done
@@ -219,4 +219,6 @@ semantics and generated plan validation.
   OpenSpec changes and moved the card to `3.inprogress`.
 - 2026-07-26T10:00:42Z implemented runner, docs and smoke coverage; synced
   specs and archived all four OpenSpec changes.
-- 2026-07-26T10:12:00Z publish finalized card into `4.done` with commit `ceec5ab` and push status `pending`.
+- 2026-07-26T10:14:00Z publish finalized card into `4.done`, pushed reviewed
+  payload commit `11d004e` to `origin/main`, and retained ignored runtime
+  manifest/review evidence outside tracked payload.
