@@ -302,7 +302,8 @@ status.
 
 ### Requirement: Plan-oriented dry-run commands
 The delivery runner MUST provide explicit plan-oriented commands that resolve a
-queue plan without launching live child deliveries.
+queue plan without launching live child deliveries, and its smoke coverage MUST
+prove generated plan examples can be inspected before live delivery.
 
 #### Scenario: Operator lists a plan
 - **WHEN** an operator invokes `bin/changerail-delivery-runner plan <plan.json>`
@@ -315,6 +316,36 @@ queue plan without launching live child deliveries.
 - **WHEN** an operator passes `--no-push` to a plan-oriented dry run
 - **THEN** the resolved child commands include the corresponding delivery
   argument that will be passed to each single-card invocation
+
+#### Scenario: Generated example validates before live delivery
+- **WHEN** smoke coverage generates a representative delivery plan
+- **THEN** the generated file validates through `plan` and `preflight-plan`
+- **AND** the smoke does not launch live child delivery
+
+### Requirement: Delivery plan generation helper
+The delivery runner MUST provide a non-live helper command that generates a
+schema-backed queue plan from ordered card paths and optional dependency
+declarations.
+
+#### Scenario: Operator generates a serial plan
+- **WHEN** an operator invokes `bin/changerail-delivery-runner generate-plan`
+  with a plan id, workspace alias/path and ordered card paths
+- **THEN** the command emits a `changerail.delivery-plan.v1` JSON plan whose
+  cards preserve the input order
+- **AND** no child delivery process is started
+
+#### Scenario: Operator adds dependencies
+- **WHEN** an operator supplies dependency declarations for generated card ids
+- **THEN** the emitted plan records those dependencies under the matching card
+  entries
+- **AND** invalid dependency references fail before writing the plan
+
+#### Scenario: Generated plan uses existing validation
+- **WHEN** `generate-plan` emits or writes a plan
+- **THEN** the payload validates against
+  `schemas/changerail-delivery-plan.schema.json`
+- **AND** the generated plan can be consumed by `plan` and `preflight-plan`
+  without live child delivery
 
 ### Requirement: Queue preflight validation
 The delivery runner MUST fail closed during `preflight-plan` before launching
@@ -363,7 +394,8 @@ across board lanes before listing, preflighting, running or resuming a plan.
 
 ### Requirement: Queue preflight aggregate status
 The delivery runner MUST write schema-backed aggregate status for plan preflight
-and status inspection.
+and status inspection, and MUST surface child preflight failures as compact
+operator diagnostics without embedding raw child logs.
 
 #### Scenario: Preflight succeeds
 - **WHEN** `preflight-plan` validates every workspace, card and dependency
@@ -374,6 +406,25 @@ and status inspection.
 - **WHEN** an operator invokes `status-plan` for a prior queue run or preflight
 - **THEN** the command reads the aggregate status record and reports structured
   queue state without parsing raw child stdout or stderr
+
+#### Scenario: Child preflight failure summary is compact
+- **WHEN** `preflight-plan` observes a child preflight check failure
+- **THEN** aggregate operator output reports the card id, failing check name,
+  `fail` status and a short reason
+- **AND** the output does not rely on a truncated child JSON blob
+
+#### Scenario: Child preflight evidence remains referenced
+- **WHEN** aggregate status records a child preflight failure
+- **THEN** the corresponding card entry includes a concise `reason` and a
+  `run_status_path` reference to the child `changerail.delivery-run.v1` status
+  record
+- **AND** aggregate status does not inline raw stdout or stderr logs
+
+#### Scenario: JSON status remains schema-compatible
+- **WHEN** `status-plan --json` reads aggregate status with compact child
+  diagnostics
+- **THEN** the emitted JSON still validates against
+  `schemas/changerail-delivery-plan-status.schema.json`
 
 ### Requirement: Live queue plan execution
 The delivery runner MUST execute `run-plan` by launching the existing
@@ -529,9 +580,10 @@ the plan without changing repository defaults.
   overrides for that run only
 
 ### Requirement: Consumer Codex auth setup documentation
-ChangeRail runner documentation MUST describe the Codex auth prerequisite for
-single-card and plan-oriented delivery runner commands without making
-credentials part of the tracked repository surface.
+ChangeRail runner documentation MUST describe the Codex auth prerequisite and
+launcher semantics for single-card and plan-oriented delivery runner commands
+without making credentials or repo-local launcher wrappers part of the tracked
+consumer repository surface.
 
 #### Scenario: Operator reads runner auth setup
 - **WHEN** an operator reads the delivery runner or consumer adoption docs
@@ -549,6 +601,19 @@ credentials part of the tracked repository surface.
   explicit `CODEX_HOME` invocation
 - **AND** the docs do not instruct operators to commit credentials or runtime
   auth state
+
+#### Scenario: Queue launcher chain is documented
+- **WHEN** docs describe queue-plan execution
+- **THEN** they distinguish the aggregate plan runner, the ChangeRail
+  single-card runner child and the final Codex launcher invocation
+- **AND** they state that `CODEX_WORKDIR` and the effective `CODEX_HOME` select
+  the consumer workspace for each child run
+
+#### Scenario: Repo-local Codex launcher is optional
+- **WHEN** docs mention `bin/codex` for consumer repositories
+- **THEN** they do not imply every consumer must track that file
+- **AND** they describe the supported invocation path when a consumer repo-local
+  launcher is absent
 
 ### Requirement: Actionable auth remediation diagnostics
 Delivery runner preflight MUST keep missing-auth and stale-symlink checks

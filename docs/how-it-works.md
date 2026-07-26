@@ -112,16 +112,25 @@ templates and board/spec files.
 
 Для длительных supervised запусков ChangeRail предоставляет tracked helper
 `bin/changerail-delivery-runner`. Это single-card launcher: он запускает
-`$changerail-deliver <card>` через repo-scoped `bin/codex`, закрывает stdin
+`$changerail-deliver <card>` через настроенный Codex launcher, закрывает stdin
 child-процесса и пишет
 `.runtime/changerail/delivery-runs/<run-id>/status.json` с contract
 `changerail.delivery-run.v1`. Supervisor наблюдает этот status record, а не `pgrep`
-или свободный текст лога.
+или свободный текст лога. По умолчанию для ChangeRail source checkout это
+tracked `/opt/changerail/bin/codex`; consumer repository не обязан иметь
+tracked `bin/codex`, если оператор запускает ChangeRail runner извне или явно
+передает supported launcher через `--launcher`.
 
 Для dependency-ordered очередей через несколько независимых workspaces runner
 поддерживает отдельный JSON plan contract и plan-oriented команды:
 
 ```bash
+bin/changerail-delivery-runner generate-plan --id example-plan \
+  --workspace service-a=service-a --workspace service-b=service-b \
+  --card service-a-card.md \
+  --card service-b-card=service-b:service-b-card.md \
+  --depends service-b-card=service-a-card \
+  --output delivery-plan.json --consumer-root /opt/example-workspace
 bin/changerail-delivery-runner plan delivery-plan.json --consumer-root /opt/example-workspace --json
 bin/changerail-delivery-runner preflight-plan delivery-plan.json --consumer-root /opt/example-workspace --json
 bin/changerail-delivery-runner run-plan delivery-plan.json --consumer-root /opt/example-workspace
@@ -137,8 +146,11 @@ limits. `plan`/`preflight-plan` полностью проверяют workspaces
 dependencies, waves и single-card runner readiness до первого live child.
 Aggregate status пишется под
 `.runtime/changerail/delivery-plans/<run-id>/status.json` с
-`changerail.delivery-plan-status.v1`; каждый live card по-прежнему запускает
-single-card `run` и сохраняет отдельный `changerail.delivery-run.v1` record.
+`changerail.delivery-plan-status.v1`; plan runner запускает ChangeRail
+single-card runner для каждого child, single-card runner запускает Codex, а
+`CODEX_WORKDIR` и effective `CODEX_HOME` выбирают workspace конкретного
+consumer child. Каждый live card сохраняет отдельный
+`changerail.delivery-run.v1` record.
 
 Workspace lock-и под ignored runtime state исключают два live child run в одном
 repository. Stale lock не удаляется автоматически: runner пишет structured

@@ -197,9 +197,12 @@ bin/changerail-delivery-runner run openspec/board/3.inprogress/example.md \
   --model gpt-5 --reasoning-effort medium
 ```
 
-Runner запускает `codex exec` через repo launcher `bin/codex`, закрывает stdin
+Runner запускает `codex exec` через настроенный launcher, закрывает stdin
 child-процесса, выполняет child в effective workspace и экспортирует
-`CODEX_WORKDIR=<workspace>`. Если `--workspace` не указан, workspace
+`CODEX_WORKDIR=<workspace>`. Для ChangeRail source checkout default launcher -
+tracked `/opt/changerail/bin/codex`; consumer repository не обязан иметь
+tracked `bin/codex`, если оператор запускает ChangeRail runner извне или
+передает supported launcher через `--launcher`. Если `--workspace` не указан, workspace
 резолвится в git-root invocation cwd, а вне git - в текущий cwd. Если
 `CODEX_HOME` не задан, runner использует `<workspace>/.codex`; если
 `--runtime-root` не задан, status пишется под
@@ -247,6 +250,9 @@ filenames или board paths, dependencies, waves, `max_parallel`,
 optional `recovery_for` для linked rescue/replacement cards.
 Required format is JSON, чтобы core runner не получал обязательную YAML
 dependency. YAML может быть добавлен позднее только как optional extension.
+Для обычных serial queues JSON можно создать helper-командой
+`generate-plan`; это не отдельный формат, а генератор того же
+`changerail.delivery-plan.v1` contract.
 
 Plan-файл является public-safe input contract. Он не должен содержать
 credentials, secrets, raw remotes, auth state, `.runtime/` state или
@@ -287,6 +293,17 @@ plan workspace paths are relative to an operator-supplied consumer root:
 }
 ```
 
+Пример генерации такого плана из ordered card list:
+
+```bash
+bin/changerail-delivery-runner generate-plan --id example-plan \
+  --workspace service-a=service-a --workspace service-b=service-b \
+  --card service-a-card.md \
+  --card service-b-card=service-b:service-b-card.md \
+  --depends service-b-card=service-a-card \
+  --output delivery-plan.json --consumer-root /opt/example-workspace
+```
+
 Schema validation checks shape and public-safe path fields. Runner semantic
 validation must additionally fail closed on cycles, duplicate aliases or card
 ids, missing workspaces/cards/dependencies, invalid wave/dependency relations
@@ -310,6 +327,9 @@ uses the existing single-card runner and keeps its own
 `.runtime/changerail/delivery-runs/<run-id>/status.json`. Queue status stores
 references such as child run ids and status paths; raw stdout/stderr logs stay
 ignored runtime evidence and are not embedded in aggregate status.
+For queue plans, plan runner запускает ChangeRail single-card runner, the
+single-card runner запускает Codex, and `CODEX_WORKDIR` и effective
+`CODEX_HOME` bind each child to its consumer workspace.
 
 Tracked queue runner commands:
 

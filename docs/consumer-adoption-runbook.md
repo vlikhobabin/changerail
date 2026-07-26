@@ -243,6 +243,12 @@ done
 `preflight-plan`, `run-plan` и `resume-plan`: без auth preflight должен
 остановиться fail-closed до запуска delivery child.
 
+Для queue plans plan runner запускает ChangeRail single-card runner, а single-card runner запускает Codex.
+Примечание: consumer repository не обязан иметь tracked `bin/codex`. Supported path - запускать
+`/opt/changerail/bin/changerail-delivery-runner` из ChangeRail checkout или
+передать явный supported launcher через `--launcher`. `CODEX_WORKDIR` и
+effective `CODEX_HOME` задаются для каждого child workspace.
+
 Runner выбирает auth location так:
 
 - если оператор явно задал `CODEX_HOME`, используется этот каталог;
@@ -293,6 +299,12 @@ CODEX_HOME="$HOME/.codex" /opt/changerail/bin/changerail-delivery-runner preflig
 Для queue plans сначала проверяйте readiness без live delivery:
 
 ```bash
+/opt/changerail/bin/changerail-delivery-runner generate-plan --id example-plan \
+  --workspace service-a=service-a --workspace service-b=service-b \
+  --card service-a-card.md \
+  --card service-b-card=service-b:service-b-card.md \
+  --depends service-b-card=service-a-card \
+  --output delivery-plan.json --consumer-root /opt/example-workspace
 /opt/changerail/bin/changerail-delivery-runner preflight-plan delivery-plan.json \
   --consumer-root /opt/example-workspace --json
 ```

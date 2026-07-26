@@ -368,6 +368,12 @@ contract for declarative multi-workspace delivery queue plans.
 - **AND** recovery cards may declare optional `recovery_for` links to a source
   card in the same plan
 
+#### Scenario: Helper-generated plan uses the same contract
+- **WHEN** a ChangeRail helper generates a delivery plan from ordered card paths
+- **THEN** the output uses `changerail.delivery-plan.v1`
+- **AND** downstream runner commands validate it with the tracked delivery plan
+  schema before applying queue semantics
+
 ### Requirement: Delivery plan status contract
 ChangeRail MUST define a public schema-backed
 `changerail.delivery-plan-status.v1` contract for aggregate queue status.

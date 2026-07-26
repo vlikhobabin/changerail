@@ -157,11 +157,18 @@ def write_fake_queue_runner(path: Path) -> None:
                 "preflight.add_argument('--json', action='store_true')",
                 "preflight.add_argument('--write-status', action='store_true')",
                 "args = parser.parse_args()",
+                "mode = os.environ.get('CHANGERAIL_QUEUE_FAKE_MODE')",
+                "preflight_mode = os.environ.get('CHANGERAIL_QUEUE_PREFLIGHT_MODE')",
                 "call_log = os.environ.get('CHANGERAIL_FAKE_CALL_LOG')",
                 "if call_log:",
                 "    with open(call_log, 'a', encoding='utf-8') as handle:",
                 "        handle.write(json.dumps({'argv': sys.argv, 'card': args.card}) + '\\n')",
                 "if args.command == 'preflight':",
+                "    result = 'DELIVERED'",
+                "    checks = [{'name': 'fake', 'status': 'pass', 'message': 'ready'}]",
+                "    if preflight_mode == 'auth-fail' and 'service-a-card' in args.card:",
+                "        result = 'BLOCKED'",
+                "        checks = [{'name': 'CODEX auth', 'status': 'fail', 'message': 'no auth marker or supported auth environment variable found; see docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner'}]",
                 "    status = {",
                 "        'schema': 'changerail.delivery-run.v1',",
                 "        'run_id': args.run_id,",
@@ -169,18 +176,19 @@ def write_fake_queue_runner(path: Path) -> None:
                 "        'workspace': {'root': args.workspace},",
                 "        'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
                 "        'phase': 'preflight',",
-                "        'result': 'DELIVERED',",
+                "        'result': result,",
                 "        'timestamps': {'started_at': '2026-07-15T00:00:00Z', 'ended_at': '2026-07-15T00:00:01Z'},",
                 "        'command': {'argv': sys.argv, 'launcher': sys.argv[0], 'stdin': 'closed', 'json': True},",
                 "        'usage': {'available': False, 'reason': 'fake queue preflight'},",
-                "        'preflight': {'checks': [{'name': 'fake', 'status': 'pass', 'message': 'ready'}]},",
+                "        'preflight': {'checks': checks},",
                 "    }",
                 "    path = Path(args.runtime_root) / args.run_id / 'status.json'",
                 "    path.parent.mkdir(parents=True, exist_ok=True)",
                 "    path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
+                "    if result != 'DELIVERED':",
+                "        print('RAW_CHILD_STDOUT_SHOULD_NOT_APPEAR')",
                 "    print(json.dumps(status))",
-                "    sys.exit(0)",
-                "mode = os.environ.get('CHANGERAIL_QUEUE_FAKE_MODE')",
+                "    sys.exit(0 if result == 'DELIVERED' else 1)",
                 "if mode == 'missing-status' and 'service-a-card' in args.card:",
                 "    sys.exit(0)",
                 "result = 'DELIVERED'",
@@ -1155,6 +1163,167 @@ def check_queue_plan_preflight(tmp: Path) -> None:
         raise AssertionError(f"status-plan did not read aggregate status: {status_payload}")
 
 
+def check_queue_preflight_child_failure_compact(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-child-fail")
+    runner = tmp / "fake-queue-preflight-runner"
+    runtime = tmp / "queue-child-fail-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_PREFLIGHT_MODE"] = "auth-fail"
+    result = run(
+        [
+            str(RUNNER),
+            "preflight-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "child-fail",
+            "--launcher",
+            str(runner),
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError(f"child preflight unexpectedly passed: {result.stdout}")
+    if "service-a-card: CODEX auth fail:" not in result.stdout:
+        raise AssertionError(f"compact child diagnostic missing: {result.stdout}")
+    if "RAW_CHILD_STDOUT_SHOULD_NOT_APPEAR" in result.stdout:
+        raise AssertionError(f"aggregate output inlined child stdout: {result.stdout}")
+
+    status = load_status(runtime, "child-fail")
+    status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    if "RAW_CHILD_STDOUT_SHOULD_NOT_APPEAR" in status_text or "stderr" in status_text:
+        raise AssertionError(f"aggregate status inlined child logs: {status}")
+    service_a_card = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    if service_a_card.get("reason", "").startswith("single-card preflight failed: {"):
+        raise AssertionError(f"child reason still uses raw JSON: {service_a_card}")
+    if "CODEX auth fail:" not in service_a_card.get("reason", ""):
+        raise AssertionError(f"child reason is not compact: {service_a_card}")
+    child_status_path = consumer / service_a_card.get("run_status_path", "")
+    if not child_status_path.is_file():
+        raise AssertionError(f"child status reference is missing: {service_a_card}")
+
+    status_result = run([str(RUNNER), "status-plan", str(runtime / "child-fail" / "status.json")])
+    if status_result.returncode == 0:
+        raise AssertionError("blocked status-plan unexpectedly returned success")
+    if "service-a-card: CODEX auth fail:" not in status_result.stdout:
+        raise AssertionError(f"status-plan compact diagnostic missing: {status_result.stdout}")
+
+    json_result = run([str(RUNNER), "status-plan", str(runtime / "child-fail" / "status.json"), "--json"])
+    if json_result.returncode == 0:
+        raise AssertionError("blocked status-plan --json unexpectedly returned success")
+    json_payload = json.loads(json_result.stdout)
+    if json_payload["schema"] != "changerail.delivery-plan-status.v1":
+        raise AssertionError(f"status-plan --json changed schema: {json_payload}")
+
+
+def check_generated_queue_plan(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-generated")
+    plan = consumer / "generated-delivery-plan.json"
+    runtime = tmp / "queue-generated-runtime"
+    generate = run(
+        [
+            str(RUNNER),
+            "generate-plan",
+            "--id",
+            "queue-generated",
+            "--workspace",
+            "service-a=service-a",
+            "--workspace",
+            "service-b=service-b",
+            "--card",
+            "service-a-card.md",
+            "--card",
+            "service-b-card=service-b:service-b-card.md",
+            "--depends",
+            "service-b-card=service-a-card",
+            "--max-parallel",
+            "2",
+            "--output",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+        ]
+    )
+    require_ok(generate, "generate-plan")
+    payload = json.loads(plan.read_text(encoding="utf-8"))
+    if payload["schema"] != "changerail.delivery-plan.v1" or payload["id"] != "queue-generated":
+        raise AssertionError(f"generated plan contract mismatch: {payload}")
+    if [card["id"] for card in payload["cards"]] != ["service-a-card", "service-b-card"]:
+        raise AssertionError(f"generated plan did not preserve card order: {payload['cards']}")
+    if payload["cards"][1].get("depends_on") != ["service-a-card"]:
+        raise AssertionError(f"generated dependency missing: {payload['cards']}")
+
+    dry_run = run(
+        [
+            str(RUNNER),
+            "plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "generated-plan",
+            "--launcher",
+            str(RUNNER),
+            "--json",
+        ]
+    )
+    require_ok(dry_run, "generated plan dry-run")
+    dry_payload = json.loads(dry_run.stdout)
+    if dry_payload["result"] != "DELIVERED":
+        raise AssertionError(f"generated plan dry-run failed: {dry_payload}")
+
+    preflight = run(
+        [
+            str(RUNNER),
+            "preflight-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "generated-preflight",
+            "--launcher",
+            str(RUNNER),
+            "--json",
+        ]
+    )
+    require_ok(preflight, "generated plan preflight")
+    status = load_status(runtime, "generated-preflight")
+    if status["result"] != "DELIVERED" or len(status["cards"]) != 2:
+        raise AssertionError(f"generated plan preflight status invalid: {status}")
+
+
+def check_queue_launcher_docs() -> None:
+    docs = "\n".join(
+        (ROOT / path).read_text(encoding="utf-8")
+        for path in (
+            "docs/how-it-works.md",
+            "docs/changerail-contracts.md",
+            "docs/consumer-adoption-runbook.md",
+            "docs/board-and-two-agent-feature-flow.md",
+        )
+    )
+    expected = [
+        "plan runner запускает ChangeRail single-card runner",
+        "single-card runner запускает Codex",
+        "consumer repository не обязан иметь tracked `bin/codex`",
+        "`CODEX_WORKDIR` и effective `CODEX_HOME`",
+        "generate-plan",
+    ]
+    missing = [phrase for phrase in expected if phrase not in docs]
+    if missing:
+        raise AssertionError(f"queue launcher docs expectations missing: {missing}")
+
+
 def check_queue_preflight_failures(tmp: Path) -> None:
     cases: list[tuple[str, Any]] = [
         (
@@ -1835,6 +2004,9 @@ def main() -> int:
         check_run_preflight_failure(workspace)
         check_stale_symlink_preflight(workspace)
         check_queue_plan_preflight(workspace)
+        check_queue_preflight_child_failure_compact(workspace)
+        check_generated_queue_plan(workspace)
+        check_queue_launcher_docs()
         check_queue_preflight_failures(workspace)
         check_queue_run_plan(workspace)
         check_queue_fail_fast_and_locks(workspace)

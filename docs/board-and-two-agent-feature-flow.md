@@ -296,6 +296,12 @@ Runner пишет structured status под:
 /opt/example-workspace/service-b/.runtime/changerail/delivery-runs/<run-id>/status.json
 ```
 
+В queue-plan режиме plan runner запускает ChangeRail single-card runner для
+каждой карточки, single-card runner запускает Codex, а `CODEX_WORKDIR` и
+effective `CODEX_HOME` выбирают конкретный child workspace. Consumer repository
+не обязан иметь tracked `bin/codex`, если оператор использует ChangeRail runner
+из `/opt/changerail` или передает supported launcher через `--launcher`.
+
 Ограничения:
 
 - внутри одного дочернего репозитория карточки все равно выполняются

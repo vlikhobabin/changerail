@@ -273,6 +273,37 @@ def safe_plan_id(value: Any) -> str:
     return cleaned
 
 
+def safe_generated_id(value: str) -> str:
+    text = value.strip().lower()
+    chars = [char if ("a" <= char <= "z" or "0" <= char <= "9") else "-" for char in text]
+    cleaned = "-".join(part for part in "".join(chars).split("-") if part)
+    if not cleaned or not ("a" <= cleaned[0] <= "z" or "0" <= cleaned[0] <= "9"):
+        return ""
+    return cleaned
+
+
+def compact_reason(value: Any, limit: int = 160) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def parse_key_value(value: str, label: str) -> tuple[str | None, str | None, str | None]:
+    if "=" not in value:
+        return None, None, f"{label} must use key=value syntax: {value}"
+    key, item = value.split("=", 1)
+    key = key.strip()
+    item = item.strip()
+    if not key or not item:
+        return None, None, f"{label} must include non-empty key and value: {value}"
+    return key, item, None
+
+
+def generated_card_id(card_ref: str) -> str:
+    return safe_generated_id(Path(card_ref).name.removesuffix(".md"))
+
+
 def plan_runtime_root(args: argparse.Namespace) -> Path:
     return args.runtime_root
 
@@ -602,6 +633,8 @@ def append_single_card_preflight_checks(
         workspace = workspaces.get(card["workspace"])
         if not workspace:
             continue
+        child_preflight_run_id = child_run_id(args, card) + "-preflight"
+        child_status_path = child_runtime_root(workspace) / child_preflight_run_id / "status.json"
         command = [
             str(args.launcher),
             "preflight",
@@ -611,7 +644,7 @@ def append_single_card_preflight_checks(
             "--runtime-root",
             str(child_runtime_root(workspace)),
             "--run-id",
-            child_run_id(args, card) + "-preflight",
+            child_preflight_run_id,
             "--json",
             "--write-status",
         ]
@@ -619,10 +652,55 @@ def append_single_card_preflight_checks(
         if result.returncode == 0:
             checks.append(Check("single-card preflight", "pass", f"{card['id']}: ready"))
         else:
-            detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+            card["run_id"] = child_preflight_run_id
+            card["run_status_path"] = repository_relative(child_status_path, args.consumer_root)
+            child_status = load_json_object(child_status_path)
+            failed = first_failed_child_check(child_status)
+            if failed:
+                name, reason = failed
+                compact = f"{name} fail: {reason}"
+            else:
+                compact = f"child preflight failed: status missing or invalid; exit {result.returncode}"
             card["state"] = "blocked"
-            card["reason"] = f"single-card preflight failed: {detail[:300]}"
-            checks.append(Check("single-card preflight", "fail", f"{card['id']}: {detail[:300]}"))
+            card["reason"] = compact
+            checks.append(Check("single-card preflight", "fail", f"{card['id']}: {compact}"))
+
+
+def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str] | None:
+    if not isinstance(child_status, dict):
+        return None
+    checks = child_status.get("preflight", {}).get("checks")
+    if not isinstance(checks, list):
+        return None
+    for check in checks:
+        if not isinstance(check, dict) or check.get("status") != "fail":
+            continue
+        name = compact_reason(check.get("name") or "child preflight")
+        message = compact_reason(check.get("message") or "failed")
+        return name, message
+    return None
+
+
+def compact_plan_failure_lines(status: dict[str, Any]) -> list[str]:
+    cards = status.get("cards")
+    if not isinstance(cards, list):
+        return []
+    lines: list[str] = []
+    for card in cards:
+        if not isinstance(card, dict) or card.get("state") != "blocked":
+            continue
+        reason = card.get("reason")
+        status_path = card.get("run_status_path")
+        if not isinstance(reason, str) or not isinstance(status_path, str):
+            continue
+        card_id = card.get("id") if isinstance(card.get("id"), str) else "unknown-card"
+        lines.append(f"{card_id}: {compact_reason(reason)} (status: {status_path})")
+    return lines
+
+
+def print_compact_plan_failures(status: dict[str, Any]) -> None:
+    for line in compact_plan_failure_lines(status):
+        print(f"- {line}")
 
 
 def build_plan_view(
@@ -1811,6 +1889,111 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
     return status, 0 if result == "DELIVERED" else 1
 
 
+def build_generated_plan(args: argparse.Namespace) -> tuple[dict[str, Any] | None, list[str]]:
+    errors: list[str] = []
+    workspaces: list[dict[str, Any]] = []
+    aliases: set[str] = set()
+    for value in args.workspace:
+        alias, path, error = parse_key_value(value, "workspace")
+        if error:
+            errors.append(error)
+            continue
+        assert alias is not None and path is not None
+        if alias in aliases:
+            errors.append(f"duplicate workspace alias: {alias}")
+        aliases.add(alias)
+        workspaces.append({"alias": alias, "path": path})
+    default_workspace = args.default_workspace or (workspaces[0]["alias"] if workspaces else None)
+    if default_workspace not in aliases:
+        errors.append(f"default workspace is not declared: {default_workspace}")
+
+    cards: list[dict[str, Any]] = []
+    card_ids: set[str] = set()
+    for raw in args.card:
+        card_id_override: str | None = None
+        spec = raw.strip()
+        if "=" in spec:
+            left, spec = spec.split("=", 1)
+            card_id_override = safe_generated_id(left)
+            if not card_id_override:
+                errors.append(f"invalid card id: {left}")
+        workspace_alias = default_workspace
+        if ":" in spec:
+            prefix, remainder = spec.split(":", 1)
+            if prefix in aliases:
+                workspace_alias = prefix
+                spec = remainder
+        if not spec:
+            errors.append(f"card path is empty: {raw}")
+            continue
+        if workspace_alias not in aliases:
+            errors.append(f"card workspace is not declared: {workspace_alias}")
+            continue
+        card_id = card_id_override or generated_card_id(spec)
+        if not card_id:
+            errors.append(f"invalid generated card id for path: {spec}")
+            continue
+        if card_id in card_ids:
+            errors.append(f"duplicate card id: {card_id}")
+        card_ids.add(card_id)
+        cards.append({"id": card_id, "workspace": workspace_alias, "card": spec})
+
+    dependencies_by_card: dict[str, list[str]] = {}
+    for value in args.depends:
+        target, raw_deps, error = parse_key_value(value, "depends")
+        if error:
+            errors.append(error)
+            continue
+        assert target is not None and raw_deps is not None
+        dependencies = [dep.strip() for dep in raw_deps.split(",") if dep.strip()]
+        if target not in card_ids:
+            errors.append(f"dependency target is not declared: {target}")
+        missing = [dep for dep in dependencies if dep not in card_ids]
+        if missing:
+            errors.append(f"{target}: dependencies are not declared: {', '.join(missing)}")
+        if not dependencies:
+            errors.append(f"{target}: depends must include at least one dependency")
+        dependencies_by_card[target] = dependencies
+
+    for card in cards:
+        dependencies = dependencies_by_card.get(card["id"])
+        if dependencies:
+            card["depends_on"] = dependencies
+
+    plan: dict[str, Any] = {
+        "schema": PLAN_SCHEMA,
+        "id": safe_generated_id(args.id),
+        "per_workspace_parallelism": 1,
+        "push_mode": "no-push" if args.no_push else "push",
+        "workspaces": workspaces,
+        "cards": cards,
+    }
+    if not plan["id"]:
+        errors.append(f"invalid plan id: {args.id}")
+    if args.description:
+        plan["description"] = args.description
+    if args.max_parallel is not None:
+        plan["max_parallel"] = args.max_parallel
+    schema_check = schema_errors(plan, "changerail-delivery-plan.schema.json")
+    errors.extend(schema_check)
+    if errors:
+        return None, errors
+    return plan, []
+
+
+def command_generate_plan(args: argparse.Namespace) -> int:
+    plan, errors = build_generated_plan(args)
+    if errors or plan is None:
+        print(json.dumps({"result": "BLOCKED", "errors": errors}, ensure_ascii=False, indent=2, sort_keys=True), file=sys.stderr)
+        return 1
+    if args.output:
+        atomic_write_json(args.output, plan)
+        print(f"wrote: {args.output}")
+    else:
+        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def command_plan(args: argparse.Namespace) -> int:
     args.started_at = utc_now()
     data, errors = load_plan(args.plan)
@@ -1854,6 +2037,7 @@ def command_preflight_plan(args: argparse.Namespace) -> int:
     else:
         print(f"terminal_outcome: {status['result']}")
         print(f"status: {plan_status_path(args)}")
+        print_compact_plan_failures(status)
     return 0 if status["result"] == "DELIVERED" else 1
 
 
@@ -1864,6 +2048,7 @@ def command_run_plan(args: argparse.Namespace) -> int:
     else:
         print(f"terminal_outcome: {status.get('terminal_outcome', status['result'])}")
         print(f"status: {plan_status_path(args)}")
+        print_compact_plan_failures(status)
     return exit_code
 
 
@@ -1874,6 +2059,7 @@ def command_resume_plan(args: argparse.Namespace) -> int:
     else:
         print(f"terminal_outcome: {status.get('terminal_outcome', status['result'])}")
         print(f"status: {plan_status_path(args)}")
+        print_compact_plan_failures(status)
     return exit_code
 
 
@@ -1937,6 +2123,7 @@ def command_status_plan(args: argparse.Namespace) -> int:
         print(f"result: {data.get('result')}")
         print(f"plan: {plan.get('id', 'unknown')}")
         print(f"cards: {len(data.get('cards', [])) if isinstance(data.get('cards'), list) else 0}")
+        print_compact_plan_failures(data)
     return 0 if data.get("result") != "BLOCKED" else 1
 
 
@@ -1992,6 +2179,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     add_plan_common(preflight_plan)
     preflight_plan.set_defaults(func=command_preflight_plan)
 
+    generate_plan = subparsers.add_parser("generate-plan", help="generate a delivery plan from ordered cards")
+    generate_plan.add_argument("--id", required=True, help="generated plan id")
+    generate_plan.add_argument("--description")
+    generate_plan.add_argument("--workspace", action="append", required=True, help="workspace alias=relative-path, repeatable")
+    generate_plan.add_argument("--default-workspace", help="default workspace alias for --card entries")
+    generate_plan.add_argument(
+        "--card",
+        action="append",
+        required=True,
+        help="card path, alias:path, id=path or id=alias:path; repeatable",
+    )
+    generate_plan.add_argument("--depends", action="append", default=[], help="card-id=dependency-id[,dependency-id], repeatable")
+    generate_plan.add_argument("--max-parallel", type=int)
+    generate_plan.add_argument("--no-push", action="store_true")
+    generate_plan.add_argument("--output", type=Path)
+    generate_plan.add_argument("--consumer-root", type=Path)
+    generate_plan.set_defaults(func=command_generate_plan)
+
     run_plan = subparsers.add_parser("run-plan", help="run a validated delivery plan")
     add_plan_common(run_plan)
     run_plan.set_defaults(func=command_run_plan)
@@ -2010,7 +2215,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status_plan.set_defaults(func=command_status_plan, no_push=False, plan=Path("delivery-plan.json"))
 
     args = parser.parse_args(argv)
-    if hasattr(args, "workspace"):
+    if args.command in {"run", "preflight"}:
         args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
         if args.runtime_root:
             args.runtime_root = resolve_path(args.runtime_root, args.workspace)
@@ -2018,17 +2223,19 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
         args.launcher = resolve_path(args.launcher)
     else:
-        args.consumer_root = resolve_path(args.consumer_root) if args.consumer_root else invocation_workspace()
+        args.consumer_root = resolve_path(args.consumer_root) if getattr(args, "consumer_root", None) else invocation_workspace()
         if hasattr(args, "status_path") and args.status_path:
             args.status_path = resolve_path(args.status_path, args.consumer_root)
         if hasattr(args, "plan"):
             args.plan = resolve_path(args.plan, args.consumer_root)
-        if args.runtime_root:
+        if getattr(args, "runtime_root", None):
             args.runtime_root = resolve_path(args.runtime_root, args.consumer_root)
-        else:
+        elif hasattr(args, "runtime_root"):
             args.runtime_root = args.consumer_root / ".runtime" / "changerail" / "delivery-plans"
         if hasattr(args, "launcher"):
             args.launcher = resolve_path(args.launcher)
+        if hasattr(args, "output") and args.output:
+            args.output = resolve_path(args.output, args.consumer_root)
     return args
 
 
