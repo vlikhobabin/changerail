@@ -19,6 +19,45 @@ changes помечаются префиксом `BREAKING:`.
 ### Breaking
 - none
 
+## 0.3.0 - 2026-07-26
+
+### Added
+- Added consumer Codex auth setup support for unattended delivery: bootstrap
+  opt-in auth marker symlink, `verify-project` delivery readiness advisory,
+  runner remediation diagnostics and focused smoke coverage.
+- Added locked approved optional browser MCP package metadata for
+  `@playwright/mcp@0.0.68` and `chrome-devtools-mcp@0.20.3` without adding
+  those packages to default ChangeRail config or templates.
+- Added `bin/changerail-delivery-runner generate-plan` to produce
+  schema-backed `changerail.delivery-plan.v1` queue plans from ordered card
+  paths and optional dependencies.
+- Added compact queue child preflight diagnostics in aggregate
+  `preflight-plan` and `status-plan` output while retaining full child status
+  references as ignored runtime evidence.
+
+### Changed
+- Delivery runner and lifecycle guidance now preserve
+  `fix_budget_exhausted` as a non-delivered safety-stop reason, fail closed on
+  unpublished child exit `0`, and resume queue recovery through explicit
+  `recovery_for` cards before downstream work.
+- Consumer documentation now distinguishes the plan runner, single-card runner
+  and Codex launcher, and clarifies that a consumer repository does not need a
+  tracked repo-local `bin/codex`.
+- `verify-project` recognizes exact npm package pins passed as direct package
+  arguments, `--package=<package>@<version>` and
+  `--package <package>@<version>`.
+
+### Fixed
+- Fixed delivery runner aggregate preflight output that could hide actionable
+  child failure details behind truncated nested JSON.
+- Fixed consumer auth setup verification so tracked `.codex/auth.json` and
+  `.codex/auth.toml` are rejected while ignored local markers remain allowed.
+- Fixed release baseline coverage for consumer auth setup, optional browser MCP
+  package forms and delivery-plan operator UX.
+
+### Breaking
+- none
+
 ## 0.2.0 - 2026-07-18
 
 ### Added

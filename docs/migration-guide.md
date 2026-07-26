@@ -8,6 +8,91 @@ credentials, traces или machine-local inventory.
 
 No unreleased migration notes.
 
+## 0.2.0 -> 0.3.0
+
+### What Changed
+
+- Delivery runner gained `generate-plan`, which emits canonical
+  `changerail.delivery-plan.v1` JSON from ordered card paths, workspace aliases
+  and optional dependencies.
+- Queue `preflight-plan` and `status-plan` now report compact child preflight
+  failures such as `example-card: CODEX auth fail` while preserving full child
+  `changerail.delivery-run.v1` status records under ignored runtime state.
+- Consumer Codex auth setup is documented and checked more explicitly:
+  bootstrap can create an opt-in ignored auth marker symlink, `verify-project`
+  emits delivery readiness advisories, and runner preflight diagnostics point
+  to the remediation guide.
+- Approved optional browser MCP packages are locked for consumer-local usage:
+  `@playwright/mcp@0.0.68` and `chrome-devtools-mcp@0.20.3`. They remain absent
+  from root ChangeRail config and default generated templates.
+- Delivery safety-stop handling now preserves `fix_budget_exhausted`, fails
+  closed for unpublished child exit `0`, and requires explicit `recovery_for`
+  queue cards before blocked downstream work resumes.
+
+### Required Actions
+
+For operators maintaining the source checkout:
+
+```bash
+cd /opt/changerail
+git pull --ff-only
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+Before unattended delivery runner or queue use, configure one supported Codex
+auth source for each consumer workspace:
+
+```bash
+mkdir -p /opt/example-project/.codex
+ln -sfn "$HOME/.codex/auth.json" /opt/example-project/.codex/auth.json
+/opt/changerail/bin/changerail-delivery-runner preflight \
+  openspec/board/3.inprogress/example-card.md \
+  --workspace /opt/example-project --json
+```
+
+Alternatively run with explicit `CODEX_HOME`:
+
+```bash
+CODEX_HOME="$HOME/.codex" /opt/changerail/bin/changerail-delivery-runner preflight \
+  openspec/board/3.inprogress/example-card.md \
+  --workspace /opt/example-project --json
+```
+
+Consumers that keep local copied ChangeRail skills, runbooks, bootstrap
+templates or verification helpers should refresh those copies from
+`/opt/changerail`. Symlink-based consumers normally need only `git pull`,
+project verification and active agent session restart.
+
+For queue plans, generate and inspect plans before live delivery:
+
+```bash
+/opt/changerail/bin/changerail-delivery-runner generate-plan --id example-plan \
+  --workspace service-a=service-a --workspace service-b=service-b \
+  --card service-a-card.md \
+  --card service-b-card=service-b:service-b-card.md \
+  --depends service-b-card=service-a-card \
+  --output delivery-plan.json --consumer-root /opt/example-workspace
+/opt/changerail/bin/changerail-delivery-runner plan delivery-plan.json \
+  --consumer-root /opt/example-workspace --json
+/opt/changerail/bin/changerail-delivery-runner preflight-plan delivery-plan.json \
+  --consumer-root /opt/example-workspace --json
+```
+
+### Rollback
+
+Return `/opt/changerail` to the previous release tag and rerun project
+verification:
+
+```bash
+git -C /opt/changerail checkout v0.2.0
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+If a queue was already started with `0.3.0`, inspect ignored aggregate status
+under `.runtime/changerail/delivery-plans/` before resuming on an older
+checkout, because compact diagnostics and recovery-card evidence may be easier
+to interpret with the newer runner.
+
 ## 0.1.0 -> 0.2.0
 
 ### What Changed

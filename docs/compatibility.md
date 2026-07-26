@@ -9,15 +9,17 @@ notes, migration guide и проверки.
 Current ChangeRail version:
 
 ```text
-0.2.0
+0.3.0
 ```
 
 Source: root `VERSION`.
 
-`0.2.0` changes ChangeRail workflow policy and release notes, but does not
-change Codex CLI, Claude Code, OpenSpec CLI or MCP npm package pins relative to
-the current tracked configuration. Existing consumers should still run
-project-local verification and restart active agent sessions after updating.
+`0.3.0` changes ChangeRail delivery runner behavior, consumer Codex auth setup
+guidance and approved optional browser MCP package verification. It does not
+change Codex CLI, Claude Code or OpenSpec CLI pins, and it does not add browser
+MCP packages to default ChangeRail config or generated templates. Existing
+consumers should run project-local verification and restart active agent
+sessions after updating.
 
 ## Codex CLI
 
