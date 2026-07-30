@@ -360,6 +360,7 @@ def write_no_go_verdict(workspace: Path, card: str) -> Path:
         "workspace": {
             "root": data["workspace"],
             "head_commit": data["head_commit"],
+            "tree_sha": data["tree_sha"],
             "diff_fingerprint": data["diff_fingerprint"],
         },
         "reviewer": {

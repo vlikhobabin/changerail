@@ -12,7 +12,8 @@ current working tree. This helper provides:
   optional `--check-fresh` freshness comparison;
 - `fingerprint --workspace <root>`: deterministic sha256 fingerprint over
   `git status --porcelain`, `git diff HEAD` and untracked non-ignored file
-  content, shared by the reviewer that embeds it and every consumer that
+  content, plus the Git tree SHA that would be committed for that reviewed
+  working tree, shared by the reviewer that embeds it and every consumer that
   re-checks it.
 
 Exit codes follow the shared ChangeRail helper convention: 0 valid, 1 validation
@@ -28,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +45,7 @@ SEVERITIES = ("blocker", "major", "minor")
 AREAS = ("evidence", "code", "tests", "scope", "docs", "process")
 FINDING_ID_RE = re.compile(r"^R[0-9]+$")
 FINGERPRINT_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+TREE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TOP_LEVEL_KEYS = {
     "schema",
     "reviewed_at",
@@ -112,12 +115,21 @@ def _validate_verdict_semantics(data: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _git_output(workspace: Path, args: list[str]) -> str:
+def _git_env(extra: dict[str, str] | None = None) -> dict[str, str] | None:
+    if extra is None:
+        return None
+    env = os.environ.copy()
+    env.update(extra)
+    return env
+
+
+def _git_output(workspace: Path, args: list[str], *, env: dict[str, str] | None = None) -> str:
     result = subprocess.run(
         ["git", "-C", str(workspace), *args],
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(env),
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "git command failed"
@@ -125,11 +137,12 @@ def _git_output(workspace: Path, args: list[str]) -> str:
     return result.stdout
 
 
-def _git_output_bytes(workspace: Path, args: list[str]) -> bytes:
+def _git_output_bytes(workspace: Path, args: list[str], *, env: dict[str, str] | None = None) -> bytes:
     result = subprocess.run(
         ["git", "-C", str(workspace), *args],
         capture_output=True,
         check=False,
+        env=_git_env(env),
     )
     if result.returncode != 0:
         detail = (
@@ -172,12 +185,47 @@ def _hash_untracked_files(digest: Any, workspace: Path) -> None:
             raise VerdictError(f"untracked file cannot be read: {path}: {exc}", exit_code=2) from exc
 
 
+def _head_commit(workspace: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--verify", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+    inside = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "--is-inside-work-tree"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if inside.returncode == 0 and inside.stdout.strip() == "true":
+        return "unborn"
+    detail = result.stderr.strip() or result.stdout.strip() or "HEAD cannot be resolved"
+    raise VerdictError(f"git rev-parse --verify HEAD: {detail}", exit_code=2)
+
+
+def compute_reviewed_tree(workspace: Path, head_commit: str) -> str:
+    with tempfile.TemporaryDirectory(prefix="changerail-review-index-") as raw:
+        index_path = Path(raw) / "index"
+        env = {"GIT_INDEX_FILE": str(index_path)}
+        if head_commit != "unborn":
+            _git_output(workspace, ["read-tree", head_commit], env=env)
+        _git_output(workspace, ["add", "-A"], env=env)
+        tree_sha = _git_output(workspace, ["write-tree"], env=env).strip()
+    if not TREE_SHA_RE.fullmatch(tree_sha):
+        raise VerdictError("reviewed tree SHA could not be computed", exit_code=2)
+    return tree_sha
+
+
 def compute_fingerprint(workspace: Path) -> dict[str, str]:
     if not workspace.is_dir():
         raise VerdictError(f"workspace directory cannot be read: {workspace}", exit_code=2)
-    head_commit = _git_output(workspace, ["rev-parse", "HEAD"]).strip()
+    head_commit = _head_commit(workspace)
     status = _git_output(workspace, ["status", "--porcelain"])
-    diff = _git_output(workspace, ["diff", "HEAD", "--no-color"])
+    diff = "" if head_commit == "unborn" else _git_output(workspace, ["diff", "HEAD", "--no-color"])
+    tree_sha = compute_reviewed_tree(workspace, head_commit)
     digest = hashlib.sha256()
     digest.update(status.encode("utf-8"))
     digest.update(b"\x00")
@@ -187,6 +235,7 @@ def compute_fingerprint(workspace: Path) -> dict[str, str]:
     return {
         "workspace": str(workspace),
         "head_commit": head_commit,
+        "tree_sha": tree_sha,
         "diff_fingerprint": f"sha256:{digest.hexdigest()}",
     }
 
@@ -212,21 +261,24 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         fresh = (
             recorded.get("diff_fingerprint") == current["diff_fingerprint"]
             and recorded.get("head_commit") == current["head_commit"]
+            and recorded.get("tree_sha") == current["tree_sha"]
         )
         freshness = {
             "fresh": fresh,
             "recorded": {
                 "head_commit": recorded.get("head_commit"),
+                "tree_sha": recorded.get("tree_sha"),
                 "diff_fingerprint": recorded.get("diff_fingerprint"),
             },
             "current": {
                 "head_commit": current["head_commit"],
+                "tree_sha": current["tree_sha"],
                 "diff_fingerprint": current["diff_fingerprint"],
             },
         }
         if not fresh:
             errors.append(
-                "verdict is stale: recorded fingerprint does not match the current working tree; re-review required"
+                "verdict is stale: recorded fingerprint, head commit or reviewed tree does not match the current working tree; re-review required"
             )
     if errors:
         raise VerdictError("; ".join(errors), exit_code=1)

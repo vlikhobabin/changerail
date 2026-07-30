@@ -43,7 +43,7 @@
     },
     "workspace": {
       "type": "object",
-      "required": ["root", "head_commit", "diff_fingerprint"],
+      "required": ["root", "head_commit", "tree_sha", "diff_fingerprint"],
       "additionalProperties": false,
       "properties": {
         "root": {
@@ -53,6 +53,10 @@
         "head_commit": {
           "type": "string",
           "minLength": 1
+        },
+        "tree_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
         },
         "diff_fingerprint": {
           "type": "string",

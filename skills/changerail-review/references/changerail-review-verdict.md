@@ -85,11 +85,17 @@ python3 scripts/changerail_review_verdict.py fingerprint --workspace <repo-root>
 
 The helper hashes `git status --porcelain`, `git diff HEAD --no-color`, and the
 deterministic list and contents of untracked non-ignored files from
-`git ls-files --others --exclude-standard`. Ignored runtime state does not
-affect the fingerprint, so writing the verdict file itself does not invalidate
-it. Reviewers must still read newly added files as defense-in-depth; the
-fingerprint only proves that the reviewed bytes have not changed since the
-verdict was written.
+`git ls-files --others --exclude-standard`. It also computes
+`workspace.tree_sha`, the Git tree that would be committed for the reviewed
+working tree, through a temporary Git index without touching the real staging
+area. In an unborn repository, `workspace.head_commit` is `unborn` and
+`workspace.tree_sha` still identifies the reviewed initial tree.
+
+Ignored runtime state does not affect the fingerprint or reviewed tree, so
+writing the verdict file itself does not invalidate it. Reviewers must still
+read newly added files as defense-in-depth; the fingerprint and tree only prove
+that the reviewed bytes have not changed since the verdict was written. Publish
+must fail closed if the current tree or fingerprint differs from the verdict.
 
 ## Semantics
 

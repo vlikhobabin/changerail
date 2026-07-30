@@ -240,7 +240,8 @@ Boundaries:
 ```
 
 After the reviewer returns, the orchestrator MUST validate the canonical verdict
-with `--check-fresh` before publish:
+with `--check-fresh` before publish. This freshness check includes the reviewed
+Git tree SHA when the verdict schema requires it:
 
 ```bash
 python3 scripts/changerail_review_verdict.py validate \

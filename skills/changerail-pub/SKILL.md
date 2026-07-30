@@ -71,7 +71,9 @@ python3 scripts/changerail_review_verdict.py validate \
 ```
 
 If the verdict is absent, stale, invalid or not `result: go`, stop before
-staging. Never stage the verdict file.
+staging. A verdict whose reviewed `workspace.tree_sha` is missing or differs
+from the current publish tree is stale for review-gated publish and requires a
+fresh review. Never stage the verdict file.
 
 ## Workflow
 

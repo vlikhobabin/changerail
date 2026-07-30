@@ -23,6 +23,7 @@ from changerail_review_verdict import _validate_verdict  # noqa: E402
 
 Validator = Callable[[Any], list[str]]
 SHA = "sha256:" + ("0" * 64)
+TREE = "0" * 40
 DATE = "2026-07-12T00:00:00Z"
 
 
@@ -31,7 +32,12 @@ def review_verdict() -> dict[str, Any]:
         "schema": "changerail.review-verdict.v1",
         "reviewed_at": DATE,
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
-        "workspace": {"root": "/opt/changerail", "head_commit": "abc123", "diff_fingerprint": SHA},
+        "workspace": {
+            "root": "/opt/changerail",
+            "head_commit": "abc123",
+            "tree_sha": TREE,
+            "diff_fingerprint": SHA,
+        },
         "reviewer": {
             "kind": "codex-exec",
             "independence": {

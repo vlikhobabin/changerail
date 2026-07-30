@@ -51,7 +51,9 @@ Review verdict является runtime-файлом:
   `did_not_plan_or_implement: true` и непустым `basis`;
 - fresh относительно текущего `HEAD`, `git status --porcelain`,
   `git diff HEAD --no-color` и содержимого untracked non-ignored файлов,
-  перечисленных через `git ls-files --others --exclude-standard`.
+  перечисленных через `git ls-files --others --exclude-standard`;
+- содержит `workspace.tree_sha` — Git tree SHA reviewed payload, который publish
+  обязан сверить с tree создаваемого commit до stage/commit.
 
 Helper:
 
@@ -77,7 +79,12 @@ Exit codes: `0` valid, `1` validation failed, `2` input error.
 
 Ignored paths не входят в freshness fingerprint. Поэтому запись verdict под
 `.runtime/changerail/reviews/` не инвалидирует сам verdict, но изменение содержимого
-нового untracked deliverable-файла делает verdict stale.
+нового untracked deliverable-файла делает verdict stale и меняет reviewed tree.
+
+Для unborn repository helper пишет `workspace.head_commit: "unborn"` и всё равно
+вычисляет `workspace.tree_sha` через temporary Git index. Это позволяет review
+связать initial reviewed payload с будущим first commit без выдуманного commit
+SHA.
 
 Independence attestation является проверяемым контрактом и операторским
 заявлением reviewer-а. Helper проверяет наличие и истинность полей, но не может

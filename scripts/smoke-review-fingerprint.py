@@ -31,14 +31,20 @@ def git(repo: Path, *args: str) -> str:
     return result.stdout
 
 
-def fingerprint(repo: Path) -> str:
+def fingerprint(repo: Path) -> dict[str, str]:
     result = run([sys.executable, str(HELPER), "fingerprint", "--workspace", str(repo)], cwd=ROOT)
     require_ok(result, "fingerprint")
     payload: Any = json.loads(result.stdout)
     value = payload.get("diff_fingerprint")
-    if not isinstance(value, str) or not value.startswith("sha256:"):
+    tree = payload.get("tree_sha")
+    if (
+        not isinstance(value, str)
+        or not value.startswith("sha256:")
+        or not isinstance(tree, str)
+        or len(tree) != 40
+    ):
         raise AssertionError(f"unexpected fingerprint payload: {result.stdout.strip()}")
-    return value
+    return payload
 
 
 def create_repo(workspace: Path) -> Path:
@@ -57,14 +63,20 @@ def create_repo(workspace: Path) -> Path:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-review-fingerprint-") as tmp:
         repo = create_repo(Path(tmp))
+        clean = fingerprint(repo)
+        head_tree = git(repo, "rev-parse", "HEAD^{tree}").strip()
+        if clean["tree_sha"] != head_tree:
+            raise AssertionError("clean reviewed tree does not match HEAD tree")
 
         untracked = repo / "deliverable.txt"
         untracked.write_text("alpha\n", encoding="utf-8")
         before = fingerprint(repo)
         untracked.write_text("beta\n", encoding="utf-8")
         after = fingerprint(repo)
-        if before == after:
+        if before["diff_fingerprint"] == after["diff_fingerprint"]:
             raise AssertionError("untracked non-ignored content change did not alter fingerprint")
+        if before["tree_sha"] == after["tree_sha"]:
+            raise AssertionError("untracked non-ignored content change did not alter reviewed tree")
 
         ignored = repo / ".runtime" / "changerail" / "reviews" / "card.json"
         ignored.parent.mkdir(parents=True)
@@ -73,6 +85,14 @@ def main() -> int:
         after_ignored = fingerprint(repo)
         if before_ignored != after_ignored:
             raise AssertionError("ignored runtime content altered fingerprint")
+
+        unborn = Path(tmp) / "unborn"
+        unborn.mkdir()
+        git(unborn, "init", "-q")
+        (unborn / "first.txt").write_text("first\n", encoding="utf-8")
+        unborn_payload = fingerprint(unborn)
+        if unborn_payload["head_commit"] != "unborn" or len(unborn_payload["tree_sha"]) != 40:
+            raise AssertionError(f"unexpected unborn fingerprint payload: {unborn_payload}")
 
     print("ok: review fingerprint smoke passed")
     return 0

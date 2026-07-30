@@ -49,6 +49,7 @@ def base_verdict(workspace: Path) -> dict[str, object]:
         "workspace": {
             "root": data["workspace"],
             "head_commit": data["head_commit"],
+            "tree_sha": data["tree_sha"],
             "diff_fingerprint": data["diff_fingerprint"],
         },
         "reviewer": {
@@ -94,6 +95,26 @@ def main() -> int:
         verdict_path = verdict_dir / "valid.json"
         write_json(verdict_path, valid)
         require_ok(validate(verdict_path, workspace, check_fresh=True), "valid verdict")
+
+        missing_tree = deepcopy(valid)
+        del missing_tree["workspace"]["tree_sha"]  # type: ignore[index]
+        missing_tree_path = verdict_dir / "missing-tree.json"
+        write_json(missing_tree_path, missing_tree)
+        missing_tree_result = validate(missing_tree_path, workspace)
+        if missing_tree_result.returncode != 1 or "tree_sha" not in missing_tree_result.stderr:
+            sys.stderr.write("missing tree verdict did not fail as expected\n")
+            sys.stderr.write(missing_tree_result.stderr)
+            return 1
+
+        drift_tree = deepcopy(valid)
+        drift_tree["workspace"]["tree_sha"] = "1" * 40  # type: ignore[index]
+        drift_tree_path = verdict_dir / "drift-tree.json"
+        write_json(drift_tree_path, drift_tree)
+        drift_tree_result = validate(drift_tree_path, workspace, check_fresh=True)
+        if drift_tree_result.returncode != 1 or "reviewed tree" not in drift_tree_result.stderr:
+            sys.stderr.write("drifted tree verdict did not fail freshness gate as expected\n")
+            sys.stderr.write(drift_tree_result.stderr)
+            return 1
 
         missing = deepcopy(valid)
         del missing["reviewer"]["independence"]  # type: ignore[index]
