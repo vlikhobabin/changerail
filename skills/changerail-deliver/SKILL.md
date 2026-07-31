@@ -94,6 +94,15 @@ openspec list --json
 Report card count/range, branch and push mode when publish is enabled,
 unrelated active OpenSpec changes and dirty-tree caveats.
 
+Before `ff` or `do`, also prove the selected publish target:
+
+- default mode is `remote-push`; the current branch must have an upstream, the
+  remote URL must be credential-free, and `git ls-remote --exit-code <remote>
+  refs/heads/<branch>` must succeed with secret-free diagnostics;
+- `--no-push` is the only local-only bypass, and the log/preflight evidence
+  must record that explicit mode and must not claim remote publication
+  readiness.
+
 After each phase, re-resolve the current card by filename under:
 
 ```text

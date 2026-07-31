@@ -61,7 +61,7 @@ def git(command: list[str], cwd: Path) -> str:
     return result.stdout.strip()
 
 
-def create_workspace(root: Path, name: str) -> Path:
+def create_workspace(root: Path, name: str, *, publish_ready: bool = True) -> Path:
     workspace = root / name
     workspace.mkdir()
     (workspace / ".codex").mkdir()
@@ -75,6 +75,8 @@ def create_workspace(root: Path, name: str) -> Path:
         ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "init"],
         workspace,
     )
+    if publish_ready:
+        configure_upstream_baseline(workspace)
     return workspace
 
 
@@ -154,6 +156,7 @@ def write_fake_queue_runner(path: Path) -> None:
                 "preflight.add_argument('--workspace', required=True)",
                 "preflight.add_argument('--runtime-root', required=True)",
                 "preflight.add_argument('--run-id', required=True)",
+                "preflight.add_argument('--deliver-arg', action='append', default=[])",
                 "preflight.add_argument('--json', action='store_true')",
                 "preflight.add_argument('--write-status', action='store_true')",
                 "args = parser.parse_args()",
@@ -315,8 +318,8 @@ def configure_upstream_baseline(workspace: Path) -> None:
 def create_queue_consumer(tmp: Path, name: str, no_push_ready: bool = True) -> tuple[Path, Path, Path]:
     consumer = tmp / name
     consumer.mkdir()
-    service_a = create_workspace(consumer, "service-a")
-    service_b = create_workspace(consumer, "service-b")
+    service_a = create_workspace(consumer, "service-a", publish_ready=False)
+    service_b = create_workspace(consumer, "service-b", publish_ready=False)
     if no_push_ready:
         configure_upstream_baseline(service_a)
         configure_upstream_baseline(service_b)
@@ -933,10 +936,134 @@ def check_preflight(tmp: Path) -> None:
             raise AssertionError(f"auth state did not pass: {checks['CODEX auth']}")
         if checks["CODEX_HOME symlinks"]["status"] != "pass":
             raise AssertionError(f"symlink diagnostics did not pass: {checks['CODEX_HOME symlinks']}")
+        if checks["publish target"]["status"] != "pass" or "reachable=true" not in checks["publish target"]["message"]:
+            raise AssertionError(f"publish target did not pass: {checks['publish target']}")
         if not (runtime / "preflight" / "status.json").is_file():
             raise AssertionError("preflight status was not written")
     finally:
         server.shutdown()
+
+
+def set_configured_upstream(workspace: Path, remote_url: str) -> None:
+    branch = git(["branch", "--show-current"], workspace)
+    git(["remote", "add", "origin", remote_url], workspace)
+    git(["config", f"branch.{branch}.remote", "origin"], workspace)
+    git(["config", f"branch.{branch}.merge", f"refs/heads/{branch}"], workspace)
+
+
+def check_publish_target_preflight(tmp: Path) -> None:
+    runtime = tmp / "runtime"
+
+    missing = create_workspace(tmp, "missing-publish-target", publish_ready=False)
+    launcher = tmp / "fake-codex-missing-publish"
+    write_fake_launcher(launcher)
+    missing_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(missing),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "missing-publish-target",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ]
+    )
+    if missing_result.returncode == 0:
+        raise AssertionError("missing publish target preflight unexpectedly passed")
+    checks = {check["name"]: check for check in json.loads(missing_result.stdout)["preflight"]["checks"]}
+    if checks["publish target"]["status"] != "fail" or "upstream=missing" not in checks["publish target"]["message"]:
+        raise AssertionError(f"missing upstream was not reported: {checks['publish target']}")
+
+    no_push = create_workspace(tmp, "explicit-no-push", publish_ready=False)
+    no_push_launcher = tmp / "fake-codex-no-push"
+    write_fake_launcher(no_push_launcher)
+    no_push_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(no_push),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "explicit-no-push",
+            "--launcher",
+            str(no_push_launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+            "--write-status",
+        ]
+    )
+    require_ok(no_push_result, "explicit no-push preflight")
+    checks = {check["name"]: check for check in json.loads(no_push_result.stdout)["preflight"]["checks"]}
+    if checks["publish target"]["status"] != "pass" or "mode=no-push" not in checks["publish target"]["message"]:
+        raise AssertionError(f"explicit no-push was not recorded: {checks['publish target']}")
+
+    unreachable = create_workspace(tmp, "unreachable-publish-target", publish_ready=False)
+    set_configured_upstream(unreachable, str(tmp / "missing-remote.git"))
+    unreachable_launcher = tmp / "fake-codex-unreachable-publish"
+    write_fake_launcher(unreachable_launcher)
+    unreachable_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(unreachable),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "unreachable-publish-target",
+            "--launcher",
+            str(unreachable_launcher),
+            "--json",
+            "--write-status",
+        ]
+    )
+    if unreachable_result.returncode == 0:
+        raise AssertionError("unreachable publish target preflight unexpectedly passed")
+    checks = {check["name"]: check for check in json.loads(unreachable_result.stdout)["preflight"]["checks"]}
+    message = checks["publish target"]["message"]
+    if checks["publish target"]["status"] != "fail" or "reachable=false" not in message:
+        raise AssertionError(f"unreachable remote was not reported: {checks['publish target']}")
+
+    credential = create_workspace(tmp, "credential-publish-target", publish_ready=False)
+    set_configured_upstream(credential, "https://user:token@example.invalid/repo.git")
+    credential_launcher = tmp / "fake-codex-credential-publish"
+    write_fake_launcher(credential_launcher)
+    credential_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(credential),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "credential-publish-target",
+            "--launcher",
+            str(credential_launcher),
+            "--json",
+            "--write-status",
+        ]
+    )
+    if credential_result.returncode == 0:
+        raise AssertionError("credential-bearing publish target preflight unexpectedly passed")
+    checks = {check["name"]: check for check in json.loads(credential_result.stdout)["preflight"]["checks"]}
+    message = checks["publish target"]["message"]
+    if checks["publish target"]["status"] != "fail" or "credential_in_url=rejected" not in message:
+        raise AssertionError(f"credential URL was not rejected: {checks['publish target']}")
+    for forbidden in ("user:token", "example.invalid/repo.git"):
+        if forbidden in message:
+            raise AssertionError(f"credential diagnostic leaked raw URL data: {message}")
 
 
 def check_preflight_connectivity_failure_redaction(tmp: Path) -> None:
@@ -2000,6 +2127,7 @@ def main() -> int:
         check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
+        check_publish_target_preflight(workspace)
         check_preflight_connectivity_failure_redaction(workspace)
         check_explicit_codex_home_preflight(workspace)
         check_run_preflight_failure(workspace)

@@ -38,6 +38,7 @@ BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 MAX_TIMELINE_EVENTS = 100
 MAX_COMMANDS = 50
 MAX_SLOW_COMMANDS = 5
+REMOTE_REACHABILITY_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass
@@ -175,12 +176,124 @@ def auth_state(codex_home: Path, env: dict[str, str]) -> Check:
     return Check("CODEX auth", "fail", f"no auth marker or supported auth environment variable found; {AUTH_REMEDIATION}")
 
 
+def no_push_selected(args: argparse.Namespace) -> bool:
+    return any(value == "--no-push" for value in getattr(args, "deliver_arg", []) or [])
+
+
+def git_text(root: Path, *git_args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "-C", str(root), *git_args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def current_branch(root: Path) -> str:
+    result = git_text(root, "branch", "--show-current")
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def publish_target_state(args: argparse.Namespace) -> Check:
+    if no_push_selected(args):
+        return Check(
+            "publish target",
+            "pass",
+            "mode=no-push explicit=true remote_probe=skipped",
+        )
+
+    root = args.workspace.resolve(strict=False)
+    if not git_is_repo(root):
+        return Check("publish target", "fail", "mode=remote-push git repository unavailable")
+
+    branch = current_branch(root)
+    if not branch:
+        return Check("publish target", "fail", "mode=remote-push current branch unavailable")
+
+    remote = git_text(root, "config", "--get", f"branch.{branch}.remote").stdout.strip()
+    merge_ref = git_text(root, "config", "--get", f"branch.{branch}.merge").stdout.strip()
+    remote_branch = merge_ref.removeprefix("refs/heads/") if merge_ref.startswith("refs/heads/") else ""
+    if not remote or not remote_branch:
+        return Check(
+            "publish target",
+            "fail",
+            f"mode=remote-push branch={branch} upstream=missing; configure an approved remote/upstream or pass --no-push explicitly",
+        )
+    upstream = git_text(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    upstream_name = upstream.stdout.strip() if upstream.returncode == 0 and upstream.stdout.strip() else f"{remote}/{remote_branch}"
+
+    remote_url = git_text(root, "remote", "get-url", remote)
+    if remote_url.returncode != 0 or not remote_url.stdout.strip():
+        return Check(
+            "publish target",
+            "fail",
+            f"mode=remote-push remote={remote} branch={remote_branch} remote_url=missing",
+        )
+    url = remote_url.stdout.strip()
+    url_class = remote_url_class(url)
+    if remote_has_embedded_credentials(url):
+        return Check(
+            "publish target",
+            "fail",
+            f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} credential_in_url=rejected",
+        )
+
+    try:
+        reachable = subprocess.run(
+            ["git", "-C", str(root), "ls-remote", "--exit-code", remote, f"refs/heads/{remote_branch}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=REMOTE_REACHABILITY_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return Check(
+            "publish target",
+            "fail",
+            f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false timeout={REMOTE_REACHABILITY_TIMEOUT_SECONDS:g}s",
+        )
+    if reachable.returncode != 0:
+        detail = compact_reason(reachable.stderr.strip() or reachable.stdout.strip() or "git ls-remote failed")
+        return Check(
+            "publish target",
+            "fail",
+            f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false detail={detail}",
+        )
+    return Check(
+        "publish target",
+        "pass",
+        f"mode=remote-push remote={remote} branch={remote_branch} upstream={upstream_name} remote_url_class={url_class} reachable=true",
+    )
+
+
 def sanitized_endpoint(url: str) -> str:
     parts = urllib.parse.urlsplit(url)
     scheme = parts.scheme or "unknown"
     host = parts.hostname or "unknown-host"
     port = f":{parts.port}" if parts.port is not None else ""
     return f"{scheme}://{host}{port}"
+
+
+def remote_url_class(remote_url: str) -> str:
+    parts = urllib.parse.urlsplit(remote_url)
+    if parts.scheme:
+        if parts.scheme == "file":
+            return "local-file"
+        if parts.scheme in {"http", "https"}:
+            return "https"
+        if parts.scheme == "ssh":
+            return "ssh"
+        return parts.scheme
+    if remote_url.startswith(("/", ".", "~")):
+        return "local-path"
+    if ":" in remote_url and "/" not in remote_url.split(":", 1)[0]:
+        return "scp"
+    return "local-path"
+
+
+def remote_has_embedded_credentials(remote_url: str) -> bool:
+    parts = urllib.parse.urlsplit(remote_url)
+    return bool(parts.scheme and (parts.username is not None or parts.password is not None))
 
 
 def connectivity_probe_url(url: str) -> str:
@@ -626,6 +739,7 @@ def append_single_card_preflight_checks(
     cards: list[dict[str, Any]],
     workspaces: dict[str, dict[str, Any]],
     checks: list[Check],
+    mode: str,
 ) -> None:
     for card in cards:
         if card.get("state") == "blocked":
@@ -648,6 +762,8 @@ def append_single_card_preflight_checks(
             "--json",
             "--write-status",
         ]
+        if mode == "no-push":
+            command.append("--deliver-arg=--no-push")
         result = subprocess.run(command, cwd=Path(workspace["root"]), capture_output=True, text=True, check=False)
         if result.returncode == 0:
             checks.append(Check("single-card preflight", "pass", f"{card['id']}: ready"))
@@ -713,9 +829,9 @@ def build_plan_view(
     checks.append(Check("single-card runner executable", "pass" if os.access(args.launcher, os.X_OK) else "fail", str(args.launcher)))
     workspace_by_alias = {workspace["alias"]: workspace for workspace in workspaces}
     apply_plan_card_overrides(data, cards)
-    if include_child_preflight and all(check.status != "fail" for check in checks):
-        append_single_card_preflight_checks(args, cards, workspace_by_alias, checks)
     mode = plan_mode(args, data)
+    if include_child_preflight and all(check.status != "fail" for check in checks):
+        append_single_card_preflight_checks(args, cards, workspace_by_alias, checks, mode)
     status_result = "DELIVERED" if all(check.status != "fail" for check in checks) else "BLOCKED"
     for card in cards:
         workspace = workspace_by_alias.get(card["workspace"])
@@ -1123,6 +1239,7 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
             "no stale symlinks" if not stale else f"stale symlinks: {', '.join(stale[:10])}; {AUTH_REMEDIATION}",
         ),
         Check("codex binary", "pass" if shutil.which("codex") else "fail", shutil.which("codex") or "not found"),
+        publish_target_state(args),
     ]
     if args.connectivity_url:
         try:
@@ -1719,8 +1836,9 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
     checks.append(Check("single-card runner executable", "pass" if os.access(args.launcher, os.X_OK) else "fail", str(args.launcher)))
     workspace_by_alias = {workspace["alias"]: workspace for workspace in workspaces}
     apply_plan_card_overrides(data, cards)
+    mode = plan_mode(args, data)
     if all(check.status != "fail" for check in checks):
-        append_single_card_preflight_checks(args, cards, workspace_by_alias, checks)
+        append_single_card_preflight_checks(args, cards, workspace_by_alias, checks, mode)
     if any(check.status == "fail" for check in checks):
         record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
         return record, 1
@@ -2167,9 +2285,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     preflight = subparsers.add_parser("preflight", help="run preflight checks only")
     add_common(preflight)
+    preflight.add_argument(
+        "--deliver-arg",
+        action="append",
+        default=[],
+        help="extra argument that would be appended to the $changerail-deliver prompt, repeatable",
+    )
     preflight.add_argument("--json", action="store_true")
     preflight.add_argument("--write-status", action="store_true")
-    preflight.set_defaults(func=command_preflight, model=None, reasoning_effort=None, deliver_arg=[])
+    preflight.set_defaults(func=command_preflight, model=None, reasoning_effort=None)
 
     plan = subparsers.add_parser("plan", help="resolve a delivery plan without launching children")
     add_plan_common(plan)
