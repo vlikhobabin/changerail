@@ -138,6 +138,31 @@
         "evidence_path": {
           "type": "string",
           "minLength": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceReference"
+        }
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "required": ["id", "index_path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "index_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw_output_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": ["mandatory", "diagnostic", "not_applicable"]
         }
       }
     },
@@ -183,6 +208,12 @@
           "items": {
             "type": "string",
             "minLength": 1
+          }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceReference"
           }
         }
       }

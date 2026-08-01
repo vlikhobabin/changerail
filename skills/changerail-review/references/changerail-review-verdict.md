@@ -104,7 +104,11 @@ must fail closed if the current tree or fingerprint differs from the verdict.
 - `result: no-go`: publish is blocked and must be justified by at least one
   blocker finding or failed acceptance criterion.
 - `acceptance`: one entry per card acceptance criterion, each backed by a
-  concrete command, retained evidence path or explicit unverifiable reason.
+  concrete command, retained evidence path/reference or explicit unverifiable
+  reason.
+- `evidence_refs`: optional structured references on acceptance entries or
+  findings, using evidence id, index path and raw output path from retained
+  ignored runtime evidence such as `bin/changerail-evidence` output.
 - `findings[].severity`: `blocker` blocks publish; `major` and `minor` require
   follow-up when not fixed.
 - `review_cycle`: `1` for the first review, incremented after fix cycles.

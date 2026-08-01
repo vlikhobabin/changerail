@@ -67,7 +67,18 @@ def manifest_payload() -> dict[str, Any]:
         "verification_summary": {
             "result": "passed",
             "summary": "focused manifest smoke checks passed",
-            "commands": [{"command": "python3 scripts/smoke-delivery-manifest.py", "outcome": "passed"}],
+            "commands": [
+                {
+                    "command": "python3 scripts/smoke-delivery-manifest.py",
+                    "outcome": "passed",
+                    "evidence": {
+                        "id": "manifest-smoke",
+                        "index_path": ".runtime/changerail/evidence/manifest-smoke/index.json",
+                        "raw_output_path": ".runtime/changerail/evidence/manifest-smoke/outputs/manifest-smoke.txt",
+                        "classification": "mandatory",
+                    },
+                }
+            ],
         },
         "review_summary": {
             "result": "go",
@@ -145,6 +156,14 @@ def main() -> int:
                 "python3 scripts/smoke-delivery-manifest.py",
                 "--verification-outcome",
                 "passed",
+                "--verification-command-evidence-id",
+                "manifest-smoke",
+                "--verification-command-evidence-index",
+                ".runtime/changerail/evidence/manifest-smoke/index.json",
+                "--verification-command-output",
+                ".runtime/changerail/evidence/manifest-smoke/outputs/manifest-smoke.txt",
+                "--verification-command-classification",
+                "mandatory",
                 "--review-result",
                 "go",
                 "--review-summary",
@@ -172,6 +191,9 @@ def main() -> int:
         updated = json.loads(path.read_text(encoding="utf-8"))
         if updated["verification_summary"]["result"] != "passed" or updated["review_summary"]["result"] != "go":
             raise AssertionError(f"handoff summary was not updated: {updated!r}")
+        evidence = updated["verification_summary"]["commands"][0].get("evidence")
+        if not evidence or evidence.get("id") != "manifest-smoke":
+            raise AssertionError(f"handoff evidence reference was not retained: {updated!r}")
 
     print("ok: delivery manifest smoke passed")
     return 0

@@ -121,6 +121,7 @@ def create_fixture(project: Path, changerail_root: Path) -> None:
     symlink_force(changerail_root / "bin" / "changerail-python", project / "bin" / "changerail-python")
     symlink_force(changerail_root / "bin" / "verify-project", project / "bin" / "verify-project")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
+    symlink_force(changerail_root / "bin" / "changerail-evidence", project / "bin" / "changerail-evidence")
 
 
 def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:

@@ -48,7 +48,21 @@ def review_verdict() -> dict[str, Any]:
         },
         "result": "go",
         "review_cycle": 1,
-        "acceptance": [{"criterion": "example", "verdict": "pass", "evidence": "schema smoke"}],
+        "acceptance": [
+            {
+                "criterion": "example",
+                "verdict": "pass",
+                "evidence": "schema smoke",
+                "evidence_refs": [
+                    {
+                        "id": "schema-smoke",
+                        "index_path": ".runtime/changerail/evidence/schema-smoke/index.json",
+                        "raw_output_path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
+                        "classification": "mandatory",
+                    }
+                ],
+            }
+        ],
         "findings": [],
         "evidence_audit": {"claims_checked": 1, "claims_unbacked": 0},
     }
@@ -72,9 +86,23 @@ def delivery_manifest() -> dict[str, Any]:
                     "command": "python3 scripts/smoke-contract-schemas.py",
                     "outcome": "passed",
                     "evidence_path": ".runtime/changerail/evidence/schema-smoke.log",
+                    "evidence": {
+                        "id": "schema-smoke",
+                        "index_path": ".runtime/changerail/evidence/schema-smoke/index.json",
+                        "raw_output_path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
+                        "classification": "mandatory",
+                    },
                 }
             ],
             "evidence_paths": [".runtime/changerail/evidence/schema-smoke.log"],
+            "evidence_refs": [
+                {
+                    "id": "schema-smoke",
+                    "index_path": ".runtime/changerail/evidence/schema-smoke/index.json",
+                    "raw_output_path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
+                    "classification": "mandatory",
+                }
+            ],
         },
         "review_summary": {
             "result": "go",
@@ -284,7 +312,32 @@ def evidence_index() -> dict[str, Any]:
         "updated_at": DATE,
         "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
         "scope": {"card_id": "example-card", "changes": ["example-change"]},
-        "entries": [],
+        "entries": [
+            {
+                "id": "schema-smoke",
+                "path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
+                "role": "raw_output",
+                "storage": "runtime",
+                "phase": "do",
+                "classification": "mandatory",
+                "change": "example-change",
+                "kind": "verification_command",
+                "reason": "schema smoke fixture",
+                "command": {
+                    "argv": ["python3", "scripts/smoke-contract-schemas.py"],
+                    "display": "python3 scripts/smoke-contract-schemas.py",
+                },
+                "status": "passed",
+                "exit_code": 0,
+                "started_at": DATE,
+                "ended_at": DATE,
+                "duration_seconds": 0.1,
+                "summary": "schema smoke passed",
+                "raw_output_path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
+                "redacted": False,
+                "timed_out": False,
+            }
+        ],
     }
 
 
@@ -476,6 +529,27 @@ def main() -> int:
         ("changerail-delivery-manifest.schema.json helper pushed missing pushed_at", validate_manifest),
     ):
         expect_invalid(failures, label, validator, copy.deepcopy(pushed_missing_pushed_at), "pushed_at")
+
+    bad_manifest_evidence = delivery_manifest()
+    del bad_manifest_evidence["verification_summary"]["commands"][0]["evidence"]["index_path"]
+    for label, validator in (
+        (
+            "changerail-delivery-manifest.schema.json schema malformed evidence ref",
+            schema_validator("changerail-delivery-manifest.schema.json"),
+        ),
+        ("changerail-delivery-manifest.schema.json helper malformed evidence ref", validate_manifest),
+    ):
+        expect_invalid(failures, label, validator, copy.deepcopy(bad_manifest_evidence), "index_path")
+
+    bad_verdict_evidence = review_verdict()
+    del bad_verdict_evidence["acceptance"][0]["evidence_refs"][0]["index_path"]
+    expect_invalid(
+        failures,
+        "changerail-review-verdict.schema.json malformed evidence ref",
+        _validate_verdict,
+        bad_verdict_evidence,
+        "index_path",
+    )
 
     unsafe_plan = delivery_plan()
     unsafe_plan["workspaces"][0]["path"] = "/opt/example-a"

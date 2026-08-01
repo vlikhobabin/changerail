@@ -56,6 +56,7 @@ them:
 - `bin/changerail-python`
 - `bin/verify-project`
 - `bin/changerail-review-verdict`
+- `bin/changerail-evidence`
 
 Runtime/auth paths remain ignored in generated `.gitignore`; bootstrap smoke
 projects and reports stay under `.runtime`.

@@ -214,7 +214,40 @@ mutable push status. Эти значения остаются в ignored manifes
 
 ## Evidence Index
 
-Evidence index описывает retained evidence для verification/review handoff.
+Evidence index описывает retained evidence для verification/review handoff:
+
+```text
+.runtime/changerail/evidence/<scope>/index.json
+```
+
+Schema id: `changerail.evidence-index.v1`. Для ChangeRail-owned verification
+commands helper `bin/changerail-evidence` запускает argv array и сохраняет:
+stable evidence id, command identity, timestamps, exit code, статус
+`passed`/`failed`/`timeout`, classification `mandatory`/`diagnostic`/
+`not_applicable`, concise summary и repository-relative raw output path.
+
+Raw output и index остаются ignored runtime state под
+`.runtime/changerail/evidence/`. Tracked cards, manifests и verdicts могут
+содержать только summary и structured evidence references: evidence id,
+index path и raw output path. Manifest `verification_summary.commands[]` и
+review verdict `acceptance[]`/`findings[]` поддерживают такие references без
+встраивания raw logs.
+
+Helper отказывается запускать command с очевидными secret-like argv values и
+редактирует obvious token-like output before retention. Это safety screen, а
+не доказательство отсутствия секретов; команды с credentials не должны
+передаваться в retained capture.
+
+Пример:
+
+```bash
+bin/changerail-evidence capture --card-id example-card --id openspec-all \
+  --classification mandatory --timeout 300 -- \
+  openspec validate --all --strict
+bin/changerail-evidence validate \
+  .runtime/changerail/evidence/example-card/index.json --json
+```
+
 Evidence может быть committable, runtime или external, но committed artifact не
 должен содержать secrets, credentials, customer data, local traces или большие
 сырые логи.

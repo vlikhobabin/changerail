@@ -147,7 +147,8 @@ bootstrap-процессом:
 │   ├── bootstrap-project
 │   ├── verify-project
 │   ├── openspec
-│   └── changerail-review-verdict
+│   ├── changerail-review-verdict
+│   └── changerail-evidence
 ├── templates/
 │   └── project/
 │       ├── AGENTS.md.tpl
@@ -230,6 +231,7 @@ bin/changerail-python       -> /opt/changerail/bin/changerail-python
 
 ```text
 bin/changerail-review-verdict     -> /opt/changerail/bin/changerail-review-verdict
+bin/changerail-evidence           -> /opt/changerail/bin/changerail-evidence
 ```
 
 Проектные `AGENTS.md`, `.mcp.json` и `.codex/config.toml` не должны быть
@@ -585,6 +587,7 @@ verify-проверки, миграция и adoption идут после зел
 bin/openspec              -> /opt/changerail/bin/openspec
 bin/changerail-python     -> /opt/changerail/bin/changerail-python
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
+bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
 ```
 
 Реальные копии (`openspec-*` как каталоги) заменяются symlink-ами. Лишние

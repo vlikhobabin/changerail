@@ -168,6 +168,34 @@
           "type": "string",
           "minLength": 1,
           "description": "Concrete backing for the verdict: a retained evidence path, an executed command plus observed output summary, or an explicit reason why the criterion cannot be verified. Generic assurance text is not acceptable."
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceReference"
+          }
+        }
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "required": ["id", "index_path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "index_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw_output_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": ["mandatory", "diagnostic", "not_applicable"]
         }
       }
     },
@@ -202,6 +230,12 @@
         },
         "recommendation": {
           "type": "string"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceReference"
+          }
         }
       }
     }

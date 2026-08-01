@@ -115,8 +115,8 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - `bin/changerail-python` как shared runtime selector для Python helpers;
 - schemas `changerail.review-verdict.v1`,
   `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
-  `changerail.delivery-run.v1`, `changerail.evidence-index.v1` и helper
-  `bin/changerail-review-verdict`;
+  `changerail.delivery-run.v1`, `changerail.evidence-index.v1` и helpers
+  `bin/changerail-review-verdict`, `bin/changerail-evidence`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как fail-closed gate для consumer wiring/config с явными
   non-blocking diagnostics;

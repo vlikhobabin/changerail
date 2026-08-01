@@ -23,6 +23,7 @@ CHANGERAIL_LIKE_PATHS = (
     "bin/openspec",
     "bin/changerail-python",
     "bin/changerail-review-verdict",
+    "bin/changerail-evidence",
     "bin/opsx-review-verdict",
 )
 SYMLINK_PATHS = (
@@ -32,6 +33,7 @@ SYMLINK_PATHS = (
     "bin/openspec",
     "bin/changerail-python",
     "bin/changerail-review-verdict",
+    "bin/changerail-evidence",
     "bin/opsx-review-verdict",
 )
 

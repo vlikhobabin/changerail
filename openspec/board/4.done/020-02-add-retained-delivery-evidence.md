@@ -1,13 +1,13 @@
 # Добавить retained delivery evidence
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `020-one-command-delivery-experience`
@@ -52,7 +52,8 @@ logs в tracked payload.
   необходимости.
 
 ## Change Set
-- `add-retained-delivery-evidence` (planned)
+- `add-retained-delivery-evidence` (archived:
+  `openspec/changes/archive/2026-08-01-add-retained-delivery-evidence/`)
 
 ## Change 1: `add-retained-delivery-evidence`
 
@@ -84,13 +85,25 @@ raw logs.
 - `add-manifest-scope-and-handoff`
 
 ### Related
-- `openspec/changes/add-retained-delivery-evidence/`
+- `openspec/changes/archive/2026-08-01-add-retained-delivery-evidence/`
 
 ## Verify
-- Focused evidence capture/redaction smoke.
-- Contract schema smoke.
-- Review verdict and manifest validation smoke.
-- Release baseline и public-surface scan.
+- `python3 scripts/smoke-retained-evidence.py` -> passed.
+- `python3 scripts/smoke-contract-schemas.py` -> passed.
+- `python3 scripts/smoke-delivery-manifest.py` -> passed.
+- `python3 scripts/smoke-review-verdict-validation.py` -> passed.
+- `ruff check bin scripts` -> passed.
+- `python3 scripts/public-surface-scan.py` -> passed, 0 findings.
+- `openspec validate add-retained-delivery-evidence --strict` -> passed before
+  archive.
+- `openspec validate --all --strict` -> passed after archive, 14 specs.
+- `git diff --check` -> passed.
+- `python3 scripts/run-release-baseline.py` -> passed under retained evidence
+  `release-baseline` at
+  `.runtime/changerail/evidence/020-02-add-retained-delivery-evidence/index.json`.
+
+## Archive
+- `openspec/changes/archive/2026-08-01-add-retained-delivery-evidence/`
 
 ## Related
 - `openspec/board/1.backlog/020-00-one-command-delivery-experience-epic.md`
@@ -99,12 +112,27 @@ raw logs.
 - `schemas/changerail-review-verdict.schema.json`
 
 ## Result
-deliver-ready after series `010` exit audit
+Implementation, spec sync and archive complete; fresh independent review
+pending before publish.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$chrl-deliver openspec/board/2.todo/020-02-add-retained-delivery-evidence.md`
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z requirement выделен из старого consumer postmortem.
 - 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
   в `2.todo`, добавлен ordered Change 1 для package runner.
+- 2026-08-01T22:00:53Z ff: созданы apply-ready artifacts для
+  `add-retained-delivery-evidence`, карточка переведена в `3.inprogress`.
+- 2026-08-01T22:20:45Z do: реализован retained evidence helper/contract,
+  specs синхронизированы, change archived, release baseline passed with
+  retained evidence `release-baseline`.
+- 2026-08-01T22:32:08Z review cycle 1 returned `no-go` for runtime-only
+  `--index` enforcement and standalone `not_applicable` notes; scoped fixes
+  added with retained-evidence regression smoke coverage.
+- 2026-08-01T22:42:15Z review cycle 2 returned `no-go` for partial
+  authorization-style output redaction; scoped fix now redacts full
+  secret-like output line values with regression smoke coverage.
+- 2026-08-01T22:56:24Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

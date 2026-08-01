@@ -88,6 +88,10 @@ ignored runtime state, а карточка, tasks или manifest содержа
 регрессе; для docs/config-only changes можно явно указать, что RED evidence
 неприменима.
 
+Для ChangeRail-owned checks используйте `bin/changerail-evidence capture`:
+helper сохраняет output под ignored `.runtime/changerail/evidence/`, а
+tracked файлы ссылаются только на evidence id/path и краткий observed summary.
+
 Для card-level handoff manifest можно строить helper-ом:
 
 ```bash

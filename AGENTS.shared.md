@@ -311,6 +311,12 @@ Verification claims требуют evidence. Подходящие evidence: comm
 reports, retained smoke artifacts, review verdicts и explicit manual checks,
 записанные с достаточными деталями для воспроизведения вывода.
 
+Для ChangeRail-owned verification commands предпочтительный retained runtime
+contract - `bin/changerail-evidence`: он пишет `changerail.evidence-index.v1`
+под ignored `.runtime/changerail/evidence/`, сохраняет concise command outcome,
+exit code и output reference, а tracked cards/manifests/verdicts ссылаются на
+evidence id/path вместо копирования raw logs.
+
 Ignored runtime evidence может упоминаться в cards или manifests, но не должно
 попадать в commit. Не храните secrets, credentials, customer data, full source
 payloads или large logs в tracked evidence.

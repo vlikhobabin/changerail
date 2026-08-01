@@ -108,6 +108,7 @@ def symlink_plan(changerail_root: Path, target: Path) -> list[tuple[Path, Path]]
         (changerail_root / "bin" / "changerail-python", target / "bin" / "changerail-python"),
         (changerail_root / "bin" / "verify-project", target / "bin" / "verify-project"),
         (changerail_root / "bin" / "changerail-review-verdict", target / "bin" / "changerail-review-verdict"),
+        (changerail_root / "bin" / "changerail-evidence", target / "bin" / "changerail-evidence"),
     ]
     links.extend((changerail_root / "skills" / skill, target / ".codex" / "skills" / skill) for skill in skill_names(changerail_root))
     return links

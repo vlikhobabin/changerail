@@ -545,6 +545,7 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
             add_unique_tree_paths(committable_paths, workspace, active_path, "add")
     manifest_path = default_manifest_path(workspace, card)
     verdict_base = workspace / ".runtime" / "changerail" / "reviews" / f"{card['id']}.json"
+    evidence_root = workspace / ".runtime" / "changerail" / "evidence" / str(card["id"])
     return {
         "schema": SCHEMA_ID,
         "updated_at": utc_now(),
@@ -573,6 +574,12 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
                 "kind": "review-history",
                 "phase": "review",
                 "reason": "Ignored runtime review-cycle history.",
+            },
+            {
+                "path": relpath(evidence_root, workspace),
+                "kind": "evidence",
+                "phase": "do",
+                "reason": "Ignored retained verification evidence.",
             },
         ],
         "preexisting_dirty": [],
@@ -646,6 +653,30 @@ def require_pair(first: str | None, second: str | None, first_name: str, second_
         raise ManifestError(f"{first_name} and {second_name} must be provided together", 2)
 
 
+def evidence_reference_from_args(args: argparse.Namespace) -> dict[str, Any] | None:
+    values = {
+        "id": args.verification_command_evidence_id,
+        "index_path": args.verification_command_evidence_index,
+        "raw_output_path": args.verification_command_output,
+        "classification": args.verification_command_classification,
+    }
+    if not any(values.values()):
+        return None
+    if not (values["id"] and values["index_path"]):
+        raise ManifestError(
+            "--verification-command-evidence-id and --verification-command-evidence-index must be provided together",
+            2,
+        )
+    reference = {
+        "id": values["id"],
+        "index_path": values["index_path"],
+    }
+    for field in ("raw_output_path", "classification"):
+        if values[field]:
+            reference[field] = values[field]
+    return reference
+
+
 def update_handoff(manifest_path: Path, args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_json(manifest_path)
     errors = validate_manifest(manifest)
@@ -675,6 +706,9 @@ def update_handoff(manifest_path: Path, args: argparse.Namespace) -> dict[str, A
             }
             if args.verification_command_evidence:
                 command["evidence_path"] = args.verification_command_evidence
+            evidence_reference = evidence_reference_from_args(args)
+            if evidence_reference:
+                command["evidence"] = evidence_reference
             summary["commands"] = [command]
         if args.verification_evidence_path:
             summary["evidence_paths"] = args.verification_evidence_path
@@ -994,6 +1028,13 @@ def build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--verification-command")
     handoff.add_argument("--verification-outcome")
     handoff.add_argument("--verification-command-evidence")
+    handoff.add_argument("--verification-command-evidence-id")
+    handoff.add_argument("--verification-command-evidence-index")
+    handoff.add_argument("--verification-command-output")
+    handoff.add_argument(
+        "--verification-command-classification",
+        choices=["mandatory", "diagnostic", "not_applicable"],
+    )
     handoff.add_argument("--verification-evidence-path", action="append", default=[])
     handoff.add_argument("--review-result", choices=["go", "no-go", "skipped", "pending"])
     handoff.add_argument("--review-summary")

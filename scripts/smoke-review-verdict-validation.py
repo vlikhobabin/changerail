@@ -179,6 +179,16 @@ def main() -> int:
             sys.stderr.write(bad_type_result.stderr)
             return 1
 
+        bad_evidence_ref = deepcopy(valid)
+        bad_evidence_ref["acceptance"][0]["evidence_refs"] = [{"id": "review-smoke"}]  # type: ignore[index]
+        bad_evidence_ref_path = verdict_dir / "bad-evidence-ref.json"
+        write_json(bad_evidence_ref_path, bad_evidence_ref)
+        bad_evidence_ref_result = validate(bad_evidence_ref_path, workspace)
+        if bad_evidence_ref_result.returncode != 1 or "index_path" not in bad_evidence_ref_result.stderr:
+            sys.stderr.write("bad evidence ref verdict did not fail as expected\n")
+            sys.stderr.write(bad_evidence_ref_result.stderr)
+            return 1
+
         malformed_go = deepcopy(valid)
         malformed_go["findings"] = [
             {

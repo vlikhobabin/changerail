@@ -706,7 +706,14 @@ def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_ro
             changerail_root / "bin" / "changerail-review-verdict",
             changerail_root,
             aggregator_root,
-        )
+        ),
+        check_symlink(
+            project,
+            "bin/changerail-evidence",
+            changerail_root / "bin" / "changerail-evidence",
+            changerail_root,
+            aggregator_root,
+        ),
     ]
     for schema in SCHEMAS:
         path = changerail_root / "schemas" / schema

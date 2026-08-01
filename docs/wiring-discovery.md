@@ -18,7 +18,7 @@ wrappers, и какой smoke подтверждает discovery. ChangeRail о�
 - Claude short aliases: `/chrl:explore`, `/chrl:ff`, `/chrl:do`,
   `/chrl:review`, `/chrl:pub`, `/chrl:deliver`;
 - helper wrappers: `bin/openspec`, `bin/changerail-python`,
-  `bin/changerail-review-verdict`.
+  `bin/changerail-review-verdict`, `bin/changerail-evidence`.
 
 Smoke проверяет discovery wiring, а не полный runtime-flow этих команд.
 
@@ -75,6 +75,7 @@ wiring и не коммитятся.
 bin/openspec                    -> /opt/changerail/bin/openspec
 bin/changerail-python           -> /opt/changerail/bin/changerail-python
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
+bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
 ```
 
 Для Codex допустимы generated copies под `.codex/skills/changerail-*` и
