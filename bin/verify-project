@@ -67,6 +67,15 @@ STALE_OPSX_PATHS = (
     "bin/opsx-delivery-runner",
     "bin/opsx-delivery-metrics",
 )
+SURFACE_STATES = {"required", "optional", "forbidden"}
+SURFACE_NAMES = {"codex", "claude", "legacy_mcp", "legacy_artifacts"}
+DEFAULT_SURFACE_POLICY = {
+    "codex": "required",
+    "claude": "required",
+    "legacy_mcp": "required",
+    "legacy_artifacts": "forbidden",
+}
+BASELINE_OPEN_SPEC_COMMAND = "bin/openspec validate --all --strict"
 
 
 @dataclass
@@ -74,6 +83,12 @@ class Check:
     name: str
     ok: bool
     message: str
+    severity: str = "blocking"
+    status: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.status:
+            self.status = "pass" if self.ok else "fail"
 
 
 @dataclass
@@ -81,6 +96,22 @@ class Advisory:
     name: str
     status: str
     message: str
+    severity: str = "info"
+
+
+@dataclass(frozen=True)
+class BaselineDebt:
+    command: str
+    residual_risk: str
+    rationale: str
+
+
+@dataclass(frozen=True)
+class VerificationPolicy:
+    profile: str
+    surfaces: dict[str, str]
+    targeted_openspec_validation: str
+    baseline_debt: tuple[BaselineDebt, ...]
 
 
 @dataclass(frozen=True)
@@ -100,13 +131,40 @@ def is_relative_to(path: Path, parent: Path) -> bool:
 
 
 def print_check(check: Check) -> None:
-    status = "PASS" if check.ok else "FAIL"
+    if check.severity == "info":
+        status = "INFO"
+    elif check.severity == "non-blocking" and check.status == "fail":
+        status = "WARN"
+    elif check.status == "skip":
+        status = "SKIP"
+    else:
+        status = "PASS" if check.ok else "FAIL"
     print(f"{status} {check.name}: {check.message}")
 
 
 def print_advisory(advisory: Advisory) -> None:
     status = "INFO" if advisory.status == "pass" else "WARN"
     print(f"{status} {advisory.name}: {advisory.message}")
+
+
+def as_diagnostic(check: Check, message: str | None = None) -> Check:
+    return Check(check.name, False, message or check.message, severity="non-blocking")
+
+
+def policy_error(message: str) -> Check:
+    return Check("verification policy", False, message)
+
+
+def optional_missing(name: str, surface: str) -> Check:
+    return Check(name, False, f"optional {surface} surface is missing", severity="non-blocking")
+
+
+def forbidden_present(name: str, paths: list[str]) -> Check:
+    return Check(name, False, "forbidden surface paths present: " + ", ".join(paths))
+
+
+def forbidden_absent(name: str, surface: str) -> Check:
+    return Check(name, True, f"forbidden {surface} surface is absent")
 
 
 def skill_names(changerail_root: Path) -> list[str]:
@@ -223,6 +281,163 @@ def check_openspec_config(project: Path) -> Check:
     if "schema:" not in text:
         return Check("openspec/config.yaml", False, "missing schema key")
     return Check("openspec/config.yaml", True, "config exists and declares schema")
+
+
+def strip_yaml_comment(line: str) -> str:
+    if "#" not in line:
+        return line.rstrip()
+    index = line.find("#")
+    return line[:index].rstrip()
+
+
+def yaml_scalar(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def yaml_lines_for_section(text: str, section: str) -> list[tuple[int, str]]:
+    lines = text.splitlines()
+    start: int | None = None
+    for index, raw in enumerate(lines):
+        line = strip_yaml_comment(raw)
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0 and line.strip() == f"{section}:":
+            start = index + 1
+            break
+    if start is None:
+        return []
+
+    section_lines: list[tuple[int, str]] = []
+    for raw in lines[start:]:
+        line = strip_yaml_comment(raw)
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0:
+            break
+        section_lines.append((indent, line.strip()))
+    return section_lines
+
+
+def parse_simple_mapping(section_lines: list[tuple[int, str]], parent: str) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    in_parent = False
+    parent_indent = -1
+    for indent, line in section_lines:
+        if indent == 2 and line == f"{parent}:":
+            in_parent = True
+            parent_indent = indent
+            continue
+        if in_parent and indent <= parent_indent:
+            break
+        if in_parent and indent == parent_indent + 2 and ":" in line and not line.startswith("- "):
+            key, value = line.split(":", 1)
+            mapping[yaml_scalar(key)] = yaml_scalar(value)
+    return mapping
+
+
+def parse_baseline_debt(section_lines: list[tuple[int, str]]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    in_parent = False
+    parent_indent = -1
+    current: dict[str, str] | None = None
+    for indent, line in section_lines:
+        if indent == 2 and line.startswith("baseline_debt:"):
+            if line.endswith("[]"):
+                return []
+            in_parent = True
+            parent_indent = indent
+            continue
+        if in_parent and indent <= parent_indent:
+            break
+        if not in_parent:
+            continue
+        if indent == parent_indent + 2 and line.startswith("- "):
+            if current is not None:
+                entries.append(current)
+            current = {}
+            remainder = line[2:].strip()
+            if ":" in remainder:
+                key, value = remainder.split(":", 1)
+                current[yaml_scalar(key)] = yaml_scalar(value)
+            continue
+        if current is not None and indent == parent_indent + 4 and ":" in line:
+            key, value = line.split(":", 1)
+            current[yaml_scalar(key)] = yaml_scalar(value)
+    if current is not None:
+        entries.append(current)
+    return entries
+
+
+def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Check]]:
+    default = VerificationPolicy(
+        profile="all-surfaces",
+        surfaces=dict(DEFAULT_SURFACE_POLICY),
+        targeted_openspec_validation="required",
+        baseline_debt=(),
+    )
+    path = project / "openspec" / "config.yaml"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return default, []
+
+    section = yaml_lines_for_section(text, "verification")
+    if not section:
+        return default, []
+
+    errors: list[Check] = []
+    profile = default.profile
+    for indent, line in section:
+        if indent == 2 and line.startswith("profile:"):
+            profile = yaml_scalar(line.split(":", 1)[1])
+            break
+
+    surfaces = dict(DEFAULT_SURFACE_POLICY)
+    for name, state in parse_simple_mapping(section, "surfaces").items():
+        normalized_name = name.replace("-", "_")
+        if normalized_name not in SURFACE_NAMES:
+            errors.append(policy_error(f"unknown surface {name!r}"))
+            continue
+        if state not in SURFACE_STATES:
+            errors.append(policy_error(f"surface {name!r} has invalid state {state!r}"))
+            continue
+        surfaces[normalized_name] = state
+
+    mandatory = parse_simple_mapping(section, "mandatory")
+    targeted = mandatory.get("targeted_openspec_validation", default.targeted_openspec_validation)
+    if targeted != "required":
+        errors.append(policy_error("targeted_openspec_validation must remain required"))
+        targeted = "required"
+
+    baseline_debt: list[BaselineDebt] = []
+    for index, entry in enumerate(parse_baseline_debt(section), start=1):
+        command = entry.get("command", "")
+        residual_risk = entry.get("residual_risk", "")
+        rationale = entry.get("rationale", "")
+        if not command or not residual_risk or not rationale:
+            errors.append(
+                policy_error(
+                    "baseline_debt entry "
+                    f"#{index} must include command, residual_risk and rationale"
+                )
+            )
+            continue
+        baseline_debt.append(
+            BaselineDebt(command=command, residual_risk=residual_risk, rationale=rationale)
+        )
+
+    policy = VerificationPolicy(
+        profile=profile,
+        surfaces=surfaces,
+        targeted_openspec_validation=targeted,
+        baseline_debt=tuple(baseline_debt),
+    )
+    return policy, errors
 
 
 def parse_npm_package_arg(value: str) -> tuple[str, str] | None:
@@ -385,30 +600,38 @@ def npm_integrity_errors(referenced: set[tuple[str, str]], lock: dict[tuple[str,
     return errors
 
 
-def check_mcp_npm_pins(project: Path, changerail_root: Path) -> Check:
+def check_mcp_npm_pins(
+    project: Path,
+    changerail_root: Path,
+    *,
+    include_codex: bool,
+    include_legacy_mcp: bool,
+) -> Check:
     lock, lock_error = load_mcp_npm_lock(changerail_root)
     if lock_error:
         return Check("MCP npm pins", False, lock_error)
     errors: list[str] = []
     referenced: set[tuple[str, str]] = set()
-    try:
-        mcp_data = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
-        mcp_errors, mcp_referenced = npm_mcp_pin_errors(".mcp.json", mcp_data.get("mcpServers", {}), lock)
-        errors.extend(mcp_errors)
-        referenced.update(mcp_referenced)
-    except (OSError, json.JSONDecodeError) as exc:
-        errors.append(f".mcp.json: {exc}")
-    try:
-        codex_data = tomllib.loads((project / ".codex" / "config.toml").read_text(encoding="utf-8"))
-        codex_errors, codex_referenced = npm_mcp_pin_errors(
-            ".codex/config.toml",
-            codex_data.get("mcp_servers", {}),
-            lock,
-        )
-        errors.extend(codex_errors)
-        referenced.update(codex_referenced)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        errors.append(f".codex/config.toml: {exc}")
+    if include_legacy_mcp:
+        try:
+            mcp_data = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+            mcp_errors, mcp_referenced = npm_mcp_pin_errors(".mcp.json", mcp_data.get("mcpServers", {}), lock)
+            errors.extend(mcp_errors)
+            referenced.update(mcp_referenced)
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f".mcp.json: {exc}")
+    if include_codex:
+        try:
+            codex_data = tomllib.loads((project / ".codex" / "config.toml").read_text(encoding="utf-8"))
+            codex_errors, codex_referenced = npm_mcp_pin_errors(
+                ".codex/config.toml",
+                codex_data.get("mcp_servers", {}),
+                lock,
+            )
+            errors.extend(codex_errors)
+            referenced.update(codex_referenced)
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            errors.append(f".codex/config.toml: {exc}")
     if not errors:
         errors.extend(npm_integrity_errors(referenced, lock))
     if errors:
@@ -434,6 +657,47 @@ def check_openspec_validate(project: Path) -> Check:
     return Check("bin/openspec validate --all --strict", True, "OpenSpec validation passed")
 
 
+def active_openspec_changes(project: Path) -> list[str]:
+    changes_root = project / "openspec" / "changes"
+    if not changes_root.is_dir():
+        return []
+    return sorted(
+        path.name
+        for path in changes_root.iterdir()
+        if path.is_dir() and path.name != "archive" and not path.name.startswith(".")
+    )
+
+
+def check_targeted_openspec_validate(project: Path) -> Check:
+    changes = active_openspec_changes(project)
+    if not changes:
+        return Check("targeted OpenSpec validation", True, "no active OpenSpec changes declared")
+    wrapper = project / "bin" / "openspec"
+    if not wrapper.exists():
+        return Check("targeted OpenSpec validation", False, "bin/openspec missing")
+    failures: list[str] = []
+    for change in changes:
+        result = subprocess.run(
+            [str(wrapper), "validate", change, "--strict", "--no-interactive"],
+            cwd=project,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "OPENSPEC_WORKDIR": str(project)},
+            timeout=120,
+        )
+        if result.returncode != 0:
+            output = result.stdout.strip() or f"openspec validate {change} failed"
+            failures.append(f"{change}: {output}")
+    if failures:
+        return Check("targeted OpenSpec validation", False, "; ".join(failures))
+    return Check(
+        "targeted OpenSpec validation",
+        True,
+        "active OpenSpec changes passed: " + ", ".join(changes),
+    )
+
+
 def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     checks = [
         check_symlink(
@@ -448,6 +712,44 @@ def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_ro
         path = changerail_root / "schemas" / schema
         checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from ChangeRail root" if path.is_file() else "missing"))
     return checks
+
+
+def apply_surface_policy(check: Check, surface: str, state: str, exists: bool) -> Check:
+    if state == "required":
+        return check
+    if state == "optional":
+        if not exists and not check.ok:
+            return optional_missing(check.name, surface)
+        return check
+    if state == "forbidden":
+        if exists:
+            return forbidden_present(check.name, [check.name])
+        return forbidden_absent(check.name, surface)
+    return policy_error(f"surface {surface!r} has invalid state {state!r}")
+
+
+def path_present(project: Path, rel_path: str) -> bool:
+    path = project / rel_path
+    return path.exists() or path.is_symlink()
+
+
+def any_path_present(project: Path, rel_paths: Iterable[str]) -> list[str]:
+    return [rel_path for rel_path in rel_paths if path_present(project, rel_path)]
+
+
+def codex_surface_present(project: Path) -> list[str]:
+    present = any_path_present(project, [".codex/config.toml"])
+    skills_root = project / ".codex" / "skills"
+    if skills_root.exists() or skills_root.is_symlink():
+        present.append(".codex/skills")
+    return present
+
+
+def claude_surface_present(project: Path) -> list[str]:
+    return any_path_present(
+        project,
+        [".claude/skills", ".claude/commands/changerail", ".claude/commands/chrl"],
+    )
 
 
 def check_no_stale_opsx_wiring(project: Path) -> Check:
@@ -515,6 +817,7 @@ def delivery_auth_advisory(project: Path) -> Advisory:
                 "delivery runner auth readiness",
                 "pass",
                 f"auth environment variable {name} is set",
+                severity="info",
             )
 
     explicit_home = os.environ.get("CODEX_HOME")
@@ -526,48 +829,132 @@ def delivery_auth_advisory(project: Path) -> Advisory:
                 "delivery runner auth readiness",
                 "pass",
                 f"supported auth marker is present at {marker_label}",
+                severity="info",
             )
 
     return Advisory(
         "delivery runner auth readiness",
-        "warn",
+        "fail",
         "missing supported auth marker or auth environment variable; see "
         "docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner",
+        severity="non-blocking",
     )
+
+
+def maybe_downgrade_baseline_debt(check: Check, policy: VerificationPolicy) -> Check:
+    if check.ok:
+        return check
+    commands = {debt.command for debt in policy.baseline_debt}
+    if BASELINE_OPEN_SPEC_COMMAND in commands:
+        return Check(
+            check.name,
+            False,
+            check.message + " (tracked project-wide baseline debt policy records residual risk)",
+            severity="non-blocking",
+        )
+    return check
 
 
 def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     skills = skill_names(changerail_root)
+    policy, policy_errors = load_verification_policy(project)
+    codex_state = policy.surfaces["codex"]
+    claude_state = policy.surfaces["claude"]
+    legacy_mcp_state = policy.surfaces["legacy_mcp"]
+    legacy_artifacts_state = policy.surfaces["legacy_artifacts"]
+
     checks: list[Check] = [
         Check("project root", project.is_dir(), str(project)),
-        check_symlink(project, ".claude/skills", changerail_root / "skills", changerail_root, aggregator_root),
-        check_symlink(project, ".claude/commands/changerail", changerail_root / "claude" / "commands" / "changerail", changerail_root, aggregator_root),
-        check_symlink(project, ".claude/commands/chrl", changerail_root / "claude" / "commands" / "chrl", changerail_root, aggregator_root),
         check_symlink(project, "bin/openspec", changerail_root / "bin" / "openspec", changerail_root, aggregator_root),
         check_symlink(project, "bin/changerail-python", changerail_root / "bin" / "changerail-python", changerail_root, aggregator_root),
         check_symlink(project, "bin/verify-project", changerail_root / "bin" / "verify-project", changerail_root, aggregator_root),
     ]
+    checks.extend(policy_errors)
+
+    claude_checks = [
+        check_symlink(project, ".claude/skills", changerail_root / "skills", changerail_root, aggregator_root),
+        check_symlink(
+            project,
+            ".claude/commands/changerail",
+            changerail_root / "claude" / "commands" / "changerail",
+            changerail_root,
+            aggregator_root,
+        ),
+        check_symlink(
+            project,
+            ".claude/commands/chrl",
+            changerail_root / "claude" / "commands" / "chrl",
+            changerail_root,
+            aggregator_root,
+        ),
+    ]
+    claude_present = set(claude_surface_present(project))
+    for check in claude_checks:
+        checks.append(apply_surface_policy(check, "claude", claude_state, check.name in claude_present))
+
+    codex_config = check_codex(project)
+    checks.append(
+        apply_surface_policy(
+            codex_config,
+            "codex",
+            codex_state,
+            path_present(project, ".codex/config.toml"),
+        )
+    )
     for skill in skills:
+        check = check_symlink(
+            project,
+            f".codex/skills/{skill}",
+            changerail_root / "skills" / skill,
+            changerail_root,
+            aggregator_root,
+        )
         checks.append(
-            check_symlink(
+            apply_surface_policy(
+                check,
+                "codex",
+                codex_state,
+                path_present(project, f".codex/skills/{skill}"),
+            )
+        )
+
+    mcp_exists = path_present(project, ".mcp.json")
+    checks.append(
+        apply_surface_policy(
+            check_mcp(project),
+            "legacy_mcp",
+            legacy_mcp_state,
+            mcp_exists,
+        )
+    )
+    include_codex_pins = codex_state != "forbidden" and path_present(project, ".codex/config.toml")
+    include_legacy_mcp_pins = legacy_mcp_state != "forbidden" and mcp_exists
+    if include_codex_pins or include_legacy_mcp_pins:
+        checks.append(
+            check_mcp_npm_pins(
                 project,
-                f".codex/skills/{skill}",
-                changerail_root / "skills" / skill,
                 changerail_root,
-                aggregator_root,
+                include_codex=include_codex_pins,
+                include_legacy_mcp=include_legacy_mcp_pins,
             )
         )
     checks.extend(check_schemas_and_helper(project, changerail_root, aggregator_root))
+    targeted_openspec_validate = check_targeted_openspec_validate(project)
+    openspec_validate = maybe_downgrade_baseline_debt(check_openspec_validate(project), policy)
+    stale_check = check_no_stale_opsx_wiring(project)
     checks.extend(
         [
-            check_mcp(project),
-            check_codex(project),
-            check_mcp_npm_pins(project, changerail_root),
             check_openspec_config(project),
-            check_openspec_validate(project),
+            targeted_openspec_validate,
+            openspec_validate,
             check_gitignore(project),
             check_tracked_runtime(project),
-            check_no_stale_opsx_wiring(project),
+            apply_surface_policy(
+                stale_check,
+                "legacy_artifacts",
+                legacy_artifacts_state,
+                not stale_check.ok,
+            ),
         ]
     )
     return checks
@@ -575,6 +962,28 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
 
 def build_advisories(project: Path) -> list[Advisory]:
     return [delivery_auth_advisory(project)]
+
+
+def summarize_results(checks: list[Check], advisories: list[Advisory]) -> dict[str, object]:
+    blocking_failed = [
+        check for check in checks if check.status == "fail" and check.severity == "blocking"
+    ]
+    nonblocking_failed_checks = [
+        check for check in checks if check.status == "fail" and check.severity == "non-blocking"
+    ]
+    nonblocking_failed_advisories = [
+        advisory for advisory in advisories if advisory.status == "fail" and advisory.severity == "non-blocking"
+    ]
+    diagnostics = len(nonblocking_failed_checks) + len(nonblocking_failed_advisories)
+    status = "fail" if blocking_failed else "pass-with-diagnostics" if diagnostics else "pass"
+    passed = sum(1 for check in checks if check.status == "pass")
+    return {
+        "status": status,
+        "total": len(checks),
+        "passed": passed,
+        "failed": len(blocking_failed),
+        "diagnostics": diagnostics,
+    }
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -593,8 +1002,10 @@ def main(argv: list[str]) -> int:
     aggregator_root = args.aggregator_root.resolve() if args.aggregator_root else None
     checks = build_checks(project, changerail_root, aggregator_root)
     advisories = build_advisories(project)
-    failed = [check for check in checks if not check.ok]
-    warnings = [advisory for advisory in advisories if advisory.status == "warn"]
+    summary = summarize_results(checks, advisories)
+    warnings = [
+        advisory for advisory in advisories if advisory.status == "fail" and advisory.severity == "non-blocking"
+    ]
 
     if args.json:
         print(
@@ -603,12 +1014,7 @@ def main(argv: list[str]) -> int:
                     "project": str(project),
                     "changerail_root": str(changerail_root),
                     "aggregator_root": str(aggregator_root) if aggregator_root else None,
-                    "summary": {
-                        "status": "fail" if failed else "pass",
-                        "total": len(checks),
-                        "passed": len(checks) - len(failed),
-                        "failed": len(failed),
-                    },
+                    "summary": summary,
                     "advisory_summary": {
                         "total": len(advisories),
                         "warnings": len(warnings),
@@ -626,8 +1032,13 @@ def main(argv: list[str]) -> int:
             print_check(check)
         for advisory in advisories:
             print_advisory(advisory)
-        print(f"summary: {'fail' if failed else 'pass'} ({len(checks) - len(failed)}/{len(checks)} passed)")
-    return 1 if failed else 0
+        print(
+            "summary: "
+            f"{summary['status']} "
+            f"({summary['passed']}/{summary['total']} passed, "
+            f"{summary['failed']} failed, {summary['diagnostics']} diagnostics)"
+        )
+    return 1 if summary["status"] == "fail" else 0
 
 
 if __name__ == "__main__":

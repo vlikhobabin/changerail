@@ -367,13 +367,26 @@ symlink-и на ChangeRail-owned surfaces.
 - drift generated sections в `AGENTS.md` и board docs, если выбран режим
   generated вставок.
 
-Каждая проверка — красно-зеленая (exit-код), не «напечатать и посмотреть»:
-verify-project — это gate, а не отчет.
+`verify-project` остается gate, а не отчет. Итоговый machine-readable status:
+
+- `pass`: все blocking checks прошли и diagnostics отсутствуют;
+- `pass-with-diagnostics`: blocking checks прошли, но есть явные
+  non-blocking findings;
+- `fail`: есть blocking failure.
+
+Tracked policy в `openspec/config.yaml` может объявить Codex, Claude и legacy
+MCP surfaces как `required`, `optional` или `forbidden`. Default profile строгий:
+canonical surfaces обязательны, а stale legacy artifacts запрещены. Optional
+missing surface дает diagnostic, forbidden present surface падает blocking
+failure. Targeted card-owned OpenSpec validation остается обязательной и не
+может быть ослаблена profile policy. Project-wide baseline debt допускается
+как diagnostic только при tracked residual-risk policy.
 
 Текущая реализация `bin/verify-project` выполняет gate локально: печатает
-`PASS`/`FAIL` для каждой проверки, поддерживает `--changerail-root` и
-`--aggregator-root`, запускает project-local `bin/openspec validate --all
---strict` и возвращает non-zero exit при любом failed check.
+`PASS`/`FAIL`/`WARN` для проверок и diagnostics, поддерживает
+`--changerail-root`, `--aggregator-root` и `--json`, запускает project-local
+`bin/openspec validate --all --strict` и возвращает non-zero exit только при
+blocking failure.
 
 Текущая реализация `/opt/changerail/scripts/smoke-drift.py` проходит по configured
 workspace roots или explicit projects из operator-provided config/CLI input,

@@ -334,6 +334,11 @@ git -C /opt/example-project status --short
 - обязательные `.gitignore` patterns для runtime/auth state;
 - что запрещенный runtime/auth state не попал в tracked files.
 
+Итог `summary: pass-with-diagnostics` допустим только для explicitly
+non-blocking findings, например intentionally optional surface или tracked
+project-wide baseline debt с residual risk. `summary: fail` остается blocking
+gate. Targeted card-owned OpenSpec validation нельзя переводить в optional.
+
 ## Ожидаемый результат
 
 После подключения пользователь запускает Claude Code из корня проекта и видит

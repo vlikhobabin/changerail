@@ -26,3 +26,14 @@ rules:
   tasks:
     - Include concrete verification commands.
     - Include public-safety scans when files could expose local data.
+
+verification:
+  profile: all-surfaces
+  surfaces:
+    codex: required
+    claude: required
+    legacy_mcp: required
+    legacy_artifacts: forbidden
+  mandatory:
+    targeted_openspec_validation: required
+  baseline_debt: []

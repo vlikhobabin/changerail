@@ -26,6 +26,11 @@ surface.
   content.
 - `{{CHANGERAIL_SHARED_AGENTS}}` - generated copy of `AGENTS.shared.md`.
 
+Generated `openspec/config.yaml` includes the default strict ChangeRail
+verification profile. Consumers that intentionally omit a surface must change
+tracked project policy with `required`, `optional` or `forbidden`; ignored
+runtime state must not be used to weaken verification.
+
 ## Generated Files
 
 Bootstrap generates project-local files:

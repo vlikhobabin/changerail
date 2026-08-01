@@ -208,6 +208,76 @@ def add_codex_mcp_server(project: Path, name: str, args: list[str]) -> None:
     )
 
 
+def set_verification_policy(project: Path, *, surfaces: dict[str, str] | None = None, targeted: str = "required") -> None:
+    path = project / "openspec" / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    marker = "\nverification:\n"
+    if marker in text:
+        text = text.split(marker, 1)[0].rstrip() + "\n"
+    surface_policy = {
+        "codex": "required",
+        "claude": "required",
+        "legacy_mcp": "required",
+        "legacy_artifacts": "forbidden",
+    }
+    if surfaces:
+        surface_policy.update(surfaces)
+    policy = [
+        "",
+        "verification:",
+        "  profile: smoke",
+        "  surfaces:",
+    ]
+    for name, state in surface_policy.items():
+        policy.append(f"    {name}: {state}")
+    policy.extend(
+        [
+            "  mandatory:",
+            f"    targeted_openspec_validation: {targeted}",
+            "  baseline_debt: []",
+            "",
+        ]
+    )
+    path.write_text(text + "\n".join(policy), encoding="utf-8")
+
+
+def remove_surface_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def verify_json(changerail_root: Path, project: Path, env: dict[str, str]) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    result = run([str(changerail_root / "bin" / "verify-project"), str(project), "--json"], changerail_root, env)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        data = {}
+    return result, data
+
+
+def check_result(
+    data: dict[str, object],
+    *,
+    name: str,
+    status: str | None = None,
+    severity: str | None = None,
+) -> bool:
+    checks = data.get("checks", [])
+    if not isinstance(checks, list):
+        return False
+    for check in checks:
+        if not isinstance(check, dict) or check.get("name") != name:
+            continue
+        if status is not None and check.get("status") != status:
+            continue
+        if severity is not None and check.get("severity") != severity:
+            continue
+        return True
+    return False
+
+
 def browser_mcp_default_offenders(changerail_root: Path) -> list[str]:
     files = [
         changerail_root / ".mcp.json",
@@ -371,6 +441,198 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "missing chrl alias fails",
             "pass" if missing_chrl.returncode != 0 and "chrl" in missing_chrl.stdout else "fail",
             missing_chrl.stdout.strip(),
+        )
+    )
+
+    codex_only_project = run_dir / "codex-only-profile-project"
+    shutil.copytree(good_project, codex_only_project, symlinks=True)
+    set_verification_policy(codex_only_project, surfaces={"claude": "optional"})
+    remove_surface_path(codex_only_project / ".claude" / "skills")
+    remove_surface_path(codex_only_project / ".claude" / "commands" / "changerail")
+    remove_surface_path(codex_only_project / ".claude" / "commands" / "chrl")
+    codex_only, codex_only_data = verify_json(changerail_root, codex_only_project, fake_env)
+    checks.append(
+        Check(
+            "codex-only profile passes with diagnostics",
+            "pass"
+            if codex_only.returncode == 0
+            and codex_only_data.get("summary", {}).get("status") == "pass-with-diagnostics"
+            and check_result(codex_only_data, name=".claude/skills", status="fail", severity="non-blocking")
+            else "fail",
+            codex_only.stdout.strip(),
+        )
+    )
+
+    strict_missing_claude_project = run_dir / "bad-strict-missing-claude"
+    shutil.copytree(good_project, strict_missing_claude_project, symlinks=True)
+    remove_surface_path(strict_missing_claude_project / ".claude" / "commands" / "changerail")
+    strict_missing_claude, strict_missing_claude_data = verify_json(
+        changerail_root,
+        strict_missing_claude_project,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "default all-surfaces missing Claude fails",
+            "pass"
+            if strict_missing_claude.returncode != 0
+            and strict_missing_claude_data.get("summary", {}).get("status") == "fail"
+            and check_result(
+                strict_missing_claude_data,
+                name=".claude/commands/changerail",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            strict_missing_claude.stdout.strip(),
+        )
+    )
+
+    forbidden_mcp_project = run_dir / "bad-forbidden-legacy-mcp"
+    shutil.copytree(good_project, forbidden_mcp_project, symlinks=True)
+    set_verification_policy(forbidden_mcp_project, surfaces={"legacy_mcp": "forbidden"})
+    forbidden_mcp, forbidden_mcp_data = verify_json(changerail_root, forbidden_mcp_project, fake_env)
+    checks.append(
+        Check(
+            "forbidden legacy MCP artifact fails",
+            "pass"
+            if forbidden_mcp.returncode != 0
+            and forbidden_mcp_data.get("summary", {}).get("status") == "fail"
+            and check_result(forbidden_mcp_data, name=".mcp.json", status="fail", severity="blocking")
+            else "fail",
+            forbidden_mcp.stdout.strip(),
+        )
+    )
+
+    weaken_target_project = run_dir / "bad-weaken-targeted-validation"
+    shutil.copytree(good_project, weaken_target_project, symlinks=True)
+    set_verification_policy(weaken_target_project, targeted="optional")
+    weaken_target, weaken_target_data = verify_json(changerail_root, weaken_target_project, fake_env)
+    checks.append(
+        Check(
+            "mandatory targeted validation weakening fails",
+            "pass"
+            if weaken_target.returncode != 0
+            and weaken_target_data.get("summary", {}).get("status") == "fail"
+            and check_result(weaken_target_data, name="verification policy", status="fail", severity="blocking")
+            else "fail",
+            weaken_target.stdout.strip(),
+        )
+    )
+
+    baseline_debt_project = run_dir / "baseline-debt-project"
+    shutil.copytree(good_project, baseline_debt_project, symlinks=True)
+    bad_spec = baseline_debt_project / "openspec" / "specs" / "bad" / "spec.md"
+    bad_spec.parent.mkdir(parents=True, exist_ok=True)
+    bad_spec.write_text(
+        "# bad Specification\n\n"
+        "## Purpose\nBad.\n"
+        "## Requirements\n"
+        "### Requirement: Bad baseline\n"
+        "No normative keyword here.\n\n"
+        "#### Scenario: Bad\n"
+        "- **WHEN** it runs\n"
+        "- **THEN** it fails\n",
+        encoding="utf-8",
+    )
+    undeclared_baseline, undeclared_baseline_data = verify_json(changerail_root, baseline_debt_project, fake_env)
+    checks.append(
+        Check(
+            "undeclared baseline debt fails closed",
+            "pass"
+            if undeclared_baseline.returncode != 0
+            and undeclared_baseline_data.get("summary", {}).get("status") == "fail"
+            and check_result(
+                undeclared_baseline_data,
+                name="bin/openspec validate --all --strict",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            undeclared_baseline.stdout.strip(),
+        )
+    )
+    config = baseline_debt_project / "openspec" / "config.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "  baseline_debt: []",
+            "  baseline_debt:\n"
+            "    - command: \"bin/openspec validate --all --strict\"\n"
+            "      residual_risk: \"known project-wide OpenSpec baseline debt\"\n"
+            "      rationale: \"fixture debt is not card-owned\"",
+        ),
+        encoding="utf-8",
+    )
+    declared_baseline, declared_baseline_data = verify_json(changerail_root, baseline_debt_project, fake_env)
+    checks.append(
+        Check(
+            "declared baseline debt is diagnostic",
+            "pass"
+            if declared_baseline.returncode == 0
+            and declared_baseline_data.get("summary", {}).get("status") == "pass-with-diagnostics"
+            and check_result(
+                declared_baseline_data,
+                name="bin/openspec validate --all --strict",
+                status="fail",
+                severity="non-blocking",
+            )
+            else "fail",
+            declared_baseline.stdout.strip(),
+        )
+    )
+
+    targeted_debt_project = run_dir / "bad-baseline-debt-targeted-change"
+    shutil.copytree(good_project, targeted_debt_project, symlinks=True)
+    set_verification_policy(
+        targeted_debt_project,
+        surfaces=None,
+        targeted="required",
+    )
+    config = targeted_debt_project / "openspec" / "config.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            "  baseline_debt: []",
+            "  baseline_debt:\n"
+            "    - command: \"bin/openspec validate --all --strict\"\n"
+            "      residual_risk: \"known project-wide OpenSpec baseline debt\"\n"
+            "      rationale: \"fixture debt is not card-owned\"",
+        ),
+        encoding="utf-8",
+    )
+    active_spec = targeted_debt_project / "openspec" / "changes" / "card-owned-invalid" / "specs" / "broken" / "spec.md"
+    active_spec.parent.mkdir(parents=True, exist_ok=True)
+    active_spec.write_text(
+        "## ADDED Requirements\n\n"
+        "### Requirement: Card-owned invalid requirement\n"
+        "No normative keyword here.\n\n"
+        "#### Scenario: Card-owned invalid scenario\n"
+        "- **WHEN** the targeted change is validated\n"
+        "- **THEN** validation fails\n",
+        encoding="utf-8",
+    )
+    (targeted_debt_project / "openspec" / "changes" / "card-owned-invalid" / "proposal.md").write_text(
+        "## Why\n\nTest.\n",
+        encoding="utf-8",
+    )
+    (targeted_debt_project / "openspec" / "changes" / "card-owned-invalid" / "tasks.md").write_text(
+        "- [ ] Test\n",
+        encoding="utf-8",
+    )
+    targeted_debt, targeted_debt_data = verify_json(changerail_root, targeted_debt_project, fake_env)
+    checks.append(
+        Check(
+            "baseline debt cannot mask targeted change failure",
+            "pass"
+            if targeted_debt.returncode != 0
+            and targeted_debt_data.get("summary", {}).get("status") == "fail"
+            and check_result(
+                targeted_debt_data,
+                name="targeted OpenSpec validation",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            targeted_debt.stdout.strip(),
         )
     )
 

@@ -143,6 +143,39 @@ def missing_workflow_guidance(project: Path) -> list[str]:
     return missing
 
 
+def missing_verification_profile_guidance(project: Path) -> list[str]:
+    checks = {
+        "openspec/config.yaml": [
+            "verification:",
+            "profile: all-surfaces",
+            "codex: required",
+            "claude: required",
+            "legacy_mcp: required",
+            "legacy_artifacts: forbidden",
+            "targeted_openspec_validation: required",
+            "baseline_debt: []",
+        ],
+        "AGENTS.md": [
+            "required",
+            "optional",
+            "forbidden",
+            "pass-with-diagnostics",
+            "targeted card-owned",
+        ],
+    }
+    missing: list[str] = []
+    for rel_path, needles in checks.items():
+        path = project / rel_path
+        if not path.is_file():
+            missing.append(f"{rel_path}: file missing")
+            continue
+        text = path.read_text(encoding="utf-8")
+        for needle in needles:
+            if needle not in text:
+                missing.append(f"{rel_path}: missing {needle!r}")
+    return missing
+
+
 def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dict[str, str]) -> Check:
     project = run_dir / "example-project"
     result = run(
@@ -171,6 +204,9 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
     workflow_missing = missing_workflow_guidance(project)
     if workflow_missing:
         return Check("bootstrap workflow guidance", "fail", "; ".join(workflow_missing))
+    profile_missing = missing_verification_profile_guidance(project)
+    if profile_missing:
+        return Check("bootstrap verification profile guidance", "fail", "; ".join(profile_missing))
     if (project / ".codex" / "auth.json").exists() or (project / ".codex" / "auth.json").is_symlink():
         return Check("bootstrap valid project", "fail", "default bootstrap created auth marker")
     return Check("bootstrap valid project", "pass", "project generated and verified")

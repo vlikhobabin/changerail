@@ -55,6 +55,13 @@ git diff --check
 
 Add project-specific tests here as the project evolves.
 
+Generated verification policy lives in `openspec/config.yaml`. The default
+profile treats Codex, Claude and legacy MCP surfaces as `required`, and stale
+legacy artifacts as `forbidden`. Project owners may edit tracked policy to mark
+a surface `optional` only when that surface is intentionally unused; optional
+missing surfaces can produce `pass-with-diagnostics`, but targeted card-owned
+OpenSpec validation remains mandatory and cannot be downgraded.
+
 ## Pre-review Delivery Budgets
 
 `changerail-do --max-fix-cycles` bounds pre-review implement/verify attempts;

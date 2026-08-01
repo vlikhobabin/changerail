@@ -118,7 +118,8 @@ changes**, каждый со своими OpenSpec-артефактами в `op
   `changerail.delivery-run.v1`, `changerail.evidence-index.v1` и helper
   `bin/changerail-review-verdict`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
-- `bin/verify-project` как red/green gate для consumer wiring/config;
+- `bin/verify-project` как fail-closed gate для consumer wiring/config с явными
+  non-blocking diagnostics;
 - `bin/bootstrap-project` для создания generic consumer project;
 - `bin/changerail-delivery-runner` для supervised non-interactive single-card
   runs со structured runtime status;
