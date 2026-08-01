@@ -28,6 +28,17 @@
 - Имя файла должно быть sortable и уникальным.
 - Новые карточки используют kebab-case slug, при необходимости с числовым
   префиксом.
+- Для ordered series используется имя `<series>-<index>-<slug>.md`, например
+  `010-03-fix-publish-finalization-ledger.md`.
+- `Series` содержит stable series id, а `Series Index` - двухзначный порядок
+  внутри серии. Индекс `00` зарезервирован для головной epic-карточки.
+- Epic-карточка остается coordination-only в `1.backlog`, перечисляет общие
+  constraints, состав, entry/exit/refresh gates и не является целью
+  `$chrl-deliver`.
+- Исполняемые story-карточки серии переходят по обычным board gates и
+  выполняются по `Series Index`, если epic явно не разрешает иной порядок.
+- Если следующая серия зависит от фактического результата предыдущей, ее epic
+  и stories остаются provisional до обязательного refresh gate.
 - В `2.todo/` и `3.inprogress/` карточка должна содержать ordered sections
   `## Change 1:`, `## Change 2:` и так далее.
 - В `Related` указываются только публичные пути внутри ChangeRail или generic
@@ -44,6 +55,10 @@
    запрашивать свежий review.
 6. После fresh `go` выполнить publish и перенести карточку в `4.done/` только
    как deterministic post-publish finalization.
+
+Для series сначала прочитайте epic `00`, проверьте entry/refresh gate и только
+затем запускайте следующую story. Coordination-only epic не входит в bounded
+delivery queue.
 
 Актуальный ChangeRail surface включает `changerail-explore`, `changerail-ff`,
 `changerail-do`, `changerail-review`, `changerail-pub`, `changerail-deliver` и

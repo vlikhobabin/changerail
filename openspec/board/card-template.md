@@ -9,6 +9,12 @@ unassigned
 ## OpenSpec Stage
 story
 
+## Series
+- none
+
+## Series Index
+- none
+
 ## Source
 - <session / person / doc>
 
