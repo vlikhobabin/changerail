@@ -92,3 +92,5 @@ not started
 
 ## Log
 - 2026-08-01T15:34:23Z program epic создана для orchestration серий `010`-`040`.
+- 2026-08-01T21:24:05Z series `010` завершена post-push baseline 26/26;
+  series `020` прошла readiness pass и получила tracked runner plan.

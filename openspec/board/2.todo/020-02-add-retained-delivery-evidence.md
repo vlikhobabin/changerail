@@ -1,7 +1,7 @@
 # Добавить retained delivery evidence
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -52,7 +52,39 @@ logs в tracked payload.
   необходимости.
 
 ## Change Set
-- none yet
+- `add-retained-delivery-evidence` (planned)
+
+## Change 1: `add-retained-delivery-evidence`
+
+### Why
+Review and publish gates can validate summaries, but verification command
+outputs are currently transient and lack a shared retained evidence contract.
+
+### Goal
+Add an ignored retained evidence mechanism that records safe command evidence
+and allows manifests/verdicts to reference concise evidence without committing
+raw logs.
+
+### Scope
+- Evidence index schema/helper and delivery/review integration.
+- Verification command capture for ChangeRail-owned checks.
+
+### Acceptance
+- Evidence helper сохраняет command identity, exit code, timestamps, concise
+  observed summary и raw output path.
+- Evidence files и index живут только под ignored runtime root.
+- Secret-like arguments/output редактируются или capture останавливается с
+  diagnostic.
+- Manifest и verdict могут ссылаться на evidence IDs/paths.
+- Helper различает mandatory, diagnostic и not-applicable evidence.
+- Smokes покрывают success, failure, timeout, redaction и missing evidence.
+
+### Depends On
+- `formalize-deliver-ready-card-contract`
+- `add-manifest-scope-and-handoff`
+
+### Related
+- `openspec/changes/add-retained-delivery-evidence/`
 
 ## Verify
 - Focused evidence capture/redaction smoke.
@@ -67,10 +99,12 @@ logs в tracked payload.
 - `schemas/changerail-review-verdict.schema.json`
 
 ## Result
-not started
+deliver-ready after series `010` exit audit
 
 ## Next
-- После `020-01` выполнить `$changerail-ff` для этой карточки.
+- `$chrl-deliver openspec/board/2.todo/020-02-add-retained-delivery-evidence.md`
 
 ## Log
 - 2026-08-01T15:07:29Z requirement выделен из старого consumer postmortem.
+- 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
+  в `2.todo`, добавлен ordered Change 1 для package runner.

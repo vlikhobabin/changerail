@@ -34,7 +34,10 @@ phase-команды остаются repair/debug/manual-resume surface. Transi
 требует ручной реконструкции контекста, а safety gates остаются fail-closed.
 
 ## Entry Gate
-- Серия `010-core-release-contracts` завершена.
+- Серия `010-core-release-contracts` завершена: карточки `010-01`..`010-05`
+  опубликованы и находятся в `4.done`.
+- Post-push release baseline после `010-05` прошел 26/26 на
+  `2026-08-01T21:24:05Z` readiness pass.
 - Все карточки этой серии повторно актуализированы против итоговых runtime,
   manifest, publish и verification contracts.
 
@@ -73,10 +76,13 @@ phase-команды остаются repair/debug/manual-resume surface. Transi
 - `bin/changerail-delivery-runner`
 
 ## Result
-not started
+ready for tracked runner plan
 
 ## Next
-- После exit gate серии `010` провести обязательный re-triage этой серии.
+- Создать и проверить tracked runner plan `020-one-command-delivery-experience`.
 
 ## Log
 - 2026-08-01T15:07:29Z epic создана из объединенного consumer delivery feedback.
+- 2026-08-01T21:24:05Z readiness pass после exit audit серии `010`: серия
+  остается единой, story cards `020-01`..`020-05` готовятся к `2.todo` и
+  package runner plan.

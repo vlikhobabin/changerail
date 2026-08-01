@@ -1,0 +1,56 @@
+{
+  "cards": [
+    {
+      "card": "020-01-formalize-deliver-ready-card-contract.md",
+      "id": "020-01",
+      "workspace": "changerail"
+    },
+    {
+      "card": "020-02-add-retained-delivery-evidence.md",
+      "depends_on": [
+        "020-01"
+      ],
+      "id": "020-02",
+      "workspace": "changerail"
+    },
+    {
+      "card": "020-03-add-remote-preflight-diagnostics-and-resume.md",
+      "depends_on": [
+        "020-02"
+      ],
+      "id": "020-03",
+      "workspace": "changerail"
+    },
+    {
+      "card": "020-04-model-review-rescue-budget.md",
+      "depends_on": [
+        "020-03"
+      ],
+      "id": "020-04",
+      "workspace": "changerail"
+    },
+    {
+      "card": "020-05-prove-one-command-delivery-regression.md",
+      "depends_on": [
+        "020-01",
+        "020-02",
+        "020-03",
+        "020-04"
+      ],
+      "id": "020-05",
+      "workspace": "changerail"
+    }
+  ],
+  "description": "План runner для серии 020 после exit audit серии 010",
+  "id": "020-one-command-delivery-experience",
+  "max_parallel": 1,
+  "per_workspace_parallelism": 1,
+  "push_mode": "push",
+  "schema": "changerail.delivery-plan.v1",
+  "workspaces": [
+    {
+      "alias": "changerail",
+      "path": "."
+    }
+  ]
+}

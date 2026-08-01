@@ -1,7 +1,7 @@
 # Добавить remote preflight diagnostics и resume
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -55,7 +55,41 @@ story
   а не скрытая замена approved operator config.
 
 ## Change Set
-- none yet
+- `add-remote-preflight-diagnostics-and-resume` (planned)
+
+## Change 1: `add-remote-preflight-diagnostics-and-resume`
+
+### Why
+Remote-push preflight failures can be transient, but current runner status does
+not preserve enough sanitized evidence or resume semantics to continue safely
+without manual reconstruction.
+
+### Goal
+Classify remote preflight failures, retain sanitized evidence, and make resume
+repeat a full fresh publish-target proof before continuing.
+
+### Scope
+- Single-card and queue runner preflight/status/resume contracts.
+- Operator diagnostics and migration docs.
+
+### Acceptance
+- Failure classes различают SSH config, DNS, auth, missing branch, timeout и
+  unknown remote failure.
+- Status использует canonical `changerail.delivery-run.v1` fields и не вводит
+  дублирующие top-level `id/status/started_at` aliases.
+- Structured preflight evidence содержит sanitized command/result/detail.
+- Ограниченный retry/backoff применяется только к transient classes.
+- Explicit resume принимает prior status, повторяет полный fresh preflight и
+  продолжает только при доказанном publish target.
+- Auth/branch uncertainty остается fail-closed.
+- Smokes воспроизводят failure classes и later-success resume без сети.
+
+### Depends On
+- `add-retained-delivery-evidence`
+- `fix-publish-finalization-ledger`
+
+### Related
+- `openspec/changes/add-remote-preflight-diagnostics-and-resume/`
 
 ## Verify
 - Fake remote/SSH/DNS/auth fixtures.
@@ -69,10 +103,12 @@ story
 - `docs/changerail-contracts.md`
 
 ## Result
-not started
+deliver-ready after series `010` exit audit
 
 ## Next
-- После `020-02` выполнить `$changerail-ff` для этой карточки.
+- `$chrl-deliver openspec/board/2.todo/020-03-add-remote-preflight-diagnostics-and-resume.md`
 
 ## Log
 - 2026-08-01T15:07:29Z карточка нормализована из E1 runner feedback.
+- 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
+  в `2.todo`, добавлен ordered Change 1 для package runner.

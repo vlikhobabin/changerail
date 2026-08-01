@@ -1,7 +1,7 @@
 # Доказать one-command delivery интеграционным regression smoke
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -54,7 +54,42 @@ story
 - Fixture не должна требовать Codex credentials или расходовать network tokens.
 
 ## Change Set
-- none yet
+- `prove-one-command-delivery-regression` (planned)
+
+## Change 1: `prove-one-command-delivery-regression`
+
+### Why
+The series needs a deterministic end-to-end guard that proves the accepted-card
+to reviewed-publish path and the transient/no-go failure paths without live
+network or real consumer repositories.
+
+### Goal
+Add a bounded integration smoke for one-command delivery success, transient
+preflight resume and fail-closed stale/no-go behavior.
+
+### Scope
+- Integration fixtures and minimal test-only fake agent/reviewer surfaces.
+- Release inventory/docs for the new smoke.
+
+### Acceptance
+- Success fixture использует temporary repo и local bare remote без внешней
+  сети.
+- Flow начинается с deliver-ready card и одного orchestration entrypoint.
+- Final card, Git history, manifest, verdict, evidence и runner status
+  согласованы.
+- Fixture доказывает отсутствие stale tracked publish metadata и extra scope.
+- Отдельный сценарий останавливается и возобновляется после transient preflight.
+- Отдельный сценарий fail-closed при stale verdict или exhausted review budget.
+- Smoke входит в release baseline с bounded runtime.
+
+### Depends On
+- `formalize-deliver-ready-card-contract`
+- `add-retained-delivery-evidence`
+- `add-remote-preflight-diagnostics-and-resume`
+- `model-review-rescue-budget`
+
+### Related
+- `openspec/changes/prove-one-command-delivery-regression/`
 
 ## Verify
 - Новый end-to-end smoke.
@@ -67,10 +102,12 @@ story
 - `scripts/smoke-delivery-manifest-derive.py`
 
 ## Result
-not started
+deliver-ready after series `010` exit audit
 
 ## Next
-- После `020-04` выполнить `$changerail-ff` для этой карточки.
+- `$chrl-deliver openspec/board/2.todo/020-05-prove-one-command-delivery-regression.md`
 
 ## Log
 - 2026-08-01T15:07:29Z добавлена как обязательный exit gate серии.
+- 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
+  в `2.todo`, добавлен ordered Change 1 для package runner.

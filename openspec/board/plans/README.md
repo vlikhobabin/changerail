@@ -21,3 +21,5 @@ package runner.
 
 - `010-core-release-contracts.json` - карточки `010-02`..`010-05` после bootstrap
   delivery карточки `010-01`.
+- `020-one-command-delivery-experience.json` - карточки `020-01`..`020-05`
+  после exit audit серии `010`.

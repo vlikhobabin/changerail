@@ -1,7 +1,7 @@
 # Формализовать deliver-ready contract карточки
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -52,7 +52,40 @@ plan и известные gates, но OpenSpec artifacts еще могут от
   boolean.
 
 ## Change Set
-- none yet
+- `formalize-deliver-ready-card-contract` (planned)
+
+## Change 1: `formalize-deliver-ready-card-contract`
+
+### Why
+Accepted board cards can currently be handed to phase commands or
+`$chrl-deliver` with ambiguous readiness language, so operators still infer
+whether OpenSpec artifacts are required before delivery.
+
+### Goal
+Define `deliver-ready` as the accepted-card contract for normal one-command
+handoff while keeping `ff/do/review/pub` as internal phases or explicit repair
+surfaces.
+
+### Scope
+- Shared methodology, board docs, templates and skill wording.
+- Advisory readiness diagnostics if they stay non-blocking before card
+  acceptance.
+
+### Acceptance
+- `deliver-ready` определен в shared methodology, board docs и templates.
+- Для стандартной доски состояние соответствует принятой карточке в `2.todo`
+  с ordered plan; новая шестая колонка не добавляется.
+- OpenSpec artifacts не являются precondition для запуска `$chrl-deliver`.
+- `$chrl-deliver <card>` представлен как normal operator handoff.
+- `ff/do/review/pub` описаны как internal phases или явные
+  repair/debug/manual-resume commands.
+- Templates позволяют подготовить deliver-ready card без premature changes.
+
+### Depends On
+- `010-core-release-contracts`
+
+### Related
+- `openspec/changes/formalize-deliver-ready-card-contract/`
 
 ## Verify
 - Docs/template consistency smoke.
@@ -66,10 +99,12 @@ plan и известные gates, но OpenSpec artifacts еще могут от
 - `templates/project/openspec/board/README.md.tpl`
 
 ## Result
-not started
+deliver-ready after series `010` exit audit
 
 ## Next
-- После re-triage серии выполнить `$changerail-ff` для этой карточки.
+- `$chrl-deliver openspec/board/2.todo/020-01-formalize-deliver-ready-card-contract.md`
 
 ## Log
 - 2026-08-01T15:07:29Z исходная карточка уточнена без введения новой board lane.
+- 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
+  в `2.todo`, добавлен ordered Change 1 для package runner.
