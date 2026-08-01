@@ -13,6 +13,8 @@
 - `3.inprogress/` - задачи с apply-ready change-set, взятые в работу.
 - `4.done/` - завершенные задачи с зафиксированным результатом.
 - `5.canceled/` - закрытые без реализации или вынесенные за текущий scope.
+- `plans/` - tracked public-safe delivery plans для package runner; runtime
+  statuses и locks остаются в ignored `.runtime/changerail/`.
 
 ## Gates
 
@@ -39,6 +41,8 @@
   выполняются по `Series Index`, если epic явно не разрешает иной порядок.
 - Если следующая серия зависит от фактического результата предыдущей, ее epic
   и stories остаются provisional до обязательного refresh gate.
+- Tracked plan серии создается только после readiness/refresh gate и содержит
+  только executable story cards; coordination-only epic cards не включаются.
 - В `2.todo/` и `3.inprogress/` карточка должна содержать ordered sections
   `## Change 1:`, `## Change 2:` и так далее.
 - В `Related` указываются только публичные пути внутри ChangeRail или generic

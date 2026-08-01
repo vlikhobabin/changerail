@@ -1,7 +1,7 @@
 # Добавить manifest scope reconciliation и handoff summary
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -50,7 +50,37 @@ ignored handoff summary данными review, verification и окончате�
 - Summary должна оставаться малой; raw evidence остается ignored и ссылочной.
 
 ## Change Set
-- none yet
+- `add-manifest-scope-and-handoff` (planned)
+
+## Change 1: `add-manifest-scope-and-handoff`
+
+### Why
+Review/publish handoff сейчас требует ручного rename-aware сравнения manifest и
+staged diff, а итоговые review/verification/card summaries не закреплены в
+машиночитаемом ignored ledger.
+
+### Goal
+Добавить manifest scope reconciliation и concise handoff summary, которые
+проверяют tracked payload без включения raw runtime logs в commit scope.
+
+### Scope
+- Delivery manifest schema/helper и documentation.
+- Review/publish handoff integration.
+- Rename и staged-scope fixtures.
+
+### Acceptance
+- `scope-check` сравнивает manifest с working tree и отдельно со staged diff.
+- Проверка NUL-safe и корректно обрабатывает add/modify/delete/rename.
+- Результат явно перечисляет missing, extra и mismatched paths.
+- Ignored runtime paths не считаются committable scope.
+- Manifest хранит concise review и verification summaries и final card state.
+- Schema и negative smoke отклоняют ложный green при extra staged path.
+
+### Depends On
+- `fix-publish-finalization-ledger`
+
+### Related
+- `openspec/changes/add-manifest-scope-and-handoff/`
 
 ## Verify
 - Scope-check smoke для add/modify/delete/rename и non-UTF-8 path.
@@ -67,7 +97,8 @@ ignored handoff summary данными review, verification и окончате�
 not started
 
 ## Next
-- После `010-03` выполнить `$changerail-ff` для этой карточки.
+- Выполнить через series `010` runner plan после `010-03`.
 
 ## Log
 - 2026-08-01T15:07:29Z карточка выделена из E1 delivery feedback.
+- 2026-08-01T15:45:00Z карточка переведена в `2.todo` для runner delivery.

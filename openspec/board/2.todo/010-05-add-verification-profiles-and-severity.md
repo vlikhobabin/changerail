@@ -1,7 +1,7 @@
 # Добавить consumer profiles и severity в verify-project
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -54,7 +54,42 @@ default: project policy может объявить surface required/optional/fo
 - Не смешивать delivery auth advisory с structural verification outcome.
 
 ## Change Set
-- none yet
+- `add-verification-profiles-and-severity` (planned)
+
+## Change 1: `add-verification-profiles-and-severity`
+
+### Why
+`verify-project` сейчас не различает required/optional/forbidden consumer
+surfaces и blocking/non-blocking diagnostics, из-за чего Codex-only projects и
+project-wide baseline debt требуют ручной интерпретации.
+
+### Goal
+Добавить profile-aware и severity-aware verification contract с fail-closed
+default и явным `pass-with-diagnostics` только для non-blocking findings.
+
+### Scope
+- `bin/verify-project`, JSON output contract и project config/template docs.
+- Verification specs и deterministic fixtures.
+- Generated project bootstrap/verify smoke matrix.
+
+### Acceptance
+- Project profile объявляет Codex, Claude и legacy MCP surfaces как required,
+  optional или forbidden.
+- Checks имеют stable status/severity contract и machine-readable summary.
+- Только non-blocking findings могут давать `pass-with-diagnostics`.
+- Targeted card-owned OpenSpec validation остается обязательной.
+- Project-wide baseline debt допускается как diagnostic только при явной
+  tracked policy с видимым residual risk.
+- Default profile сохраняет текущий строгий all-surfaces behavior.
+- Positive/negative smokes покрывают Codex-only, all-surfaces, forbidden
+  artifact и попытку ослабить mandatory check.
+
+### Depends On
+- `establish-supported-python-runtime`
+- `add-manifest-scope-and-handoff`
+
+### Related
+- `openspec/changes/add-verification-profiles-and-severity/`
 
 ## Verify
 - Focused `verify-project` profile/severity smoke matrix.
@@ -71,7 +106,8 @@ default: project policy может объявить surface required/optional/fo
 not started
 
 ## Next
-- После `010-04` выполнить `$changerail-ff` для этой карточки.
+- Выполнить через series `010` runner plan после `010-04`.
 
 ## Log
 - 2026-08-01T15:07:29Z requirements нормализованы из consumer feedback.
+- 2026-08-01T15:45:00Z карточка переведена в `2.todo` для runner delivery.

@@ -1,7 +1,7 @@
 # Исправить YAML frontmatter ChangeRail skills
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -50,7 +50,38 @@ frontmatter всех bundled skills в release baseline.
   CI gate.
 
 ## Change Set
-- none yet
+- `repair-skill-frontmatter-validation` (planned)
+
+## Change 1: `repair-skill-frontmatter-validation`
+
+### Why
+Текущие canonical ChangeRail skill frontmatter содержат YAML scalar с `: `,
+из-за чего Codex может пропустить загрузку skill и сделать runner bootstrap
+недетерминированным.
+
+### Goal
+Сделать skill metadata YAML-valid и добавить release gate, который проверяет
+полный bundled skill frontmatter тем же классом парсинга, на который опирается
+agent discovery.
+
+### Scope
+- `skills/*/SKILL.md` frontmatter для canonical ChangeRail skills.
+- Детерминированный skill metadata smoke в release baseline.
+- Contract/spec update для валидируемой skill metadata.
+
+### Acceptance
+- Все `skills/*/SKILL.md` имеют YAML-valid frontmatter.
+- Canonical и alias skills загружаются без `Skipped loading` diagnostics.
+- Release baseline парсит полный frontmatter, а не только извлекает `name`
+  строковым разбором.
+- Negative fixture доказывает, что unquoted scalar с `: ` отклоняется.
+- Проверка не зависит от сетевого `codex exec` или наличия credentials.
+
+### Depends On
+- none
+
+### Related
+- `openspec/changes/repair-skill-frontmatter-validation/`
 
 ## Verify
 - YAML parse всех `skills/*/SKILL.md`.
@@ -68,7 +99,8 @@ frontmatter всех bundled skills в release baseline.
 not started
 
 ## Next
-- `$changerail-ff openspec/board/1.backlog/010-01-repair-skill-frontmatter-validation.md`
+- Bootstrap delivery: `$chrl-deliver openspec/board/2.todo/010-01-repair-skill-frontmatter-validation.md`
 
 ## Log
 - 2026-08-01T15:07:29Z карточка пересобрана из исходного bug report.
+- 2026-08-01T15:45:00Z карточка переведена в `2.todo` для bootstrap delivery.
