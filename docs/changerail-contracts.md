@@ -299,6 +299,8 @@ bin/changerail-delivery-runner preflight openspec/board/3.inprogress/example.md 
   --connectivity-url https://example.invalid/health --json
 bin/changerail-delivery-runner run openspec/board/3.inprogress/example.md \
   --model gpt-5 --reasoning-effort medium
+bin/changerail-delivery-runner resume \
+  --status-path .runtime/changerail/delivery-runs/<run-id>/status.json
 ```
 
 Runner запускает `codex exec` через настроенный launcher, закрывает stdin
@@ -312,7 +314,14 @@ tracked `bin/codex`, если оператор запускает ChangeRail run
 `--runtime-root` не задан, status пишется под
 `<workspace>/.runtime/changerail/delivery-runs/`. Preflight записывает диагностику
 launcher, Codex binary, auth state, `config.toml`, stale symlink-ов в
-`CODEX_HOME`, permissions и optional connectivity URL. Connectivity diagnostics
+`CODEX_HOME`, permissions, publish target и optional connectivity URL. Remote
+publish-target proof выполняет `git ls-remote --exit-code <remote>
+refs/heads/<branch>` и сохраняет только sanitized command/result/detail:
+remote name, branch, remote URL class, failure class, retryability, attempt
+count и bounded detail. Failure classes: `ssh_config`, `dns`, `auth`,
+`missing_branch`, `timeout`, `unknown_remote_failure`. Bounded retry/backoff
+допустим только для `dns`, `timeout` и `unknown_remote_failure`; auth, SSH
+config и branch uncertainty остаются fail-closed. Connectivity diagnostics
 записывают только sanitized endpoint metadata, status или exception class; raw
 URL, query values и raw exception text не являются частью structured status.
 Child stdout/stderr logs остаются raw ignored runtime evidence и не должны
@@ -338,6 +347,13 @@ signals являются preferred source of truth; если их нет, fallba
 `docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`: ignored
 project-local marker, explicit `CODEX_HOME` или supported auth environment
 variable без публикации credentials.
+
+Single-card `resume` принимает prior `changerail.delivery-run.v1` status как
+контекст после blocked remote publish-target preflight, но не доверяет прежнему
+preflight как proof. Runner повторяет полный fresh preflight текущего workspace
+и запускает `$changerail-deliver` только если publish target доказан заново.
+Если prior status отсутствует, невалиден, относится к другой card/workspace или
+fresh proof снова не проходит, resume пишет `BLOCKED` и не запускает delivery.
 
 ## Delivery Plan
 
@@ -431,6 +447,8 @@ uses the existing single-card runner and keeps its own
 `.runtime/changerail/delivery-runs/<run-id>/status.json`. Queue status stores
 references such as child run ids and status paths; raw stdout/stderr logs stay
 ignored runtime evidence and are not embedded in aggregate status.
+Если child preflight блокируется на remote publish target, aggregate card status
+сохраняет compact reason/failure class и `run_status_path`, а не raw child logs.
 For queue plans, plan runner запускает ChangeRail single-card runner, the
 single-card runner запускает Codex, and `CODEX_WORKDIR` и effective
 `CODEX_HOME` bind each child to its consumer workspace.

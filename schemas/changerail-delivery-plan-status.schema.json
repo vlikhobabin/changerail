@@ -221,6 +221,9 @@
         "terminal_reason": {
           "$ref": "#/$defs/terminalReason"
         },
+        "failure_class": {
+          "$ref": "#/$defs/remoteFailureClass"
+        },
         "recovered_by": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]*$"
@@ -270,6 +273,9 @@
     "terminalReason": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9_]*$"
+    },
+    "remoteFailureClass": {
+      "enum": ["ssh_config", "dns", "auth", "missing_branch", "timeout", "unknown_remote_failure"]
     },
     "lock": {
       "type": "object",

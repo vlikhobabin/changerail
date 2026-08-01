@@ -408,6 +408,57 @@
         },
         "message": {
           "type": "string"
+        },
+        "result": {
+          "enum": ["passed", "failed"]
+        },
+        "remote": {
+          "type": "string",
+          "minLength": 1
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remote_url_class": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failure_class": {
+          "$ref": "#/$defs/remoteFailureClass"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "detail": {
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/$defs/preflightEvidence"
+        }
+      }
+    },
+    "remoteFailureClass": {
+      "enum": ["ssh_config", "dns", "auth", "missing_branch", "timeout", "unknown_remote_failure"]
+    },
+    "preflightEvidence": {
+      "type": "object",
+      "required": ["command", "result", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "enum": ["passed", "failed"]
+        },
+        "detail": {
+          "type": "string"
         }
       }
     }

@@ -182,6 +182,11 @@ Expected contract:
 
 - `bin/changerail-delivery-runner` launches one card through the repo launcher
   and writes structured runtime status under `.runtime/changerail/delivery-runs/`;
+- single-card `preflight` classifies remote publish-target failures as
+  `ssh_config`, `dns`, `auth`, `missing_branch`, `timeout` or
+  `unknown_remote_failure`; only transient classes are retried, and
+  `resume --status-path <status.json>` repeats a full fresh preflight before
+  relaunching delivery;
 - `bin/changerail-delivery-runner` also exposes explicit queue plan commands
   `plan`, `preflight-plan`, `run-plan`, `resume-plan` and `status-plan` that
   use `changerail.delivery-plan.v1` and

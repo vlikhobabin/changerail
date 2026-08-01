@@ -80,6 +80,17 @@ git -C PROJECT_PATH diff --check
   openspec/board/1.backlog/another-card.md
 ```
 
+Если single-card preflight блокируется на remote publish target, status
+классифицирует причину как `ssh_config`, `dns`, `auth`, `missing_branch`,
+`timeout` или `unknown_remote_failure`. После исправления transient или
+операторской причины используйте explicit resume; он повторит полный fresh
+preflight и продолжит только при доказанном publish target:
+
+```bash
+/opt/changerail/bin/changerail-delivery-runner resume \
+  --status-path /opt/example-workspace/service-a/.runtime/changerail/delivery-runs/<run-id>/status.json
+```
+
 Для dependency-ordered очереди через несколько child repos используйте
 consumer-owned JSON plan с workspace aliases и relative paths:
 

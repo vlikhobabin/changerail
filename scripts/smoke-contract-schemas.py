@@ -155,6 +155,28 @@ def delivery_run() -> dict[str, Any]:
         "reasoning_tokens": 2,
         "total_tokens": 15,
     }
+    payload["preflight"] = {
+        "checks": [
+            {
+                "name": "publish target",
+                "status": "fail",
+                "message": "mode=remote-push remote=origin branch=main remote_url_class=ssh reachable=false failure_class=dns detail=ssh: Could not resolve hostname example.invalid",
+                "result": "failed",
+                "remote": "origin",
+                "branch": "main",
+                "remote_url_class": "ssh",
+                "failure_class": "dns",
+                "retryable": True,
+                "attempts": 2,
+                "detail": "ssh: Could not resolve hostname example.invalid",
+                "evidence": {
+                    "command": "git ls-remote --exit-code <remote> refs/heads/<branch>",
+                    "result": "failed",
+                    "detail": "ssh: Could not resolve hostname example.invalid",
+                },
+            }
+        ]
+    }
     payload["performance"] = {
         "wall_time_seconds": 12.5,
         "event_counts": {"exec_command": 2, "agent_message": 1},
@@ -506,6 +528,10 @@ def main() -> int:
             invalid_reason["terminal_reason"] = "free form reason"
             if not validator(invalid_reason):
                 failures.append(f"{name}: invalid terminal reason unexpectedly passed")
+            invalid_alias = delivery_run_minimal()
+            invalid_alias["status"] = "BLOCKED"
+            if not validator(invalid_alias):
+                failures.append(f"{name}: duplicate top-level status alias unexpectedly passed")
         negative = mutate_invalid(positive)
         negative_errors = validator(negative)
         if not negative_errors:
@@ -582,6 +608,18 @@ def main() -> int:
     recovery_status["summary"]["recovered"] = 1
     if validate_delivery_plan_status(recovery_status):
         failures.append("changerail-delivery-plan-status.schema.json: recovery status fixture failed")
+
+    remote_failure_status = delivery_plan_status()
+    remote_failure_status["result"] = "BLOCKED"
+    remote_failure_status["terminal_outcome"] = "BLOCKED"
+    remote_failure_status["cards"][0]["state"] = "blocked"
+    remote_failure_status["cards"][0]["result"] = "BLOCKED"
+    remote_failure_status["cards"][0]["failure_class"] = "timeout"
+    remote_failure_status["cards"][0]["reason"] = "publish target fail: timeout"
+    remote_failure_status["summary"]["delivered"] = 1
+    remote_failure_status["summary"]["blocked"] = 1
+    if validate_delivery_plan_status(remote_failure_status):
+        failures.append("changerail-delivery-plan-status.schema.json: remote failure status fixture failed")
 
     if failures:
         for failure in failures:

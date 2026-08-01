@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -28,7 +29,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -50,7 +51,20 @@ BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 MAX_TIMELINE_EVENTS = 100
 MAX_COMMANDS = 50
 MAX_SLOW_COMMANDS = 5
-REMOTE_REACHABILITY_TIMEOUT_SECONDS = 10.0
+REMOTE_REACHABILITY_TIMEOUT_SECONDS = float(os.environ.get("CHANGERAIL_REMOTE_REACHABILITY_TIMEOUT_SECONDS", "10.0"))
+REMOTE_PREFLIGHT_MAX_ATTEMPTS = 2
+REMOTE_PREFLIGHT_BACKOFF_SECONDS = 0.05
+REMOTE_FAILURE_CLASSES = (
+    "ssh_config",
+    "dns",
+    "auth",
+    "missing_branch",
+    "timeout",
+    "unknown_remote_failure",
+)
+TRANSIENT_REMOTE_FAILURE_CLASSES = {"dns", "timeout", "unknown_remote_failure"}
+URL_USERINFO_RE = re.compile(r"([a-z][a-z0-9+.-]*://)([^/@\s]+)@", re.IGNORECASE)
+TOKEN_VALUE_RE = re.compile(r"(?i)(token|password|passwd|secret|access_key|api_key|authorization)=([^\s&]+)")
 
 
 @dataclass
@@ -58,12 +72,37 @@ class Check:
     name: str
     status: str
     message: str
+    data: dict[str, Any] | None = None
 
 
 @dataclass
 class TerminalSignal:
     outcome: str | None = None
     reason: str | None = None
+
+
+@dataclass
+class RemoteProof:
+    status: str
+    message: str
+    remote: str | None = None
+    branch: str | None = None
+    remote_url_class: str | None = None
+    failure_class: str | None = None
+    detail: str | None = None
+    retryable: bool = False
+    attempts: int = 1
+
+
+def check_payload(check: Check) -> dict[str, Any]:
+    payload = {
+        "name": check.name,
+        "status": check.status,
+        "message": check.message,
+    }
+    if check.data:
+        payload.update(check.data)
+    return payload
 
 
 def repo_root_from_script() -> Path:
@@ -192,6 +231,93 @@ def no_push_selected(args: argparse.Namespace) -> bool:
     return any(value == "--no-push" for value in getattr(args, "deliver_arg", []) or [])
 
 
+def sanitize_remote_detail(value: str) -> str:
+    compact = compact_reason(value or "git ls-remote failed")
+    compact = URL_USERINFO_RE.sub(r"\1<redacted>@", compact)
+    compact = TOKEN_VALUE_RE.sub(r"\1=<redacted>", compact)
+    return compact
+
+
+def classify_remote_failure(returncode: int, stdout: str, stderr: str, timed_out: bool = False) -> tuple[str, str, bool]:
+    if timed_out:
+        return "timeout", f"git ls-remote timed out after {REMOTE_REACHABILITY_TIMEOUT_SECONDS:g}s", True
+    raw_detail = stderr.strip() or stdout.strip() or "remote branch ref was not found"
+    detail = sanitize_remote_detail(raw_detail)
+    text = raw_detail.lower()
+    if returncode == 2 and not stderr.strip():
+        return "missing_branch", detail, False
+    if any(
+        marker in text
+        for marker in (
+            "could not resolve hostname",
+            "name or service not known",
+            "temporary failure in name resolution",
+            "nodename nor servname",
+            "no address associated",
+            "failed to resolve",
+            "resolve host",
+        )
+    ):
+        return "dns", detail, True
+    if any(
+        marker in text
+        for marker in (
+            "permission denied",
+            "authentication failed",
+            "access denied",
+            "could not read username",
+            "repository not found",
+            "not authorized",
+            "authorization failed",
+            "publickey",
+        )
+    ):
+        return "auth", detail, False
+    if any(
+        marker in text
+        for marker in (
+            "bad configuration option",
+            "terminating, 1 bad configuration",
+            "no such identity",
+            "identityfile",
+            "host key verification failed",
+            "known_hosts",
+            "no matching host key",
+            "no matching key exchange",
+            "ssh: connect to host",
+            "could not open a connection",
+            "connection refused",
+        )
+    ):
+        return "ssh_config", detail, False
+    return "unknown_remote_failure", detail, True
+
+
+def remote_check_data(proof: RemoteProof) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "result": "passed" if proof.status == "pass" else "failed",
+        "attempts": proof.attempts,
+    }
+    if proof.remote:
+        data["remote"] = proof.remote
+    if proof.branch:
+        data["branch"] = proof.branch
+    if proof.remote_url_class:
+        data["remote_url_class"] = proof.remote_url_class
+    if proof.failure_class:
+        data["failure_class"] = proof.failure_class
+        data["retryable"] = proof.retryable
+    if proof.detail:
+        data["detail"] = proof.detail
+    command = "git ls-remote --exit-code <remote> refs/heads/<branch>"
+    data["evidence"] = {
+        "command": command,
+        "result": data["result"],
+        "detail": proof.detail or proof.message,
+    }
+    return data
+
+
 def git_text(root: Path, *git_args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(root), *git_args],
@@ -216,65 +342,129 @@ def publish_target_state(args: argparse.Namespace) -> Check:
 
     root = args.workspace.resolve(strict=False)
     if not git_is_repo(root):
-        return Check("publish target", "fail", "mode=remote-push git repository unavailable")
+        proof = RemoteProof("fail", "mode=remote-push git repository unavailable", failure_class="unknown_remote_failure", retryable=True)
+        return Check("publish target", "fail", proof.message, remote_check_data(proof))
 
     branch = current_branch(root)
     if not branch:
-        return Check("publish target", "fail", "mode=remote-push current branch unavailable")
+        proof = RemoteProof("fail", "mode=remote-push current branch unavailable", failure_class="missing_branch", retryable=False)
+        return Check("publish target", "fail", proof.message, remote_check_data(proof))
 
     remote = git_text(root, "config", "--get", f"branch.{branch}.remote").stdout.strip()
     merge_ref = git_text(root, "config", "--get", f"branch.{branch}.merge").stdout.strip()
     remote_branch = merge_ref.removeprefix("refs/heads/") if merge_ref.startswith("refs/heads/") else ""
     if not remote or not remote_branch:
-        return Check(
-            "publish target",
+        proof = RemoteProof(
             "fail",
             f"mode=remote-push branch={branch} upstream=missing; configure an approved remote/upstream or pass --no-push explicitly",
+            branch=branch,
+            failure_class="missing_branch",
+            detail="upstream is missing",
+            retryable=False,
         )
+        return Check("publish target", "fail", proof.message, remote_check_data(proof))
     upstream = git_text(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
     upstream_name = upstream.stdout.strip() if upstream.returncode == 0 and upstream.stdout.strip() else f"{remote}/{remote_branch}"
 
     remote_url = git_text(root, "remote", "get-url", remote)
     if remote_url.returncode != 0 or not remote_url.stdout.strip():
-        return Check(
-            "publish target",
+        proof = RemoteProof(
             "fail",
             f"mode=remote-push remote={remote} branch={remote_branch} remote_url=missing",
+            remote=remote,
+            branch=remote_branch,
+            failure_class="unknown_remote_failure",
+            detail="remote URL is missing",
+            retryable=True,
         )
+        return Check("publish target", "fail", proof.message, remote_check_data(proof))
     url = remote_url.stdout.strip()
     url_class = remote_url_class(url)
     if remote_has_embedded_credentials(url):
-        return Check(
-            "publish target",
+        proof = RemoteProof(
             "fail",
             f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} credential_in_url=rejected",
+            remote=remote,
+            branch=remote_branch,
+            remote_url_class=url_class,
+            failure_class="auth",
+            detail="credential_in_url=rejected",
+            retryable=False,
         )
+        return Check("publish target", "fail", proof.message, remote_check_data(proof))
 
-    try:
-        reachable = subprocess.run(
-            ["git", "-C", str(root), "ls-remote", "--exit-code", remote, f"refs/heads/{remote_branch}"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=REMOTE_REACHABILITY_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return Check(
-            "publish target",
+    proof: RemoteProof | None = None
+    for attempt in range(1, REMOTE_PREFLIGHT_MAX_ATTEMPTS + 1):
+        try:
+            reachable = subprocess.run(
+                ["git", "-C", str(root), "ls-remote", "--exit-code", remote, f"refs/heads/{remote_branch}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=REMOTE_REACHABILITY_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            failure_class, detail, retryable = classify_remote_failure(124, "", "", timed_out=True)
+            proof = RemoteProof(
+                "fail",
+                f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false failure_class={failure_class}",
+                remote=remote,
+                branch=remote_branch,
+                remote_url_class=url_class,
+                failure_class=failure_class,
+                detail=detail,
+                retryable=retryable,
+                attempts=attempt,
+            )
+        else:
+            if reachable.returncode == 0:
+                proof = RemoteProof(
+                    "pass",
+                    f"mode=remote-push remote={remote} branch={remote_branch} upstream={upstream_name} remote_url_class={url_class} reachable=true",
+                    remote=remote,
+                    branch=remote_branch,
+                    remote_url_class=url_class,
+                    detail="remote branch reachable",
+                    retryable=False,
+                    attempts=attempt,
+                )
+                break
+            failure_class, detail, retryable = classify_remote_failure(
+                reachable.returncode,
+                reachable.stdout,
+                reachable.stderr,
+            )
+            proof = RemoteProof(
+                "fail",
+                f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false failure_class={failure_class} detail={detail}",
+                remote=remote,
+                branch=remote_branch,
+                remote_url_class=url_class,
+                failure_class=failure_class,
+                detail=detail,
+                retryable=retryable,
+                attempts=attempt,
+            )
+        if not proof.retryable or attempt >= REMOTE_PREFLIGHT_MAX_ATTEMPTS:
+            break
+        time.sleep(REMOTE_PREFLIGHT_BACKOFF_SECONDS)
+
+    if proof is None:
+        proof = RemoteProof(
             "fail",
-            f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false timeout={REMOTE_REACHABILITY_TIMEOUT_SECONDS:g}s",
-        )
-    if reachable.returncode != 0:
-        detail = compact_reason(reachable.stderr.strip() or reachable.stdout.strip() or "git ls-remote failed")
-        return Check(
-            "publish target",
-            "fail",
-            f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false detail={detail}",
+            f"mode=remote-push remote={remote} branch={remote_branch} remote_url_class={url_class} reachable=false failure_class=unknown_remote_failure",
+            remote=remote,
+            branch=remote_branch,
+            remote_url_class=url_class,
+            failure_class="unknown_remote_failure",
+            detail="git ls-remote failed",
+            retryable=True,
         )
     return Check(
         "publish target",
-        "pass",
-        f"mode=remote-push remote={remote} branch={remote_branch} upstream={upstream_name} remote_url_class={url_class} reachable=true",
+        proof.status,
+        proof.message,
+        remote_check_data(proof),
     )
 
 
@@ -785,8 +975,10 @@ def append_single_card_preflight_checks(
             child_status = load_json_object(child_status_path)
             failed = first_failed_child_check(child_status)
             if failed:
-                name, reason = failed
+                name, reason, failure_class = failed
                 compact = f"{name} fail: {reason}"
+                if failure_class:
+                    card["failure_class"] = failure_class
             else:
                 compact = f"child preflight failed: status missing or invalid; exit {result.returncode}"
             card["state"] = "blocked"
@@ -794,7 +986,7 @@ def append_single_card_preflight_checks(
             checks.append(Check("single-card preflight", "fail", f"{card['id']}: {compact}"))
 
 
-def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str] | None:
+def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str, str | None] | None:
     if not isinstance(child_status, dict):
         return None
     checks = child_status.get("preflight", {}).get("checks")
@@ -805,7 +997,12 @@ def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, 
             continue
         name = compact_reason(check.get("name") or "child preflight")
         message = compact_reason(check.get("message") or "failed")
-        return name, message
+        failure_class = check.get("failure_class")
+        if not isinstance(failure_class, str):
+            failure_class = None
+        if failure_class:
+            message = f"{failure_class}: {message}"
+        return name, message, failure_class
     return None
 
 
@@ -857,7 +1054,7 @@ def build_plan_view(
         "mode": mode,
         "workspaces": workspaces,
         "cards": cards,
-        "checks": [asdict(check) for check in checks],
+        "checks": [check_payload(check) for check in checks],
     }
     return view, status
 
@@ -889,6 +1086,7 @@ def plan_status_record(
                 "run_status_path",
                 "result",
                 "terminal_reason",
+                "failure_class",
                 "recovered_by",
                 "upstream_state",
                 "upstream_detail",
@@ -925,7 +1123,7 @@ def plan_status_record(
         "per_workspace_parallelism": data.get("per_workspace_parallelism", 1),
         "workspaces": status_workspaces,
         "cards": status_cards,
-        "checks": [asdict(check) for check in checks],
+        "checks": [check_payload(check) for check in checks],
         "summary": {
             "total_cards": len(status_cards),
             "delivered": sum(1 for card in status_cards if card.get("state") == "delivered"),
@@ -1513,7 +1711,7 @@ def command_preflight(args: argparse.Namespace) -> int:
     args.started_at = utc_now()
     checks = check_preflight(args)
     record = base_record(args, "preflight", "DELIVERED" if all(c.status != "fail" for c in checks) else "BLOCKED")
-    record["preflight"] = {"checks": [asdict(check) for check in checks]}
+    record["preflight"] = {"checks": [check_payload(check) for check in checks]}
     record["timestamps"]["ended_at"] = utc_now()
     record_commit(record, args.workspace.resolve(strict=False))
     if args.write_status:
@@ -1522,16 +1720,14 @@ def command_preflight(args: argparse.Namespace) -> int:
     return 0 if record["result"] == "DELIVERED" else 1
 
 
-def command_run(args: argparse.Namespace) -> int:
-    args.started_at = utc_now()
+def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> int:
     root = args.workspace.resolve(strict=False)
     args.runtime_root.mkdir(parents=True, exist_ok=True)
-    checks = check_preflight(args)
     stdout_path, stderr_path = log_paths(args)
     command = build_command(args)
     record = base_record(args, "delivery", "RUNNING")
     record["command"]["argv"] = command
-    record["preflight"] = {"checks": [asdict(check) for check in checks]}
+    record["preflight"] = {"checks": [check_payload(check) for check in checks]}
     record["logs"] = {"stdout": str(stdout_path), "stderr": str(stderr_path)}
     if any(check.status == "fail" for check in checks):
         record["phase"] = "terminal"
@@ -1587,6 +1783,72 @@ def command_run(args: argparse.Namespace) -> int:
         print(f"terminal_reason: {terminal_signal.reason}")
     print(f"status: {status_path(args)}")
     return 0 if outcome == "DELIVERED" else 1
+
+
+def command_run(args: argparse.Namespace) -> int:
+    args.started_at = utc_now()
+    return run_single_card_delivery(args, check_preflight(args))
+
+
+def prior_status_remote_failure(prior: dict[str, Any]) -> str | None:
+    checks = prior.get("preflight", {}).get("checks")
+    if not isinstance(checks, list):
+        return None
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        if check.get("name") != "publish target" or check.get("status") != "fail":
+            continue
+        failure_class = check.get("failure_class")
+        if isinstance(failure_class, str) and failure_class in REMOTE_FAILURE_CLASSES:
+            return failure_class
+    return None
+
+
+def resume_prior_checks(args: argparse.Namespace) -> list[Check]:
+    prior = load_json_object(args.status_path)
+    if prior is None:
+        return [Check("resume prior status", "fail", f"prior status cannot be read: {args.status_path}")]
+    errors = schema_errors(prior, "changerail-delivery-run.schema.json")
+    if errors:
+        return [Check("resume prior status", "fail", "; ".join(errors))]
+    if prior.get("schema") != SCHEMA or prior.get("result") != "BLOCKED":
+        return [Check("resume prior status", "fail", "prior status is not a blocked delivery-run record")]
+    prior_workspace = prior.get("workspace", {}).get("root")
+    if prior_workspace != str(args.workspace.resolve(strict=False)):
+        return [Check("resume prior status", "fail", "prior status belongs to another workspace")]
+    prior_card = prior.get("card", {}).get("path")
+    if prior_card != args.card:
+        return [Check("resume prior status", "fail", "prior status belongs to another card")]
+    failure_class = prior_status_remote_failure(prior)
+    if not failure_class:
+        return [Check("resume prior status", "fail", "prior status did not stop at remote publish-target preflight")]
+    return [
+        Check(
+            "resume prior status",
+            "pass",
+            f"prior remote preflight failure accepted: {failure_class}",
+            {"failure_class": failure_class},
+        )
+    ]
+
+
+def command_resume(args: argparse.Namespace) -> int:
+    args.started_at = utc_now()
+    resume_checks = resume_prior_checks(args)
+    if any(check.status == "fail" for check in resume_checks):
+        record = base_record(args, "terminal", "BLOCKED")
+        record["preflight"] = {"checks": [check_payload(check) for check in resume_checks]}
+        record["terminal_outcome"] = "BLOCKED"
+        record["terminal_reason"] = "resume_prior_status_invalid"
+        record["timestamps"]["ended_at"] = utc_now()
+        args.runtime_root.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(status_path(args), record)
+        print("terminal_outcome: BLOCKED")
+        print("terminal_reason: resume_prior_status_invalid")
+        print(f"status: {status_path(args)}")
+        return 1
+    return run_single_card_delivery(args, resume_checks + check_preflight(args))
 
 
 def workspace_lock_path(args: argparse.Namespace, workspace: dict[str, Any]) -> Path:
@@ -2224,7 +2486,7 @@ def blocked_plan_status_for_errors(
         "per_workspace_parallelism": fallback.get("per_workspace_parallelism", 1),
         "workspaces": [],
         "cards": [],
-        "checks": [asdict(check) for check in checks],
+        "checks": [check_payload(check) for check in checks],
         "summary": {"total_cards": 0, "delivered": 0, "blocked": 0, "no_go": 0, "skipped": 0},
     }
     schema_check = schema_errors(record, "changerail-delivery-plan-status.schema.json")
@@ -2307,6 +2569,25 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     preflight.add_argument("--write-status", action="store_true")
     preflight.set_defaults(func=command_preflight, model=None, reasoning_effort=None)
 
+    resume = subparsers.add_parser("resume", help="resume a blocked single-card delivery after fresh preflight")
+    resume.add_argument("card", nargs="?", help="single repository-relative board card path; defaults to prior status card")
+    resume.add_argument("--status-path", type=Path, required=True, help="prior delivery-run status.json path")
+    resume.add_argument("--workspace", type=Path)
+    resume.add_argument("--runtime-root", type=Path)
+    resume.add_argument("--run-id", default=utc_run_id())
+    resume.add_argument("--launcher", type=Path, default=repo_root_from_script() / "bin" / "codex")
+    resume.add_argument("--connectivity-url")
+    resume.add_argument("--connectivity-timeout", type=float, default=5.0)
+    resume.add_argument("--model")
+    resume.add_argument("--reasoning-effort")
+    resume.add_argument(
+        "--deliver-arg",
+        action="append",
+        default=[],
+        help="extra argument appended to the $changerail-deliver prompt, repeatable",
+    )
+    resume.set_defaults(func=command_resume)
+
     plan = subparsers.add_parser("plan", help="resolve a delivery plan without launching children")
     add_plan_common(plan)
     plan.set_defaults(func=command_plan)
@@ -2351,8 +2632,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status_plan.set_defaults(func=command_status_plan, no_push=False, plan=Path("delivery-plan.json"))
 
     args = parser.parse_args(argv)
-    if args.command in {"run", "preflight"}:
-        args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
+    if args.command in {"run", "preflight", "resume"}:
+        workspace_arg = args.workspace
+        if args.command == "resume":
+            args.status_path = resolve_path(args.status_path)
+            prior = load_json_object(args.status_path)
+            if args.card is None and isinstance(prior, dict):
+                prior_card = prior.get("card", {}).get("path")
+                if isinstance(prior_card, str) and prior_card:
+                    args.card = prior_card
+            if workspace_arg is None and isinstance(prior, dict):
+                prior_workspace = prior.get("workspace", {}).get("root")
+                if isinstance(prior_workspace, str) and prior_workspace:
+                    workspace_arg = Path(prior_workspace)
+            if args.card is None:
+                args.card = "unknown-card.md"
+        args.workspace = resolve_path(workspace_arg) if workspace_arg else invocation_workspace()
         if args.runtime_root:
             args.runtime_root = resolve_path(args.runtime_root, args.workspace)
         else:

@@ -7,6 +7,7 @@ import http.server
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -134,6 +135,66 @@ def write_fake_launcher(path: Path) -> None:
     path.chmod(0o755)
 
 
+def write_fake_git(path: Path) -> None:
+    real_git = shutil.which("git")
+    if not real_git:
+        raise AssertionError("git binary not found for fake git wrapper")
+    path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import os, subprocess, sys, time",
+                f"REAL_GIT = {real_git!r}",
+                "if 'ls-remote' not in sys.argv:",
+                "    os.execv(REAL_GIT, [REAL_GIT, *sys.argv[1:]])",
+                "mode = os.environ.get('CHANGERAIL_FAKE_GIT_MODE', 'success')",
+                "log = os.environ.get('CHANGERAIL_FAKE_GIT_LOG')",
+                "if log:",
+                "    with open(log, 'a', encoding='utf-8') as handle:",
+                "        handle.write(' '.join(sys.argv[1:]) + '\\n')",
+                "if mode == 'success':",
+                "    sys.exit(0)",
+                "if mode == 'ssh_config':",
+                "    sys.stderr.write('Bad configuration option: Include\\n')",
+                "    sys.exit(128)",
+                "if mode == 'dns':",
+                "    sys.stderr.write('ssh: Could not resolve hostname example.invalid: Name or service not known\\n')",
+                "    sys.exit(128)",
+                "if mode == 'auth':",
+                "    sys.stderr.write('git@example.invalid: Permission denied (publickey).\\n')",
+                "    sys.exit(128)",
+                "if mode == 'missing_branch':",
+                "    sys.exit(2)",
+                "if mode == 'timeout':",
+                "    time.sleep(0.2)",
+                "    sys.exit(128)",
+                "if mode == 'unknown_remote_failure':",
+                "    sys.stderr.write('fatal: remote end hung up unexpectedly\\n')",
+                "    sys.exit(128)",
+                "sys.stderr.write('fatal: unexpected fake git mode\\n')",
+                "sys.exit(128)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def fake_git_env(tmp: Path, mode: str, *, timeout: float | None = None, log: Path | None = None) -> dict[str, str]:
+    bin_dir = tmp / f"fake-git-{mode}"
+    bin_dir.mkdir(exist_ok=True)
+    write_fake_git(bin_dir / "git")
+    env = runner_env()
+    env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
+    env["CHANGERAIL_FAKE_GIT_MODE"] = mode
+    if timeout is not None:
+        env["CHANGERAIL_REMOTE_REACHABILITY_TIMEOUT_SECONDS"] = str(timeout)
+    if log is not None:
+        env["CHANGERAIL_FAKE_GIT_LOG"] = str(log)
+    return env
+
+
 def write_fake_queue_runner(path: Path) -> None:
     path.write_text(
         "\n".join(
@@ -172,6 +233,9 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    if preflight_mode == 'auth-fail' and 'service-a-card' in args.card:",
                 "        result = 'BLOCKED'",
                 "        checks = [{'name': 'CODEX auth', 'status': 'fail', 'message': 'no auth marker or supported auth environment variable found; see docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner'}]",
+                "    if preflight_mode == 'remote-fail' and 'service-a-card' in args.card:",
+                "        result = 'BLOCKED'",
+                "        checks = [{'name': 'publish target', 'status': 'fail', 'message': 'mode=remote-push remote=origin branch=main remote_url_class=ssh reachable=false failure_class=dns detail=ssh: Could not resolve hostname example.invalid', 'result': 'failed', 'remote': 'origin', 'branch': 'main', 'remote_url_class': 'ssh', 'failure_class': 'dns', 'retryable': True, 'attempts': 2, 'detail': 'ssh: Could not resolve hostname example.invalid', 'evidence': {'command': 'git ls-remote --exit-code <remote> refs/heads/<branch>', 'result': 'failed', 'detail': 'ssh: Could not resolve hostname example.invalid'}}]",
                 "    status = {",
                 "        'schema': 'changerail.delivery-run.v1',",
                 "        'run_id': args.run_id,",
@@ -1066,6 +1130,126 @@ def check_publish_target_preflight(tmp: Path) -> None:
             raise AssertionError(f"credential diagnostic leaked raw URL data: {message}")
 
 
+def remote_preflight_workspace(tmp: Path, name: str) -> tuple[Path, Path, Path]:
+    workspace = create_workspace(tmp, name, publish_ready=False)
+    set_configured_upstream(workspace, "example.invalid:org/repo.git")
+    launcher = tmp / f"fake-codex-{name}"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    return workspace, launcher, runtime
+
+
+def publish_target_check(payload: dict[str, Any]) -> dict[str, Any]:
+    checks = {check["name"]: check for check in payload["preflight"]["checks"]}
+    return checks["publish target"]
+
+
+def check_remote_preflight_failure_classes(tmp: Path) -> None:
+    cases = [
+        ("ssh_config", False, 1, None),
+        ("dns", True, 2, None),
+        ("auth", False, 1, None),
+        ("missing_branch", False, 1, None),
+        ("timeout", True, 2, 0.05),
+        ("unknown_remote_failure", True, 2, None),
+    ]
+    for mode, retryable, attempts, timeout in cases:
+        workspace, launcher, runtime = remote_preflight_workspace(tmp, f"remote-{mode}")
+        log = tmp / f"remote-{mode}-git-calls.log"
+        result = run(
+            [
+                str(RUNNER),
+                "preflight",
+                CARD,
+                "--workspace",
+                str(workspace),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"remote-{mode}",
+                "--launcher",
+                str(launcher),
+                "--json",
+                "--write-status",
+            ],
+            env=fake_git_env(tmp, mode, timeout=timeout, log=log),
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"{mode} remote preflight unexpectedly passed")
+        check = publish_target_check(json.loads(result.stdout))
+        if check.get("failure_class") != mode:
+            raise AssertionError(f"{mode} was not classified correctly: {check}")
+        if check.get("retryable") is not retryable:
+            raise AssertionError(f"{mode} retryable mismatch: {check}")
+        if check.get("attempts") != attempts:
+            raise AssertionError(f"{mode} attempts mismatch: {check}")
+        evidence = check.get("evidence", {})
+        if evidence.get("command") != "git ls-remote --exit-code <remote> refs/heads/<branch>":
+            raise AssertionError(f"{mode} evidence command was not sanitized: {check}")
+        detail = json.dumps(check, ensure_ascii=False)
+        for forbidden in ("ssh://git@example.invalid/org/repo.git", "git@example.invalid:org/repo.git"):
+            if forbidden in detail:
+                raise AssertionError(f"{mode} diagnostic leaked raw remote URL: {check}")
+        observed_attempts = len(log.read_text(encoding="utf-8").splitlines())
+        if observed_attempts != attempts:
+            raise AssertionError(f"{mode} git ls-remote attempts mismatch: {observed_attempts} != {attempts}")
+
+
+def check_remote_preflight_resume_success(tmp: Path) -> None:
+    workspace, launcher, runtime = remote_preflight_workspace(tmp, "remote-resume")
+    prior = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-resume-prior",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "dns"),
+    )
+    if prior.returncode == 0:
+        raise AssertionError("prior remote failure preflight unexpectedly passed")
+    prior_check = publish_target_check(json.loads(prior.stdout))
+    if prior_check.get("failure_class") != "dns":
+        raise AssertionError(f"prior remote preflight did not record dns: {prior_check}")
+
+    resume = run(
+        [
+            str(RUNNER),
+            "resume",
+            "--status-path",
+            str(runtime / "remote-resume-prior" / "status.json"),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-resume",
+            "--launcher",
+            str(launcher),
+        ],
+        env=fake_git_env(tmp, "success"),
+    )
+    require_ok(resume, "remote preflight resume")
+    status = load_status(runtime, "remote-resume")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["resume prior status"]["status"] != "pass":
+        raise AssertionError(f"resume did not accept prior status: {checks['resume prior status']}")
+    if checks["publish target"]["status"] != "pass" or checks["publish target"].get("attempts") != 1:
+        raise AssertionError(f"resume did not repeat fresh publish target proof: {checks['publish target']}")
+    for required in ("launcher exists", "CODEX auth", "CODEX_HOME symlinks", "codex binary"):
+        if required not in checks:
+            raise AssertionError(f"resume did not repeat full preflight; missing {required}: {checks}")
+    if status["result"] != "DELIVERED":
+        raise AssertionError(f"resume did not continue to delivery after fresh proof: {status}")
+
+
 def check_preflight_connectivity_failure_redaction(tmp: Path) -> None:
     workspace = create_workspace(tmp, "preflight-failure-workspace")
     launcher = tmp / "fake-codex-preflight-failure"
@@ -1348,6 +1532,45 @@ def check_queue_preflight_child_failure_compact(tmp: Path) -> None:
     json_payload = json.loads(json_result.stdout)
     if json_payload["schema"] != "changerail.delivery-plan-status.v1":
         raise AssertionError(f"status-plan --json changed schema: {json_payload}")
+
+
+def check_queue_preflight_remote_failure_class(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-remote-fail")
+    runner = tmp / "fake-queue-remote-preflight-runner"
+    runtime = tmp / "queue-remote-fail-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_PREFLIGHT_MODE"] = "remote-fail"
+    result = run(
+        [
+            str(RUNNER),
+            "preflight-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-child-fail",
+            "--launcher",
+            str(runner),
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError(f"remote child preflight unexpectedly passed: {result.stdout}")
+    if "service-a-card: publish target fail: dns:" not in result.stdout:
+        raise AssertionError(f"remote class compact diagnostic missing: {result.stdout}")
+    status = load_status(runtime, "remote-child-fail")
+    service_a_card = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    if service_a_card.get("failure_class") != "dns":
+        raise AssertionError(f"aggregate card did not retain remote failure class: {service_a_card}")
+    if "run_status_path" not in service_a_card:
+        raise AssertionError(f"aggregate card did not reference child status: {service_a_card}")
+    if "RAW_CHILD_STDOUT_SHOULD_NOT_APPEAR" in json.dumps(status, ensure_ascii=False):
+        raise AssertionError(f"aggregate status inlined child output: {status}")
 
 
 def check_generated_queue_plan(tmp: Path) -> None:
@@ -2128,12 +2351,15 @@ def main() -> int:
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
         check_publish_target_preflight(workspace)
+        check_remote_preflight_failure_classes(workspace)
+        check_remote_preflight_resume_success(workspace)
         check_preflight_connectivity_failure_redaction(workspace)
         check_explicit_codex_home_preflight(workspace)
         check_run_preflight_failure(workspace)
         check_stale_symlink_preflight(workspace)
         check_queue_plan_preflight(workspace)
         check_queue_preflight_child_failure_compact(workspace)
+        check_queue_preflight_remote_failure_class(workspace)
         check_generated_queue_plan(workspace)
         check_queue_launcher_docs()
         check_queue_preflight_failures(workspace)
