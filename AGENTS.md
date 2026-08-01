@@ -21,12 +21,14 @@ The project is currently in bootstrap stage. The tracked public surface is:
 - generic ChangeRail lifecycle skills and OpenSpec lifecycle skills under `skills/`;
 - Claude command wrappers under `claude/commands/changerail/`;
 - ChangeRail contract schemas under `schemas/`;
-- helper wrappers `bin/openspec`, `bin/changerail-review-verdict`,
+- helper wrappers `bin/openspec`, `bin/changerail-python`,
+  `bin/changerail-review-verdict`,
   `bin/bootstrap-project`, `bin/verify-project`,
   `bin/changerail-delivery-runner` and `bin/changerail-delivery-metrics`;
 - project bootstrap templates under `templates/project/`;
 - drift, smoke, release baseline, schema validation and public-surface checks
   under `scripts/`;
+- Python runtime/helper dependency pins in `requirements-runtime.txt`;
 - release-gate Python tooling pins in `requirements-dev.txt` and `ruff.toml`;
 - MIT `LICENSE`;
 - public Codex configuration under `.codex/config.toml`;

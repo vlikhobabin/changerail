@@ -168,7 +168,7 @@ Preferred order:
 
 1. Validate an existing external verdict:
    ```bash
-   python3 scripts/changerail_review_verdict.py validate \
+   bin/changerail-review-verdict validate \
      ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
    ```
 2. Run a fresh reviewer context when the operator permits this orchestration
@@ -244,7 +244,7 @@ Boundaries:
 - Include reviewer.independence with fresh_context true,
   did_not_plan_or_implement true and a non-empty basis.
 - Compute the workspace fingerprint and validate the verdict with:
-  python3 scripts/changerail_review_verdict.py validate \
+  bin/changerail-review-verdict validate \
     .runtime/changerail/reviews/<card-id>.json --json
 ```
 
@@ -253,7 +253,7 @@ with `--check-fresh` before publish. This freshness check includes the reviewed
 Git tree SHA when the verdict schema requires it:
 
 ```bash
-python3 scripts/changerail_review_verdict.py validate \
+bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
 ```
 

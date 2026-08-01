@@ -1,7 +1,19 @@
-#!/usr/bin/env python3
-"""Run one ChangeRail delivery card non-interactively and write structured runtime status."""
-
+#!/bin/sh
+""":"
+self="$0"
+if command -v readlink >/dev/null 2>&1; then
+    resolved=$(readlink -f "$0" 2>/dev/null || true)
+    if [ -n "$resolved" ]; then
+        self="$resolved"
+    fi
+fi
+exec "$(dirname "$self")/changerail-python" "$0" "$@"
+":"""
 from __future__ import annotations
+
+# Run one ChangeRail delivery card non-interactively and write structured runtime status.
+
+__doc__ = "Run one ChangeRail delivery card non-interactively and write structured runtime status."
 
 import argparse
 import hashlib

@@ -134,6 +134,46 @@ when testing ChangeRail contracts:
 /opt/changerail/bin/openspec validate --all --strict
 ```
 
+## Python Runtime
+
+Status: supported through shared runtime selector for ChangeRail Python helpers.
+
+Expected contract:
+
+- ChangeRail Python helper entrypoints require Python `3.11` or newer.
+- Runtime helper dependencies are declared in `requirements-runtime.txt`.
+- `tomllib` is required from the Python 3.11 stdlib.
+- `jsonschema` is required for schema-backed manifest and verdict validation.
+- `requirements-dev.txt` includes runtime requirements plus release-only tools
+  such as `PyYAML` and `ruff`; it is not the implicit runtime API.
+- Operators can choose a specific interpreter without editing tracked shebangs:
+
+```bash
+CHANGERAIL_PYTHON=/opt/example-project/.runtime/python/bin/python \
+  /opt/changerail/bin/verify-project /opt/example-project
+```
+
+Runtime selection diagnostics are emitted before helper-specific imports when
+the interpreter is too old, the override is invalid or a required module is
+missing. The selector records sanitized check state only under ignored
+runtime state:
+
+```text
+.runtime/changerail/python-runtime/last-check.json
+```
+
+Install runtime dependencies in the selected environment:
+
+```bash
+python3 -m pip install --disable-pip-version-check -r requirements-runtime.txt
+```
+
+Verification:
+
+```bash
+python3 scripts/smoke-python-runtime.py
+```
+
 ## ChangeRail Runtime Helpers
 
 Status: supported as tracked Python helpers.
@@ -155,6 +195,7 @@ Expected contract:
 Verification:
 
 ```bash
+python3 scripts/smoke-python-runtime.py
 python3 scripts/smoke-delivery-runner.py
 python3 scripts/smoke-delivery-metrics.py
 python3 scripts/smoke-review-verdict-validation.py
@@ -166,10 +207,12 @@ python3 scripts/smoke-contract-schemas.py
 
 Status: pinned direct Python tooling for the release gate.
 
-`requirements-dev.txt` pins release-gate Python tools:
+`requirements-dev.txt` includes `requirements-runtime.txt` and pins
+release-gate Python tools:
 
 ```text
-jsonschema==4.23.0
+-r requirements-runtime.txt
+PyYAML==6.0.3
 ruff==0.6.9
 ```
 

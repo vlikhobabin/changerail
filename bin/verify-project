@@ -1,4 +1,14 @@
-#!/usr/bin/env python3
+#!/bin/sh
+""":"
+self="$0"
+if command -v readlink >/dev/null 2>&1; then
+    resolved=$(readlink -f "$0" 2>/dev/null || true)
+    if [ -n "$resolved" ]; then
+        self="$resolved"
+    fi
+fi
+exec "$(dirname "$self")/changerail-python" "$0" "$@"
+":"""
 from __future__ import annotations
 
 import argparse
@@ -534,6 +544,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
         check_symlink(project, ".claude/commands/changerail", changerail_root / "claude" / "commands" / "changerail", changerail_root, aggregator_root),
         check_symlink(project, ".claude/commands/chrl", changerail_root / "claude" / "commands" / "chrl", changerail_root, aggregator_root),
         check_symlink(project, "bin/openspec", changerail_root / "bin" / "openspec", changerail_root, aggregator_root),
+        check_symlink(project, "bin/changerail-python", changerail_root / "bin" / "changerail-python", changerail_root, aggregator_root),
         check_symlink(project, "bin/verify-project", changerail_root / "bin" / "verify-project", changerail_root, aggregator_root),
     ]
     for skill in skills:

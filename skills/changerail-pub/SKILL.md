@@ -66,7 +66,7 @@ At the start of publish, before documentation edits change the working tree,
 validate the verdict:
 
 ```bash
-python3 scripts/changerail_review_verdict.py validate \
+bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
 ```
 
@@ -150,10 +150,10 @@ finalization, not a substantive change to the reviewed payload. If this creates
 a new card-only diff before push, amend only the card with explicit staging.
 
 When the workspace provides `scripts/changerail_delivery_manifest.py`, prefer
-helper-assisted finalization:
+helper-assisted finalization through the shared Python runtime selector:
 
 ```bash
-python3 scripts/changerail_delivery_manifest.py finalize-card "<card-path>" \
+bin/changerail-python scripts/changerail_delivery_manifest.py finalize-card "<card-path>" \
   --commit "<commit>" --remote "<remote>" --branch "<branch>" \
   --push-status pending --timestamp "<utc>"
 git add -- <old-card-path> <new-card-path>
@@ -181,7 +181,7 @@ HEAD`. Never force-push.
 After push, update ignored manifest publish metadata when the helper exists:
 
 ```bash
-python3 scripts/changerail_delivery_manifest.py publish-update \
+bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --status pushed --commit "<commit>" --remote "<remote>" --branch "<branch>" \
   --pushed-at "<utc>" --mode review-gated

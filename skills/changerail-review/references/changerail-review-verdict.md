@@ -55,7 +55,7 @@ freshness gate, not proof of real-world identity or full memory isolation.
 Validate a verdict with the local helper:
 
 ```bash
-python3 scripts/changerail_review_verdict.py validate \
+bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --json
 ```
 
@@ -80,7 +80,7 @@ freshness.
 A verdict certifies one exact working-tree state. Compute the fingerprint with:
 
 ```bash
-python3 scripts/changerail_review_verdict.py fingerprint --workspace <repo-root>
+bin/changerail-review-verdict fingerprint --workspace <repo-root>
 ```
 
 The helper hashes `git status --porcelain`, `git diff HEAD --no-color`, and the

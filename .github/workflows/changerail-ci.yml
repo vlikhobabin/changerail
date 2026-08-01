@@ -51,6 +51,9 @@ jobs:
       - name: Python syntax inventory
         run: python3 scripts/compile-python-inventory.py
 
+      - name: Python runtime smoke
+        run: python3 scripts/smoke-python-runtime.py
+
       - name: Python lint
         run: ruff check bin scripts
 

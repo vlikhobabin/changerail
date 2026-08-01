@@ -1,7 +1,17 @@
-#!/usr/bin/env python3
-"""Launch the ChangeRail review verdict helper from a repo or symlinked wrapper."""
-
+#!/bin/sh
+""":"
+self="$0"
+if command -v readlink >/dev/null 2>&1; then
+    resolved=$(readlink -f "$0" 2>/dev/null || true)
+    if [ -n "$resolved" ]; then
+        self="$resolved"
+    fi
+fi
+exec "$(dirname "$self")/changerail-python" "$0" "$@"
+":"""
 from __future__ import annotations
+
+# Launch the ChangeRail review verdict helper from a repo or symlinked wrapper.
 
 import json
 import sys

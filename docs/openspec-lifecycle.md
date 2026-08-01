@@ -79,6 +79,7 @@ Consumer project может подключать `openspec-*` skills так же
 .claude/skills              -> /opt/changerail/skills
 .codex/skills/openspec-*    -> /opt/changerail/skills/openspec-*
 bin/openspec                -> /opt/changerail/bin/openspec
+bin/changerail-python       -> /opt/changerail/bin/changerail-python
 ```
 
 OpenSpec artifacts (`openspec/board`, `openspec/changes`, `openspec/specs`) при

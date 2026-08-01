@@ -91,7 +91,7 @@ ignored runtime state, а карточка, tasks или manifest содержа
 Для card-level handoff manifest можно строить helper-ом:
 
 ```bash
-python3 scripts/changerail_delivery_manifest.py derive \
+bin/changerail-python scripts/changerail_delivery_manifest.py derive \
   openspec/board/3.inprogress/example.md --write --json
 ```
 

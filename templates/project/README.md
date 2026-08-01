@@ -48,6 +48,7 @@ them:
 - `.codex/skills/chrl-*`
 - `.codex/skills/openspec-*`
 - `bin/openspec`
+- `bin/changerail-python`
 - `bin/verify-project`
 - `bin/changerail-review-verdict`
 

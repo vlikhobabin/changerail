@@ -172,8 +172,9 @@ git -C /opt/changerail status --short
 .codex/skills/changerail-*       -> /opt/changerail/skills/changerail-*
 .codex/skills/chrl-*       -> /opt/changerail/skills/chrl-*
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
-bin/openspec               -> /opt/changerail/bin/openspec
-bin/changerail-review-verdict    -> /opt/changerail/bin/changerail-review-verdict
+bin/openspec                    -> /opt/changerail/bin/openspec
+bin/changerail-python           -> /opt/changerail/bin/changerail-python
+bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
 ```
 
 Практический shell-фрагмент для агента:
@@ -188,6 +189,7 @@ ln -sfnT "$ChangeRail/skills" "$PROJECT/.claude/skills"
 ln -sfnT "$ChangeRail/claude/commands/changerail" "$PROJECT/.claude/commands/changerail"
 ln -sfnT "$ChangeRail/claude/commands/chrl" "$PROJECT/.claude/commands/chrl"
 ln -sfnT "$ChangeRail/bin/openspec" "$PROJECT/bin/openspec"
+ln -sfnT "$ChangeRail/bin/changerail-python" "$PROJECT/bin/changerail-python"
 ln -sfnT "$ChangeRail/bin/changerail-review-verdict" "$PROJECT/bin/changerail-review-verdict"
 
 for skill_path in "$ChangeRail"/skills/*; do

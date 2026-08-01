@@ -172,10 +172,10 @@ python3 scripts/run-release-baseline.py
 
 `scripts/run-release-baseline.py` воспроизводит обязательный release baseline:
 OpenSpec strict validation, JSON/TOML config parsing, schema validation,
-tracked Python syntax inventory, `ruff check bin scripts`, focused smoke
-checks, generated drift fixture, public-surface scans, `git diff --check` и
-ignored-status check. Raw runtime reports остаются under `.runtime/` and are
-not committed.
+tracked Python syntax inventory, Python runtime selector smoke,
+`ruff check bin scripts`, focused smoke checks, generated drift fixture,
+public-surface scans, `git diff --check` и ignored-status check. Raw runtime
+reports остаются under `.runtime/` and are not committed.
 
 ## CI Gate
 
@@ -198,6 +198,7 @@ The CI workflow runs:
 - `scripts/smoke-contract-schemas.py` for all public contract schemas;
 - `scripts/compile-python-inventory.py` for tracked Python helpers and smoke
   scripts;
+- `scripts/smoke-python-runtime.py`;
 - `ruff check bin scripts` with pinned release-gate tooling;
 - `scripts/smoke-release-ci.py` to validate the workflow command inventory;
 - public-surface scans for current files and reachable history;

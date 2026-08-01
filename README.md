@@ -112,6 +112,7 @@ changes**, каждый со своими OpenSpec-артефактами в `op
   `/chrl:explore`, `/chrl:ff`, `/chrl:do`, `/chrl:review`, `/chrl:pub`,
   `/chrl:deliver`;
 - `bin/openspec` с pin версии OpenSpec CLI;
+- `bin/changerail-python` как shared runtime selector для Python helpers;
 - schemas `changerail.review-verdict.v1`,
   `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
   `changerail.delivery-run.v1`, `changerail.evidence-index.v1` и helper
@@ -125,8 +126,9 @@ changes**, каждый со своими OpenSpec-артефактами в `op
   cycle history;
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
 - `scripts/public-surface-scan.py`, `scripts/run-release-baseline.py`,
-  `scripts/compile-python-inventory.py`, `scripts/smoke-contract-schemas.py` и
-  focused smoke checks для release/public-safety gate;
+  `scripts/compile-python-inventory.py`, `scripts/smoke-contract-schemas.py`,
+  `scripts/smoke-python-runtime.py` и focused smoke checks для
+  release/public-safety gate;
 - `VERSION`, `CHANGELOG.md`, compatibility notes и migration guide для
   release discipline;
 - `.github/workflows/changerail-ci.yml` и `scripts/smoke-release-ci.py` для

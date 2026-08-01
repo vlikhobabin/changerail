@@ -1,13 +1,13 @@
 # Зафиксировать поддерживаемый Python runtime ChangeRail
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `010-core-release-contracts`
@@ -53,7 +53,7 @@ story
   разделения runtime и release-only dependencies.
 
 ## Change Set
-- `establish-supported-python-runtime` (planned)
+- `establish-supported-python-runtime` (archived)
 
 ## Change 1: `establish-supported-python-runtime`
 
@@ -88,22 +88,68 @@ contract для всех ChangeRail Python helpers.
 - `openspec/changes/establish-supported-python-runtime/`
 
 ## Verify
-- Focused runtime/bootstrap smoke.
-- `python3 scripts/run-release-baseline.py` из поддерживаемого environment.
-- Public-surface scan и `git diff --check`.
+- RED: `python3 scripts/smoke-python-runtime.py` failed before implementation
+  with missing `bin/changerail-python`, proving the focused smoke covered the
+  selector absence.
+- `python3 scripts/smoke-python-runtime.py` passed after R1 fix: `7/7`
+  checks, including invalid `CHANGERAIL_PYTHON` for `bin/bootstrap-project`.
+- `CHANGERAIL_PYTHON=/opt/example-project/missing-python bin/bootstrap-project
+  --help` exits `2` with the selector invalid override diagnostic.
+- `python3 scripts/compile-python-inventory.py` passed and compiled
+  polyglot Python helper entrypoints.
+- `ruff check bin scripts` passed.
+- `python3 scripts/smoke-release-ci.py` passed: `40/40` checks.
+- `python3 scripts/smoke-verify-project.py` passed: `17/17` checks.
+- `python3 scripts/smoke-bootstrap-project.py` passed: `8/8` checks.
+- `python3 scripts/smoke-delivery-runner.py` passed.
+- `python3 scripts/smoke-delivery-metrics.py` passed.
+- `python3 scripts/smoke-wiring-discovery.py` passed: `172/172` checks.
+- `python3 scripts/smoke-contract-schemas.py` passed: `7` schemas.
+- `python3 scripts/smoke-drift.py --project <generated fixture>` passed:
+  `1/1` checks.
+- `python3 scripts/run-release-baseline.py` passed after R1 fix: `26/26`
+  steps, including current/history public-surface scans and generated drift
+  fixture bootstrap through the selector.
+- `python3 scripts/public-surface-scan.py` passed after R1 fix:
+  `591` files scanned, `0` findings.
+- `./bin/openspec validate --all --strict` passed after R1 fix.
+- `git diff --check` passed after R1 fix.
+
+## Archive
+- `openspec/changes/archive/2026-08-01-establish-supported-python-runtime/`
 
 ## Related
 - `openspec/board/1.backlog/010-00-core-release-contracts-epic.md`
+- `openspec/changes/establish-supported-python-runtime/`
+- `openspec/changes/archive/2026-08-01-establish-supported-python-runtime/`
 - `docs/compatibility.md`
+- `bin/bootstrap-project`
 - `bin/verify-project`
+- `bin/changerail-python`
 - `bin/changerail-delivery-runner`
 
 ## Result
-not started
+Implemented shared Python runtime selector, explicit runtime dependency file,
+selector-backed helper entrypoints, docs/migration updates and focused runtime
+smoke. Synced specs and archived the OpenSpec change. Post-review R1 rescue
+routed `bin/bootstrap-project` through the same selector and re-ran the release
+baseline; awaiting fresh independent review.
+
+Published reviewed payload as `a47ca3407ad77aee2c8cbb0b6c1074bc4e0ca447`; push status `pending` on `main`/`origin`.
 
 ## Next
-- Выполнить через series `010` runner plan после published `010-01`.
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z generic runtime requirement извлечен из consumer feedback.
 - 2026-08-01T15:45:00Z карточка переведена в `2.todo` для runner delivery.
+- 2026-08-01T16:30:36Z `changerail-ff` создал apply-ready artifacts для
+  `establish-supported-python-runtime` и перевел карточку в `3.inprogress`.
+- 2026-08-01T16:51:17Z `changerail-do` реализовал selector/runtime contract,
+  выполнил focused smokes и release baseline, синхронизировал specs и
+  archived change `2026-08-01-establish-supported-python-runtime`; карточка
+  оставлена в `3.inprogress` для independent review.
+- 2026-08-01T17:19:09Z post-review R1 rescue routed `bin/bootstrap-project`
+  through shared `bin/changerail-python` selector and extended runtime smoke
+  coverage for invalid bootstrap override; requires fresh review cycle 2.
+- 2026-08-01T17:54:15Z publish finalized card into `4.done` with commit `a47ca3407ad77aee2c8cbb0b6c1074bc4e0ca447` and push status `pending`.

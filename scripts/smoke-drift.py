@@ -21,6 +21,7 @@ CHANGERAIL_LIKE_PATHS = (
     ".claude",
     ".codex",
     "bin/openspec",
+    "bin/changerail-python",
     "bin/changerail-review-verdict",
     "bin/opsx-review-verdict",
 )
@@ -29,6 +30,7 @@ SYMLINK_PATHS = (
     ".claude/commands/changerail",
     ".claude/commands/opsx",
     "bin/openspec",
+    "bin/changerail-python",
     "bin/changerail-review-verdict",
     "bin/opsx-review-verdict",
 )

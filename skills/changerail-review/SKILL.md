@@ -61,9 +61,10 @@ path is:
 .runtime/changerail/reviews/<card-id>.json
 ```
 
-The canonical schema id is `changerail.review-verdict.v1`. Use
-`scripts/changerail_review_verdict.py` when present, otherwise the linked
-`bin/changerail-review-verdict` helper, to compute and validate verdicts.
+The canonical schema id is `changerail.review-verdict.v1`. Use the linked
+`bin/changerail-review-verdict` helper when present; otherwise use
+`bin/changerail-python scripts/changerail_review_verdict.py` to compute and
+validate verdicts through the shared Python runtime selector.
 
 When retaining review-cycle evidence, keep the latest canonical verdict at:
 
@@ -103,7 +104,7 @@ Run:
 git status --short
 git diff HEAD --stat
 openspec list --json
-python3 scripts/changerail_review_verdict.py fingerprint --workspace .
+bin/changerail-review-verdict fingerprint --workspace .
 ```
 
 Read the card and delivery manifest. Confirm card-owned changes are archived.
@@ -162,7 +163,7 @@ Set `result` to `no-go` when any blocker exists or any acceptance criterion is
 `fail`; otherwise set `go`. Validate:
 
 ```bash
-python3 scripts/changerail_review_verdict.py validate \
+bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --json
 ```
 

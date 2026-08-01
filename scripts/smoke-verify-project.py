@@ -118,6 +118,7 @@ def create_fixture(project: Path, changerail_root: Path) -> None:
     for skill in skill_names(changerail_root):
         symlink_force(changerail_root / "skills" / skill, project / ".codex" / "skills" / skill)
     symlink_force(changerail_root / "bin" / "openspec", project / "bin" / "openspec")
+    symlink_force(changerail_root / "bin" / "changerail-python", project / "bin" / "changerail-python")
     symlink_force(changerail_root / "bin" / "verify-project", project / "bin" / "verify-project")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
 
@@ -229,6 +230,7 @@ def browser_mcp_default_offenders(changerail_root: Path) -> list[str]:
 def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     checks: list[Check] = []
     fake_env = create_fake_npm(changerail_root, run_dir / "fake-bin")
+    fake_env.update({"CODEX_HOME": "", "CODEX_AUTH_TOKEN": "", "OPENAI_API_KEY": ""})
     good_project = run_dir / "example-project"
     create_fixture(good_project, changerail_root)
 

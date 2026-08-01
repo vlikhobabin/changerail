@@ -6,7 +6,50 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
-No unreleased migration notes.
+### What Changed
+
+- ChangeRail Python helpers now share one runtime selector:
+  `bin/changerail-python`.
+- Python helper entrypoints require Python `3.11` or newer and runtime
+  dependencies from `requirements-runtime.txt`.
+- Operators can set `CHANGERAIL_PYTHON` to choose an interpreter without
+  editing tracked shebangs.
+- Unsupported runtimes fail early with remediation diagnostics before
+  helper-specific imports run.
+
+### Required Actions
+
+For operators maintaining the source checkout:
+
+```bash
+cd /opt/changerail
+python3 -m pip install --disable-pip-version-check -r requirements-runtime.txt
+python3 scripts/smoke-python-runtime.py
+```
+
+For consumer projects that keep generated wrapper symlinks, refresh wiring so
+`bin/changerail-python` points at the ChangeRail source of truth:
+
+```bash
+ln -sfnT /opt/changerail/bin/changerail-python /opt/example-project/bin/changerail-python
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+If the host default `python3` is too old, use an explicit interpreter:
+
+```bash
+CHANGERAIL_PYTHON=/opt/example-project/.runtime/python/bin/python \
+  /opt/changerail/bin/verify-project /opt/example-project
+```
+
+Runtime selector state remains ignored under
+`.runtime/changerail/python-runtime/`.
+
+### Rollback
+
+Unset `CHANGERAIL_PYTHON` or point it at the previous supported local Python,
+then return `/opt/changerail` to the previous reviewed ref and rerun project
+verification.
 
 ## 0.2.0 -> 0.3.0
 

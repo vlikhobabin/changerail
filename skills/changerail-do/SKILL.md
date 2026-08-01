@@ -57,10 +57,10 @@ paths only:
 - excluded runtime paths such as manifests, review verdicts, raw command logs
   and local evidence files.
 
-Validate or normalize the manifest with `scripts/changerail_delivery_manifest.py`
-when a project provides that helper. If no helper exists, keep the manifest
-small, structured and conservative; publish must still re-check scope before
-staging.
+Validate or normalize the manifest with
+`bin/changerail-python scripts/changerail_delivery_manifest.py` when a project
+provides that helper. If no helper exists, keep the manifest small, structured
+and conservative; publish must still re-check scope before staging.
 
 ## Inputs
 

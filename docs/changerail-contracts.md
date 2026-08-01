@@ -58,8 +58,8 @@ Review verdict является runtime-файлом:
 Helper:
 
 ```bash
-python3 scripts/changerail_review_verdict.py fingerprint --workspace .
-python3 scripts/changerail_review_verdict.py validate \
+bin/changerail-review-verdict fingerprint --workspace .
+bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
 ```
 
@@ -114,9 +114,9 @@ Helper может вывести или обновить manifest из теку�
 state:
 
 ```bash
-python3 scripts/changerail_delivery_manifest.py derive \
+bin/changerail-python scripts/changerail_delivery_manifest.py derive \
   openspec/board/3.inprogress/example.md --write --json
-python3 scripts/changerail_delivery_manifest.py staging-plan \
+bin/changerail-python scripts/changerail_delivery_manifest.py staging-plan \
   .runtime/changerail/delivery-manifests/example.json --json
 ```
 
@@ -142,7 +142,7 @@ proposal.
 После publish ignored manifest можно обновить без staging runtime state:
 
 ```bash
-python3 scripts/changerail_delivery_manifest.py publish-update \
+bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
   .runtime/changerail/delivery-manifests/example.json \
   --status pushed --commit <commit> --remote origin --branch main \
   --pushed-at <utc> --mode review-gated

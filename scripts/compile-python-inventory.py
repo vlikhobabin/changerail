@@ -32,10 +32,15 @@ def is_python(path: Path) -> bool:
     if not rel.startswith("bin/") or path.name.startswith("."):
         return False
     try:
-        first = path.open("rb").readline(200)
+        with path.open("rb") as handle:
+            first = handle.readline(200)
+            sample = first + handle.read(1024)
     except OSError:
         return False
-    return first.startswith(b"#!/") and b"python" in first
+    return first.startswith(b"#!/") and (
+        b"python" in first
+        or (b'""":' in sample and b"from __future__ import annotations" in sample)
+    )
 
 
 def main() -> int:

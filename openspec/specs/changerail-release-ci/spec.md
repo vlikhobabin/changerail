@@ -168,3 +168,18 @@ for complete bundled skill YAML frontmatter.
 - **WHEN** the release baseline executes the wiring discovery smoke
 - **THEN** the smoke includes a negative fixture for an unquoted `: ` scalar
 - **AND** the baseline fails if the parser path accepts that fixture
+
+### Requirement: Release baseline covers Python runtime selection
+ChangeRail release baseline MUST include focused smoke coverage for shared
+Python runtime selection and diagnostics.
+
+#### Scenario: Runtime smoke covers supported and failing selectors
+- **WHEN** `python3 scripts/smoke-python-runtime.py` runs
+- **THEN** it verifies successful helper startup through a supported runtime
+- **AND** it verifies old-version simulation, missing dependency simulation and
+  invalid override diagnostics
+
+#### Scenario: Local release baseline runs runtime smoke
+- **WHEN** `python3 scripts/run-release-baseline.py` runs
+- **THEN** it includes the focused Python runtime smoke in the mandatory step
+  list
