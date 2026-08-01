@@ -96,6 +96,18 @@ Build a publish scope from manifest `committable_paths`, archive paths, synced
 specs, card state, docs and changed files. Exclude runtime paths and unrelated
 active OpenSpec changes.
 
+When a delivery manifest exists and the helper supports `scope-check`, compare
+the manifest with the working tree before staging:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --target working-tree --json
+```
+
+Stop before staging if the result reports missing, extra or mismatched
+committable paths.
+
 ### 2. Documentation Check
 
 Confirm durable docs that changed user-facing commands, workflow, contracts or
@@ -135,8 +147,15 @@ Stage explicit paths only:
 git add -- <path> ...
 git diff --cached --stat
 git diff --cached --check
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --target staged --json
 git commit -m "<message>"
 ```
+
+If staged scope reconciliation reports any missing, extra or mismatched path,
+unstage the incorrect explicit path set only after confirming it is safe, then
+return to scope review. Never include unrelated staged paths in the commit.
 
 Use `--message` when provided. Otherwise derive a concise message from the
 card summary and local commit style.

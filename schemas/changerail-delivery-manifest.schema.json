@@ -100,6 +100,15 @@
         "$ref": "#/$defs/runtimePauseReason"
       }
     },
+    "verification_summary": {
+      "$ref": "#/$defs/verificationSummary"
+    },
+    "review_summary": {
+      "$ref": "#/$defs/reviewSummary"
+    },
+    "final_card_state": {
+      "$ref": "#/$defs/finalCardState"
+    },
     "notes": {
       "type": "array",
       "items": {
@@ -111,6 +120,119 @@
     }
   },
   "$defs": {
+    "summaryCommand": {
+      "type": "object",
+      "required": ["command", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "outcome": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "evidence_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "findingCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blocker": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "verificationSummary": {
+      "type": "object",
+      "required": ["result", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "enum": ["passed", "failed", "skipped", "blocked", "not-verifiable"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/summaryCommand"
+          }
+        },
+        "evidence_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "reviewSummary": {
+      "type": "object",
+      "required": ["result", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "result": {
+          "enum": ["go", "no-go", "skipped", "pending"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "review_cycle": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "verdict_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findings": {
+          "$ref": "#/$defs/findingCounts"
+        }
+      }
+    },
+    "finalCardState": {
+      "type": "object",
+      "required": ["path", "status", "result_summary"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result_summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    },
     "publishResult": {
       "type": "object",
       "required": ["status"],

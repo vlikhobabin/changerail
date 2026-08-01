@@ -110,6 +110,19 @@ bin/changerail-review-verdict fingerprint --workspace .
 Read the card and delivery manifest. Confirm card-owned changes are archived.
 If a manifest exists, treat `committable_paths` as the claimed publish scope;
 otherwise reconstruct scope from the card, archives and `git status`.
+When the manifest helper supports `scope-check`, run the working-tree check and
+treat missing, extra or mismatched committable paths as scope findings:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --target working-tree --json
+```
+
+Do not update the manifest from the reviewer context. Review writes only the
+canonical verdict and optional ignored review-cycle history; orchestrator or
+publish handoff may copy concise review summary data into the manifest after
+the verdict is validated.
 
 ### 2. Evidence Audit
 

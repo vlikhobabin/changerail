@@ -64,6 +64,23 @@ def manifest_payload() -> dict[str, Any]:
         ],
         "excluded_runtime_paths": [],
         "preexisting_dirty": [],
+        "verification_summary": {
+            "result": "passed",
+            "summary": "focused manifest smoke checks passed",
+            "commands": [{"command": "python3 scripts/smoke-delivery-manifest.py", "outcome": "passed"}],
+        },
+        "review_summary": {
+            "result": "go",
+            "summary": "schema fixture review summary",
+            "review_cycle": 1,
+            "verdict_path": ".runtime/changerail/reviews/harden-delivery-operations.json",
+            "findings": {"blocker": 0, "major": 0, "minor": 0},
+        },
+        "final_card_state": {
+            "path": "openspec/board/4.done/harden-delivery-operations.md",
+            "status": "4.done",
+            "result_summary": "finalized through scoped publish",
+        },
     }
 
 
@@ -114,6 +131,47 @@ def main() -> int:
         }
         if set(paths) != expected:
             raise AssertionError(f"unexpected staging paths: {paths!r}")
+        result = run(
+            [
+                sys.executable,
+                str(HELPER),
+                "handoff-update",
+                str(path),
+                "--verification-result",
+                "passed",
+                "--verification-summary",
+                "handoff-update smoke verification passed",
+                "--verification-command",
+                "python3 scripts/smoke-delivery-manifest.py",
+                "--verification-outcome",
+                "passed",
+                "--review-result",
+                "go",
+                "--review-summary",
+                "handoff-update smoke review passed",
+                "--review-cycle",
+                "1",
+                "--verdict-path",
+                ".runtime/changerail/reviews/harden-delivery-operations.json",
+                "--finding-blocker",
+                "0",
+                "--finding-major",
+                "0",
+                "--finding-minor",
+                "0",
+                "--final-card-path",
+                "openspec/board/4.done/harden-delivery-operations.md",
+                "--final-card-status",
+                "4.done",
+                "--final-result-summary",
+                "finalized through scoped publish",
+                "--json",
+            ]
+        )
+        require_ok(result, "handoff-update")
+        updated = json.loads(path.read_text(encoding="utf-8"))
+        if updated["verification_summary"]["result"] != "passed" or updated["review_summary"]["result"] != "go":
+            raise AssertionError(f"handoff summary was not updated: {updated!r}")
 
     print("ok: delivery manifest smoke passed")
     return 0

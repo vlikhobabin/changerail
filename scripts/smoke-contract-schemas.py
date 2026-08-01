@@ -64,6 +64,30 @@ def delivery_manifest() -> dict[str, Any]:
         "committable_paths": [],
         "excluded_runtime_paths": [],
         "preexisting_dirty": [],
+        "verification_summary": {
+            "result": "passed",
+            "summary": "schema smoke verification passed",
+            "commands": [
+                {
+                    "command": "python3 scripts/smoke-contract-schemas.py",
+                    "outcome": "passed",
+                    "evidence_path": ".runtime/changerail/evidence/schema-smoke.log",
+                }
+            ],
+            "evidence_paths": [".runtime/changerail/evidence/schema-smoke.log"],
+        },
+        "review_summary": {
+            "result": "go",
+            "summary": "fresh independent schema smoke review passed",
+            "review_cycle": 1,
+            "verdict_path": ".runtime/changerail/reviews/example-card.json",
+            "findings": {"blocker": 0, "major": 0, "minor": 0},
+        },
+        "final_card_state": {
+            "path": "openspec/board/4.done/example-card.md",
+            "status": "4.done",
+            "result_summary": "finalized through scoped publish",
+        },
         "publish": {
             "status": "pushed",
             "payload_commit": "payload123",

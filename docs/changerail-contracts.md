@@ -120,6 +120,12 @@ bin/changerail-python scripts/changerail_delivery_manifest.py derive \
   openspec/board/3.inprogress/example.md --write --json
 bin/changerail-python scripts/changerail_delivery_manifest.py staging-plan \
   .runtime/changerail/delivery-manifests/example.json --json
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  .runtime/changerail/delivery-manifests/example.json \
+  --target working-tree --json
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  .runtime/changerail/delivery-manifests/example.json \
+  --target staged --json
 ```
 
 Validation сначала применяет `schemas/changerail-delivery-manifest.schema.json`,
@@ -140,6 +146,42 @@ manifest оставался valid UTF-8 file и `os.fsencode` восстанав
 path bytes. Untracked directories разворачиваются до точных non-ignored file
 paths; directory-wide untracked path отклоняется до попадания в staging
 proposal.
+
+`scope-check` сверяет заявленный manifest scope с фактическим Git scope
+отдельно для working tree и staged index. Helper использует NUL-delimited Git
+data и operation-aware сравнение для `add`, `modify`, `delete` и `rename`;
+rename сравнивается по `source_path` и `target_path`, а не по human-readable
+`old -> new` строке. JSON result содержит per-target `missing`, `extra` и
+`mismatched` arrays; любой непустой список дает fail-closed non-zero exit.
+Ignored runtime paths из manifest `excluded_runtime_paths` и Git ignored files
+не считаются committable scope.
+
+Перед staging publish должен проверить manifest against working tree:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  .runtime/changerail/delivery-manifests/example.json \
+  --target working-tree --json
+```
+
+После explicit staging publish должен проверить staged index:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  .runtime/changerail/delivery-manifests/example.json \
+  --target staged --json
+```
+
+Manifest может хранить concise handoff summary без raw logs:
+
+- `verification_summary`: итог проверки, короткое резюме и command/evidence
+  references;
+- `review_summary`: latest review result, cycle, finding counts и verdict path;
+- `final_card_state`: итоговый board path/status и stable result summary.
+
+Helper обновляет такие поля через `handoff-update`; `finalize-card` также
+записывает `final_card_state` при post-publish board move. Raw command output,
+review history и local evidence остаются ignored runtime artifacts.
 
 После publish ignored manifest можно обновить без staging runtime state:
 

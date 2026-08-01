@@ -95,8 +95,10 @@ bin/changerail-python scripts/changerail_delivery_manifest.py derive \
   openspec/board/3.inprogress/example.md --write --json
 ```
 
-`staging-plan` по manifest дает reviewable список путей для scoped publish, но
-publish все равно повторно сверяет scope с `git status`.
+`staging-plan` по manifest дает reviewable список путей для scoped publish, а
+`scope-check` сверяет manifest отдельно с working tree и staged index.
+Publish все равно повторно исключает runtime paths и останавливается при
+missing, extra или mismatched committable paths.
 
 Перед публичным commit используйте единый scanner вместо ad hoc regex:
 

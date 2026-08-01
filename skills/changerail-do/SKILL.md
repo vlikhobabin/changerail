@@ -55,12 +55,25 @@ paths only:
 - card-owned committable paths introduced by planning, implementation, synced
   specs, archives, docs, tests and board updates;
 - excluded runtime paths such as manifests, review verdicts, raw command logs
-  and local evidence files.
+  and local evidence files;
+- concise verification handoff summary with executed commands, observed
+  outcomes and evidence references when available.
 
 Validate or normalize the manifest with
 `bin/changerail-python scripts/changerail_delivery_manifest.py` when a project
-provides that helper. If no helper exists, keep the manifest small, structured
-and conservative; publish must still re-check scope before staging.
+provides that helper. When the helper supports `scope-check`, run it against
+the working tree after manifest derivation/update and before review handoff:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --target working-tree --json
+```
+
+When the helper supports `handoff-update`, use it to record a concise
+`verification_summary` after verification. Do not store raw logs in the
+manifest. If no helper exists, keep the manifest small, structured and
+conservative; publish must still re-check scope before staging.
 
 ## Inputs
 
@@ -155,6 +168,15 @@ parsing checks are normally sufficient.
 Every verification claim recorded in the card, tasks or manifest must name the
 executed command and observed outcome. Keep raw logs in ignored runtime state
 when needed; do not commit local runtime evidence.
+
+When a delivery manifest exists, verification must include a working-tree
+manifest scope reconciliation if the helper supports it:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --target working-tree --json
+```
 
 For added or changed tests, record why the test observes the intended behavior
 source and would fail if the claimed regression were present. For docs-only,

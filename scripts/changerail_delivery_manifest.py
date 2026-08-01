@@ -19,6 +19,7 @@ from changerail_contract_schema import validate_with_schema
 SCHEMA_ID = "changerail.delivery-manifest.v1"
 SCHEMA_FILE = "changerail-delivery-manifest.schema.json"
 OPERATIONS = {"add", "modify", "delete", "rename", "unknown"}
+SCOPE_TARGETS = ("working-tree", "staged")
 PUSHED_PUBLISH_REQUIRED_FIELDS = ("payload_commit", "published_commit", "remote", "branch", "pushed_at")
 CHANGE_RE = re.compile(r"^## Change\s+[0-9]+:\s*`?([a-z0-9][a-z0-9-]*)`?", re.MULTILINE)
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
@@ -51,6 +52,13 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def json_line(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=True)
+
+
+def concise_text(value: str, max_length: int = 500) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= max_length:
+        return compact
+    return compact[: max_length - 3].rstrip() + "..."
 
 
 def require_object(value: Any, label: str, errors: list[str]) -> dict[str, Any] | None:
@@ -343,6 +351,151 @@ def git_status_entries(workspace: Path) -> list[dict[str, Any]]:
     return entries
 
 
+def git_staged_entries(workspace: Path) -> list[dict[str, Any]]:
+    output = git_output_bytes(workspace, ["diff", "--cached", "--name-status", "-z", "--find-renames", "--"])
+    records = [record for record in output.split(b"\x00") if record]
+    entries: list[dict[str, Any]] = []
+    index = 0
+    while index < len(records):
+        status = records[index].decode("ascii", errors="replace")
+        index += 1
+        if not status:
+            continue
+        operation = status[0]
+        if operation in {"R", "C"}:
+            if index + 1 >= len(records):
+                raise ManifestError(f"git staged diff missing paths for {status}", 2)
+            source_path = decode_git_path(records[index])
+            target_path = decode_git_path(records[index + 1])
+            entries.append(operation_entry(target_path, "R", source_path))
+            index += 2
+            continue
+        if index >= len(records):
+            raise ManifestError(f"git staged diff missing path for {status}", 2)
+        path = decode_git_path(records[index])
+        entries.append(operation_entry(path, operation))
+        index += 1
+    return entries
+
+
+def scope_excluded_paths(data: dict[str, Any]) -> set[str]:
+    excluded: set[str] = set()
+    for entry in data.get("excluded_runtime_paths", []):
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        if isinstance(path, str):
+            excluded.add(path.rstrip("/"))
+    return excluded
+
+
+def scope_path_values(entry: dict[str, Any]) -> set[str]:
+    values: set[str] = set()
+    for field in ("path", "source_path", "target_path"):
+        value = entry.get(field)
+        if isinstance(value, str):
+            values.add(value.rstrip("/"))
+    return values
+
+
+def is_scope_excluded(entry: dict[str, Any], excluded: set[str]) -> bool:
+    values = scope_path_values(entry)
+    return any(value in excluded for value in values)
+
+
+def normalized_scope_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    operation = entry.get("operation") or "unknown"
+    path = entry.get("path")
+    source_path = entry.get("source_path")
+    target_path = entry.get("target_path")
+    if operation == "rename":
+        key = target_path or path
+    elif operation == "delete":
+        key = source_path or path
+    elif operation in {"add", "modify"}:
+        key = target_path or path
+    else:
+        key = path or target_path or source_path
+        operation = "unknown"
+    if not isinstance(key, str) or not key:
+        raise ManifestError(f"scope entry cannot be compared without a path: {entry!r}", 1)
+    normalized: dict[str, Any] = {
+        "path": key,
+        "operation": operation,
+    }
+    if isinstance(source_path, str) and source_path:
+        normalized["source_path"] = source_path
+    if isinstance(target_path, str) and target_path:
+        normalized["target_path"] = target_path
+    return normalized
+
+
+def scope_entry_map(entries: list[dict[str, Any]], excluded: set[str], label: str) -> dict[str, dict[str, Any]]:
+    mapped: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if is_scope_excluded(entry, excluded):
+            continue
+        normalized = normalized_scope_entry(entry)
+        key = normalized["path"]
+        if key in mapped:
+            raise ManifestError(f"{label} contains duplicate comparable path: {key}", 1)
+        mapped[key] = normalized
+    return mapped
+
+
+def scope_expected_entries(data: dict[str, Any], excluded: set[str]) -> dict[str, dict[str, Any]]:
+    entries = [entry for entry in data.get("committable_paths", []) if isinstance(entry, dict)]
+    return scope_entry_map(entries, excluded, "manifest committable_paths")
+
+
+def scope_actual_entries(workspace: Path, target: str, excluded: set[str]) -> dict[str, dict[str, Any]]:
+    if target == "working-tree":
+        return scope_entry_map(git_status_entries(workspace), excluded, "working-tree scope")
+    if target == "staged":
+        return scope_entry_map(git_staged_entries(workspace), excluded, "staged scope")
+    raise ManifestError(f"unknown scope target: {target}", 2)
+
+
+def comparable_scope(entry: dict[str, Any]) -> dict[str, Any]:
+    operation = entry.get("operation")
+    if operation == "rename":
+        return {
+            "operation": "rename",
+            "source_path": entry.get("source_path"),
+            "target_path": entry.get("target_path"),
+        }
+    if operation == "delete":
+        return {"operation": "delete", "source_path": entry.get("source_path") or entry.get("path")}
+    if operation in {"add", "modify"}:
+        return {"operation": operation, "target_path": entry.get("target_path") or entry.get("path")}
+    return {
+        "operation": "unknown",
+        "source_path": entry.get("source_path"),
+        "target_path": entry.get("target_path"),
+    }
+
+
+def compare_scope(data: dict[str, Any], workspace: Path, target: str) -> dict[str, Any]:
+    excluded = scope_excluded_paths(data)
+    expected = scope_expected_entries(data, excluded)
+    actual = scope_actual_entries(workspace, target, excluded)
+    missing = [expected[path] for path in sorted(set(expected) - set(actual))]
+    extra = [actual[path] for path in sorted(set(actual) - set(expected))]
+    mismatched = []
+    for path in sorted(set(expected) & set(actual)):
+        expected_entry = comparable_scope(expected[path])
+        actual_entry = comparable_scope(actual[path])
+        if expected_entry != actual_entry:
+            mismatched.append({"path": path, "expected": expected_entry, "actual": actual_entry})
+    ok = not missing and not extra and not mismatched
+    return {
+        "ok": ok,
+        "missing": missing,
+        "extra": extra,
+        "mismatched": mismatched,
+    }
+
+
 def add_unique_path(entries: list[dict[str, Any]], path: str, operation: str = "unknown") -> None:
     if any(entry.get("path") == path for entry in entries):
         return
@@ -488,6 +641,85 @@ def update_publish(manifest_path: Path, args: argparse.Namespace) -> dict[str, A
     return manifest
 
 
+def require_pair(first: str | None, second: str | None, first_name: str, second_name: str) -> None:
+    if bool(first) != bool(second):
+        raise ManifestError(f"{first_name} and {second_name} must be provided together", 2)
+
+
+def update_handoff(manifest_path: Path, args: argparse.Namespace) -> dict[str, Any]:
+    manifest = load_json(manifest_path)
+    errors = validate_manifest(manifest)
+    if errors:
+        raise ManifestError("; ".join(errors), 1)
+    if args.verification_result or args.verification_summary:
+        require_pair(
+            args.verification_result,
+            args.verification_summary,
+            "--verification-result",
+            "--verification-summary",
+        )
+        summary: dict[str, Any] = {
+            "result": args.verification_result,
+            "summary": args.verification_summary,
+        }
+        require_pair(
+            args.verification_command,
+            args.verification_outcome,
+            "--verification-command",
+            "--verification-outcome",
+        )
+        if args.verification_command:
+            command: dict[str, Any] = {
+                "command": args.verification_command,
+                "outcome": args.verification_outcome,
+            }
+            if args.verification_command_evidence:
+                command["evidence_path"] = args.verification_command_evidence
+            summary["commands"] = [command]
+        if args.verification_evidence_path:
+            summary["evidence_paths"] = args.verification_evidence_path
+        manifest["verification_summary"] = summary
+    if args.review_result or args.review_summary:
+        require_pair(args.review_result, args.review_summary, "--review-result", "--review-summary")
+        review: dict[str, Any] = {
+            "result": args.review_result,
+            "summary": args.review_summary,
+        }
+        if args.review_cycle:
+            review["review_cycle"] = args.review_cycle
+        if args.verdict_path:
+            review["verdict_path"] = args.verdict_path
+        findings = {
+            key: value
+            for key, value in {
+                "blocker": args.finding_blocker,
+                "major": args.finding_major,
+                "minor": args.finding_minor,
+            }.items()
+            if value is not None
+        }
+        if findings:
+            review["findings"] = findings
+        manifest["review_summary"] = review
+    if args.final_card_path or args.final_card_status or args.final_result_summary:
+        if not (args.final_card_path and args.final_card_status and args.final_result_summary):
+            raise ManifestError(
+                "--final-card-path, --final-card-status and --final-result-summary must be provided together",
+                2,
+            )
+        manifest["final_card_state"] = {
+            "path": args.final_card_path,
+            "status": args.final_card_status,
+            "result_summary": args.final_result_summary,
+        }
+    manifest["updated_at"] = utc_now()
+    errors = validate_manifest(manifest)
+    if errors:
+        raise ManifestError("; ".join(errors), 1)
+    write_json(manifest_path, manifest)
+    return manifest
+
+
 def update_manifest_after_finalize(
     manifest_path: Path,
     workspace: Path,
@@ -502,6 +734,13 @@ def update_manifest_after_finalize(
         raise ManifestError("; ".join(errors), 1)
     _, card = read_card(target, workspace)
     manifest["card"] = card
+    finalized_text = target.read_text(encoding="utf-8")
+    result_summary = concise_text(section_body(finalized_text, "Result").strip() or "finalized")
+    manifest["final_card_state"] = {
+        "path": card["path"],
+        "status": card.get("status") or "",
+        "result_summary": result_summary,
+    }
     publish = dict(manifest.get("publish") or {})
     publish.update(
         {
@@ -606,6 +845,43 @@ def cmd_staging_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scope_check(args: argparse.Namespace) -> int:
+    data = load_json(args.manifest)
+    errors = validate_manifest(data)
+    if errors:
+        raise ManifestError("; ".join(errors), 1)
+    if not isinstance(data, dict):
+        raise ManifestError("manifest must be an object", 1)
+    workspace = args.workspace.resolve(strict=False)
+    targets = list(SCOPE_TARGETS) if args.target == "both" else [args.target]
+    results = {target: compare_scope(data, workspace, target) for target in targets}
+    ok = all(result["ok"] for result in results.values())
+    payload = {
+        "ok": ok,
+        "command": "scope-check",
+        "manifest": str(args.manifest),
+        "targets": results,
+    }
+    if not ok:
+        payload["diagnostic"] = "manifest scope differs from target Git state"
+    if args.json:
+        print(json_line(payload))
+    else:
+        if ok:
+            print("ok: manifest scope matches target Git state")
+        else:
+            print("error: manifest scope differs from target Git state", file=sys.stderr)
+            for target, result in results.items():
+                if result["ok"]:
+                    continue
+                print(
+                    f"{target}: missing={len(result['missing'])} "
+                    f"extra={len(result['extra'])} mismatched={len(result['mismatched'])}",
+                    file=sys.stderr,
+                )
+    return 0 if ok else 1
+
+
 def cmd_derive(args: argparse.Namespace) -> int:
     workspace = args.workspace.resolve(strict=False)
     manifest = derive_manifest(args.card, workspace)
@@ -642,6 +918,20 @@ def cmd_publish_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_handoff_update(args: argparse.Namespace) -> int:
+    manifest = update_handoff(args.manifest, args)
+    payload = {
+        "ok": True,
+        "command": "handoff-update",
+        "manifest": str(args.manifest),
+    }
+    for field in ("verification_summary", "review_summary", "final_card_state"):
+        if field in manifest:
+            payload[field] = manifest[field]
+    print(json_line(payload) if args.json else f"ok: updated handoff summary at {args.manifest}")
+    return 0
+
+
 def cmd_finalize_card(args: argparse.Namespace) -> int:
     workspace = args.workspace.resolve(strict=False)
     paths = finalize_card(args.card, workspace, args)
@@ -663,6 +953,13 @@ def build_parser() -> argparse.ArgumentParser:
     staging.add_argument("manifest", type=Path)
     staging.add_argument("--json", action="store_true")
     staging.set_defaults(func=cmd_staging_plan)
+
+    scope = subparsers.add_parser("scope-check", help="compare manifest scope with Git working tree or staged index")
+    scope.add_argument("manifest", type=Path)
+    scope.add_argument("--workspace", type=Path, default=Path("."))
+    scope.add_argument("--target", choices=["working-tree", "staged", "both"], default="both")
+    scope.add_argument("--json", action="store_true")
+    scope.set_defaults(func=cmd_scope_check)
 
     derive = subparsers.add_parser("derive", help="derive a manifest from a board card and git status")
     derive.add_argument("card", type=Path)
@@ -686,6 +983,30 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--mode")
     publish.add_argument("--json", action="store_true")
     publish.set_defaults(func=cmd_publish_update)
+
+    handoff = subparsers.add_parser("handoff-update", help="update concise manifest handoff summaries")
+    handoff.add_argument("manifest", type=Path)
+    handoff.add_argument(
+        "--verification-result",
+        choices=["passed", "failed", "skipped", "blocked", "not-verifiable"],
+    )
+    handoff.add_argument("--verification-summary")
+    handoff.add_argument("--verification-command")
+    handoff.add_argument("--verification-outcome")
+    handoff.add_argument("--verification-command-evidence")
+    handoff.add_argument("--verification-evidence-path", action="append", default=[])
+    handoff.add_argument("--review-result", choices=["go", "no-go", "skipped", "pending"])
+    handoff.add_argument("--review-summary")
+    handoff.add_argument("--review-cycle", type=int)
+    handoff.add_argument("--verdict-path")
+    handoff.add_argument("--finding-blocker", type=int)
+    handoff.add_argument("--finding-major", type=int)
+    handoff.add_argument("--finding-minor", type=int)
+    handoff.add_argument("--final-card-path")
+    handoff.add_argument("--final-card-status")
+    handoff.add_argument("--final-result-summary")
+    handoff.add_argument("--json", action="store_true")
+    handoff.set_defaults(func=cmd_handoff_update)
 
     finalize = subparsers.add_parser("finalize-card", help="move a reviewed board card to done and update metadata")
     finalize.add_argument("card", type=Path)

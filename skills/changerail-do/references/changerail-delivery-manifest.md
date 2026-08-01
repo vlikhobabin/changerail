@@ -39,6 +39,8 @@ Record at minimum:
   temporary patches and runtime state.
 - concise verification evidence summaries when useful, with command, observed
   outcome and runtime evidence path instead of raw logs.
+- concise review and final card state summaries when copied from validated
+  review/publish handoff evidence.
 
 Each `committable_paths` entry may include `operation`:
 
@@ -62,11 +64,29 @@ they become a staging proposal.
 
 `changerail-pub` uses the manifest as an initial staging proposal, not as proof.
 Publish must still compare the manifest with `git status`, exclude runtime
-paths and stop if pre-existing dirty state cannot be isolated.
+paths and stop if pre-existing dirty state cannot be isolated. When the helper
+supports `scope-check`, delivery/review/publish can compare manifest scope with
+Git state explicitly:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  .runtime/changerail/delivery-manifests/<card-id>.json \
+  --target working-tree --json
+bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+  .runtime/changerail/delivery-manifests/<card-id>.json \
+  --target staged --json
+```
+
+The JSON result reports `missing`, `extra` and `mismatched` path operations for
+each target and must be treated as fail-closed before publish.
 
 Review uses manifest evidence as audit input. It is acceptable to reference
 ignored runtime evidence paths, but do not place raw command logs, secrets,
 credentials, customer data or local traces in the manifest.
+
+Use `handoff-update` for concise `verification_summary`, `review_summary` or
+`final_card_state` updates when the helper provides it. Raw command logs and
+review history remain separate ignored runtime artifacts.
 
 Tracked done-card text should contain only stable completion state. Exact final
 commit hashes, mutable push status and timestamps are retained in this ignored

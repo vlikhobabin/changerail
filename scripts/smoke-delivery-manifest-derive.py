@@ -49,6 +49,105 @@ def git_stdout(command: list[str], cwd: Path, label: str) -> str:
     return result.stdout.strip()
 
 
+def derive_manifest(workspace: Path) -> Path:
+    card = workspace / "openspec" / "board" / "3.inprogress" / "example-card.md"
+    derive = run(
+        [
+            sys.executable,
+            str(HELPER),
+            "derive",
+            str(card.relative_to(workspace)),
+            "--workspace",
+            str(workspace),
+            "--write",
+            "--json",
+        ]
+    )
+    require_ok(derive, "derive scope manifest")
+    return Path(json.loads(derive.stdout)["manifest"])
+
+
+def scope_check(manifest_path: Path, workspace: Path, target: str) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            sys.executable,
+            str(HELPER),
+            "scope-check",
+            str(manifest_path),
+            "--workspace",
+            str(workspace),
+            "--target",
+            target,
+            "--json",
+        ]
+    )
+
+
+def require_scope_ok(manifest_path: Path, workspace: Path, target: str, label: str) -> None:
+    result = scope_check(manifest_path, workspace, target)
+    require_ok(result, label)
+    payload = json.loads(result.stdout)
+    targets = payload.get("targets", {})
+    names = ("working-tree", "staged") if target == "both" else (target,)
+    for name in names:
+        if not targets.get(name, {}).get("ok"):
+            sys.stderr.write(f"{label} returned non-ok payload: {payload!r}\n")
+            raise SystemExit(1)
+
+
+def require_scope_fails(
+    manifest_path: Path,
+    workspace: Path,
+    target: str,
+    bucket: str,
+    needle: str,
+    label: str,
+) -> None:
+    result = scope_check(manifest_path, workspace, target)
+    if result.returncode == 0:
+        sys.stderr.write(f"{label} unexpectedly passed\nSTDOUT:\n{result.stdout}\n")
+        raise SystemExit(1)
+    payload = json.loads(result.stdout)
+    entries = payload.get("targets", {}).get(target, {}).get(bucket, [])
+    if needle not in json.dumps(entries, ensure_ascii=False):
+        sys.stderr.write(f"{label} did not report {needle!r} in {bucket}: {payload!r}\n")
+        raise SystemExit(1)
+
+
+def staged_scope_paths(workspace: Path) -> set[str]:
+    result = run(["git", "diff", "--cached", "--name-status", "-z", "--find-renames", "--"], cwd=workspace)
+    require_ok(result, "git diff cached scope paths")
+    records = [record for record in result.stdout.split("\0") if record]
+    paths: set[str] = set()
+    index = 0
+    while index < len(records):
+        status = records[index]
+        index += 1
+        if status.startswith(("R", "C")):
+            paths.add(records[index])
+            paths.add(records[index + 1])
+            index += 2
+        else:
+            paths.add(records[index])
+            index += 1
+    return paths
+
+
+def stage_manifest_paths(manifest_path: Path, workspace: Path, skip: set[str] | None = None) -> None:
+    skip = skip or set()
+    plan = run([sys.executable, str(HELPER), "staging-plan", str(manifest_path), "--json"])
+    require_ok(plan, "scope staging-plan")
+    paths = [path for path in json.loads(plan.stdout)["paths"] if path not in skip]
+    for path in paths:
+        absolute = workspace / path
+        if absolute.exists() or absolute.is_symlink():
+            require_ok(run(["git", "add", "--", path], cwd=workspace), f"git add scope path {path}")
+        else:
+            if path in staged_scope_paths(workspace):
+                continue
+            require_ok(run(["git", "add", "-u", "--", path], cwd=workspace), f"git add scope missing path {path}")
+
+
 def write_non_utf8_path(workspace: Path, raw_relative_path: bytes, payload: bytes) -> str:
     raw_path = os.path.join(os.fsencode(workspace), raw_relative_path)
     with open(raw_path, "wb") as handle:
@@ -58,7 +157,7 @@ def write_non_utf8_path(workspace: Path, raw_relative_path: bytes, payload: byte
 
 def make_workspace(root: Path) -> Path:
     workspace = root / "repo"
-    workspace.mkdir()
+    workspace.mkdir(parents=True)
     require_ok(run(["git", "init", "-q"], cwd=workspace), "git init")
     require_ok(run(["git", "config", "user.email", "smoke@example.invalid"], cwd=workspace), "git config email")
     require_ok(run(["git", "config", "user.name", "ChangeRail Smoke"], cwd=workspace), "git config name")
@@ -135,6 +234,64 @@ Implemented and archived.
         "## 1. Tasks\n\n- [x] done\n",
     )
     return workspace, bad_byte_path
+
+
+def check_scope_reconciliation(root: Path) -> None:
+    workspace, _ = make_workspace(root / "scope-positive")
+    manifest_path = derive_manifest(workspace)
+    require_scope_ok(manifest_path, workspace, "working-tree", "scope-check working tree")
+    stage_manifest_paths(manifest_path, workspace)
+    require_scope_ok(manifest_path, workspace, "staged", "scope-check staged")
+    require_scope_ok(manifest_path, workspace, "both", "scope-check both")
+
+    workspace, _ = make_workspace(root / "scope-extra")
+    manifest_path = derive_manifest(workspace)
+    stage_manifest_paths(manifest_path, workspace)
+    write(workspace / "docs" / "extra-staged.md", "extra\n")
+    require_ok(run(["git", "add", "--", "docs/extra-staged.md"], cwd=workspace), "git add extra staged")
+    require_scope_fails(
+        manifest_path,
+        workspace,
+        "staged",
+        "extra",
+        "docs/extra-staged.md",
+        "scope-check staged extra",
+    )
+
+    workspace, _ = make_workspace(root / "scope-missing")
+    manifest_path = derive_manifest(workspace)
+    stage_manifest_paths(manifest_path, workspace, skip={"docs/tracked.md"})
+    require_scope_fails(
+        manifest_path,
+        workspace,
+        "staged",
+        "missing",
+        "docs/tracked.md",
+        "scope-check staged missing",
+    )
+
+    workspace, _ = make_workspace(root / "scope-mismatched")
+    manifest_path = derive_manifest(workspace)
+    stage_manifest_paths(manifest_path, workspace)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for entry in manifest["committable_paths"]:
+        if entry.get("path") == "docs/tracked.md":
+            entry["operation"] = "delete"
+            entry["source_path"] = "docs/tracked.md"
+            entry.pop("target_path", None)
+            break
+    else:
+        sys.stderr.write("scope mismatch fixture could not find docs/tracked.md\n")
+        raise SystemExit(1)
+    write_json(manifest_path, manifest)
+    require_scope_fails(
+        manifest_path,
+        workspace,
+        "staged",
+        "mismatched",
+        "docs/tracked.md",
+        "scope-check staged mismatched",
+    )
 
 
 def check_bare_remote_publish_finalization(root: Path) -> None:
@@ -667,6 +824,7 @@ def main() -> int:
             sys.stderr.write("source inprogress card still exists after finalization\n")
             return 1
 
+        check_scope_reconciliation(Path(tmp))
         check_bare_remote_publish_finalization(Path(tmp))
 
     print("SMOKE_DELIVERY_MANIFEST_DERIVE_OK")
