@@ -150,6 +150,9 @@ Report является aggregate-отчетом. Верхний уровень 
 
 Smoke считается успешным, когда все checks имеют `status: pass`.
 
+Каждый run также включает regression fixture для skill frontmatter, который
+MUST отклонять некавыченый scalar с `: `.
+
 Claude checks:
 
 - `.claude/skills` resolves to ChangeRail `skills/`;
@@ -167,8 +170,8 @@ Codex checks:
 - `.codex/skills/changerail-*` resolves to ChangeRail `skills/changerail-*`;
 - `.codex/skills/chrl-*` resolves to ChangeRail `skills/chrl-*`;
 - `.codex/skills/openspec-*` resolves to ChangeRail `skills/openspec-*`;
-- each discovered `SKILL.md` has frontmatter `name` matching the skill
-  directory.
+- each discovered `SKILL.md` parses complete YAML frontmatter and has parsed
+  `name` matching the skill directory.
 
 Repo-local checks additionally require relative symlink targets. Consumer
 checks may use absolute `/opt/changerail` symlink targets because `/opt/changerail` is the

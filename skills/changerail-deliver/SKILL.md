@@ -1,6 +1,6 @@
 ---
 name: changerail-deliver
-description: Run the complete ChangeRail card pipeline in one supervised foreground workflow: ff, do, independent review gate and publish.
+description: "Run the complete ChangeRail card pipeline in one supervised foreground workflow: ff, do, independent review gate and publish."
 ---
 
 # ChangeRail Deliver

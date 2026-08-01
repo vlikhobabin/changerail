@@ -1,6 +1,6 @@
 ---
 name: changerail-pub
-description: Run the final ChangeRail publish loop for a reviewed board card: validate review verdict, confirm reviewed docs, create a scoped commit and push unless disabled.
+description: "Run the final ChangeRail publish loop for a reviewed board card: validate review verdict, confirm reviewed docs, create a scoped commit and push unless disabled."
 ---
 
 # ChangeRail Pub

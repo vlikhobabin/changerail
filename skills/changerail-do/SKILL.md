@@ -1,6 +1,6 @@
 ---
 name: changerail-do
-description: Run a supervised ChangeRail delivery loop for a board card or backlog file: implement each planned OpenSpec change, verify it, sync specs and archive completed changes without publishing.
+description: "Run a supervised ChangeRail delivery loop for a board card or backlog file: implement each planned OpenSpec change, verify it, sync specs and archive completed changes without publishing."
 ---
 
 # ChangeRail Do

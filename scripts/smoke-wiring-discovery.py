@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+import yaml
+
 
 SCHEMA = "changerail.wiring-discovery-smoke.v1"
 SKILLS = (
@@ -166,18 +168,57 @@ def check_symlink(
     )
 
 
-def frontmatter_name(skill_md: Path) -> str | None:
+def yaml_error_summary(exc: yaml.YAMLError) -> str:
+    lines = str(exc).splitlines()
+    return lines[0] if lines else exc.__class__.__name__
+
+
+def frontmatter_metadata(skill_md: Path) -> tuple[dict[object, object] | None, str | None]:
     text = skill_md.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
-        return None
+        return None, "frontmatter opening marker is missing"
     end = text.find("\n---", 4)
     if end == -1:
-        return None
-    for line in text[4:end].splitlines():
-        key, sep, value = line.partition(":")
-        if sep and key.strip() == "name":
-            return value.strip().strip("\"'")
-    return None
+        return None, "frontmatter closing marker is missing"
+    raw_frontmatter = text[4:end]
+    try:
+        metadata = yaml.safe_load(raw_frontmatter)
+    except yaml.YAMLError as exc:
+        return None, f"frontmatter YAML invalid: {yaml_error_summary(exc)}"
+    if not isinstance(metadata, dict):
+        return None, "frontmatter YAML document is not a mapping"
+    return metadata, None
+
+
+def check_frontmatter_negative_fixture(run_dir: Path, mode: str, surface: str) -> Check:
+    fixture = run_dir / "frontmatter-negative-fixtures" / mode / surface / "SKILL.md"
+    fixture.parent.mkdir(parents=True, exist_ok=True)
+    fixture.write_text(
+        "---\n"
+        "name: invalid-frontmatter\n"
+        "description: invalid: scalar\n"
+        "---\n"
+        "\n"
+        "# Invalid fixture\n",
+        encoding="utf-8",
+    )
+    _, error = frontmatter_metadata(fixture)
+    failures: list[str] = []
+    if error is None:
+        failures.append("negative fixture with unquoted ': ' scalar parsed successfully")
+
+    status = "fail" if failures else "pass"
+    message = "; ".join(failures) if failures else "negative frontmatter fixture was rejected"
+    return Check(
+        name=f"{surface} {mode} YAML frontmatter negative fixture",
+        path=str(fixture),
+        expected_target="unquoted ': ' scalar must fail YAML parsing",
+        resolved_target="",
+        status=status,
+        message=message,
+        mode=mode,
+        surface=surface,
+    )
 
 
 def check_skill_contract(
@@ -193,14 +234,19 @@ def check_skill_contract(
     resolved, resolved_error = safe_resolve(skill_md)
 
     failures: list[str] = []
-    actual_name = None
+    actual_name: object | None = None
     if resolved_error:
         failures.append(f"SKILL.md is not resolvable: {resolved_error}")
     else:
         try:
-            actual_name = frontmatter_name(skill_md)
+            metadata, metadata_error = frontmatter_metadata(skill_md)
         except OSError as exc:
             failures.append(f"SKILL.md cannot be read: {exc}")
+        else:
+            if metadata_error:
+                failures.append(metadata_error)
+            elif metadata is not None:
+                actual_name = metadata.get("name")
     if actual_name != expected_name:
         failures.append(f"frontmatter name is {actual_name!r}, expected {expected_name!r}")
     if expected_name == "changerail-deliver" and not failures:
@@ -218,7 +264,7 @@ def check_skill_contract(
             failures.append("changerail-do fix budget contract missing: " + ", ".join(missing))
 
     status = "fail" if failures else "pass"
-    message = "; ".join(failures) if failures else "SKILL.md contract matches"
+    message = "; ".join(failures) if failures else "SKILL.md contract matches and frontmatter parses as YAML"
     return Check(
         name=f"{surface} {mode} {expected_name} skill contract",
         path=str(skill_md),
@@ -426,6 +472,7 @@ def build_report(run_id: str, changerail_root: Path, run_dir: Path, modes: list[
                 checks = codex_checks(mode, base, changerail_root)
             else:
                 raise ValueError(f"unsupported surface: {surface}")
+            checks.append(check_frontmatter_negative_fixture(run_dir, mode, surface))
             all_checks.extend(checks)
             runs.append(
                 {

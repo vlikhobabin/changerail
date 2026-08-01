@@ -1,13 +1,13 @@
 # Исправить YAML frontmatter ChangeRail skills
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `010-core-release-contracts`
@@ -50,7 +50,7 @@ frontmatter всех bundled skills в release baseline.
   CI gate.
 
 ## Change Set
-- `repair-skill-frontmatter-validation` (planned)
+- `repair-skill-frontmatter-validation` (archived)
 
 ## Change 1: `repair-skill-frontmatter-validation`
 
@@ -84,23 +84,42 @@ agent discovery.
 - `openspec/changes/repair-skill-frontmatter-validation/`
 
 ## Verify
-- YAML parse всех `skills/*/SKILL.md`.
-- `python3 scripts/smoke-wiring-discovery.py`.
-- `python3 scripts/run-release-baseline.py`.
-- `git diff --check`.
+- `openspec validate "repair-skill-frontmatter-validation" --strict` passed.
+- `git diff --check` passed for planning artifacts.
+- `python3 - <<'PY' ...` YAML-parsed all `skills/*/SKILL.md`, checked parsed
+  `name` values, and rejected the unquoted `: ` negative fixture:
+  `YAML_FRONTMATTER_OK`.
+- `python3 scripts/smoke-wiring-discovery.py` passed: `172/172` checks.
+- `python3 scripts/run-release-baseline.py` passed: `25/25` release baseline
+  steps.
+- `openspec validate --all --strict` passed after archive: `13` specs, `0`
+  failed.
+- `git diff --check` passed after archive.
+
+## Archive
+- `openspec/changes/archive/2026-08-01-repair-skill-frontmatter-validation/`
 
 ## Related
 - `openspec/board/1.backlog/010-00-core-release-contracts-epic.md`
+- `openspec/changes/repair-skill-frontmatter-validation/`
 - `skills/changerail-deliver/SKILL.md`
 - `skills/changerail-do/SKILL.md`
 - `skills/changerail-pub/SKILL.md`
 
 ## Result
-not started
+Published reviewed payload as `64100218514e03b18963122282d15310f09f7893`;
+push status `pending` on `main`/`origin`.
 
 ## Next
-- Bootstrap delivery: `$chrl-deliver openspec/board/2.todo/010-01-repair-skill-frontmatter-validation.md`
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z карточка пересобрана из исходного bug report.
 - 2026-08-01T15:45:00Z карточка переведена в `2.todo` для bootstrap delivery.
+- 2026-08-01T16:00:18Z `$chrl-deliver` выполнил `ff`: создан active change
+  `repair-skill-frontmatter-validation`, apply-required artifacts готовы,
+  planning checks passed.
+- 2026-08-01T16:09:35Z `$chrl-deliver` выполнил `do`: исправлен skill
+  frontmatter, усилен deterministic wiring smoke, обновлены specs/docs/release
+  dependency, выполнен release baseline, change archived.
+- 2026-08-01T16:19:57Z publish finalized card into `4.done` with commit `64100218514e03b18963122282d15310f09f7893` and push status `pending`.
