@@ -64,7 +64,15 @@ def delivery_manifest() -> dict[str, Any]:
         "committable_paths": [],
         "excluded_runtime_paths": [],
         "preexisting_dirty": [],
-        "publish": {"status": "pending"},
+        "publish": {
+            "status": "pushed",
+            "payload_commit": "payload123",
+            "published_commit": "published456",
+            "remote": "origin",
+            "branch": "main",
+            "pushed_at": DATE,
+            "mode": "review-gated",
+        },
     }
 
 
@@ -370,6 +378,21 @@ def check_schema_file(path: Path) -> None:
     jsonschema.Draft202012Validator.check_schema(schema)
 
 
+def expect_invalid(
+    failures: list[str],
+    label: str,
+    validator: Validator,
+    payload: dict[str, Any],
+    needle: str,
+) -> None:
+    errors = validator(payload)
+    if not errors:
+        failures.append(f"{label}: invalid fixture unexpectedly passed")
+        return
+    if not any(needle in error for error in errors):
+        failures.append(f"{label}: invalid fixture did not report {needle!r}: {errors}")
+
+
 def main() -> int:
     failures: list[str] = []
     schema_files = sorted(path.name for path in SCHEMAS.glob("changerail-*.schema.json"))
@@ -410,6 +433,25 @@ def main() -> int:
         negative_errors = validator(negative)
         if not negative_errors:
             failures.append(f"{name}: negative date-time fixture unexpectedly passed")
+
+    pushed_status_only = delivery_manifest()
+    pushed_status_only["publish"] = {"status": "pushed"}
+    for label, validator in (
+        ("changerail-delivery-manifest.schema.json schema pushed status-only", schema_validator("changerail-delivery-manifest.schema.json")),
+        ("changerail-delivery-manifest.schema.json helper pushed status-only", validate_manifest),
+    ):
+        expect_invalid(failures, label, validator, copy.deepcopy(pushed_status_only), "payload_commit")
+
+    pushed_missing_pushed_at = delivery_manifest()
+    pushed_missing_pushed_at["publish"].pop("pushed_at")
+    for label, validator in (
+        (
+            "changerail-delivery-manifest.schema.json schema pushed missing pushed_at",
+            schema_validator("changerail-delivery-manifest.schema.json"),
+        ),
+        ("changerail-delivery-manifest.schema.json helper pushed missing pushed_at", validate_manifest),
+    ):
+        expect_invalid(failures, label, validator, copy.deepcopy(pushed_missing_pushed_at), "pushed_at")
 
     unsafe_plan = delivery_plan()
     unsafe_plan["workspaces"][0]["path"] = "/opt/example-a"

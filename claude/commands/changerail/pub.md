@@ -1,5 +1,5 @@
 ---
-description: "ChangeRail pub: validate review verdict, update final docs, create a scoped commit and push"
+description: "ChangeRail pub: validate review verdict, finalize stable card metadata, create a scoped commit and push"
 argument-hint: <card-path> [--no-push] [--message text] [--docs-only]
 ---
 

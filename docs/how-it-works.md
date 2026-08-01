@@ -289,8 +289,10 @@ Publish работает **fail-closed**: без валидного свежег
 
 После успешного payload commit `changerail-pub` может использовать helper для
 детерминированной board finalization: move `3.inprogress -> 4.done`, обновление
-`Result`/`Log`/`Next` и card-only amend. Такие edits являются metadata, а не
-содержательным изменением reviewed payload.
+stable `Result`/`Log`/`Next` и card-only amend. Такие edits являются metadata,
+а не содержательным изменением reviewed payload. Exact `payload_commit`,
+`published_commit`, remote/branch/status/timestamps живут в ignored delivery
+manifest ledger, а не в tracked card text.
 
 ## Что делает пользователь
 

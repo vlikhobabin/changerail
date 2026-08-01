@@ -279,6 +279,9 @@ workflow.
 payload до verdict. Если publish обнаруживает, что нужны содержательные edits,
 он останавливается до staging и возвращает карточку в delivery/review loop.
 После успешного publish карточка финализируется в `4.done` по board protocol.
+Tracked карточка фиксирует только stable completion state; exact
+payload/published commit, remote, branch, final push status и timestamps
+остаются в ignored delivery manifest ledger.
 
 ## Evidence
 

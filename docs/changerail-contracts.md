@@ -102,7 +102,9 @@ Delivery manifest является runtime-файлом:
 Он описывает card-owned scope: planned changes, committable paths, excluded
 runtime paths, preexisting dirty state и publish handoff details. Publish
 использует manifest как initial staging proposal, но обязан повторно сверить
-его с `git status` и не stage-ить runtime files.
+его с `git status` и не stage-ить runtime files. Manifest также является
+ignored ledger для exact publication metadata: reviewed `payload_commit`,
+final `published_commit`, remote, branch, status и timestamps.
 
 `workspace.repository` является sanitized identity. Helper удаляет URL
 userinfo, passwords, query string и fragment из remote URLs; для SCP-style SSH
@@ -144,9 +146,29 @@ proposal.
 ```bash
 bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
   .runtime/changerail/delivery-manifests/example.json \
-  --status pushed --commit <commit> --remote origin --branch main \
+  --status pushed --payload-commit <payload-commit> \
+  --published-commit <published-commit> --remote origin --branch main \
   --pushed-at <utc> --mode review-gated
 ```
+
+Validation is fail-closed for pushed publish ledgers: `status: pushed` is valid
+only when `payload_commit`, `published_commit`, remote, branch and `pushed_at`
+are all present.
+
+Для explicit `--no-push` manifest должен фиксировать skipped local-only publish
+evidence вместо remote readiness:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
+  .runtime/changerail/delivery-manifests/example.json \
+  --status skipped --payload-commit <payload-commit> \
+  --published-commit <local-final-commit> \
+  --reason "push skipped by --no-push" --mode local-only
+```
+
+Tracked done-card text не должен хранить собственный exact final commit hash или
+mutable push status. Эти значения остаются в ignored manifest и Git history,
+чтобы deterministic card-only amend не создавал stale metadata.
 
 ## Evidence Index
 

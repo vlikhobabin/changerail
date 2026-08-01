@@ -143,18 +143,21 @@ card summary and local commit style.
 
 ### 5. Card Sync
 
-After a successful commit, update the card with result, commit hash, push
-status, log entry and the documented `4.done` board move when local board
-conventions require it. This post-publish card metadata is deterministic
-finalization, not a substantive change to the reviewed payload. If this creates
-a new card-only diff before push, amend only the card with explicit staging.
+After a successful payload commit, update the card with stable result, log
+entry and the documented `4.done` board move when local board conventions
+require it. Do not write the card's own exact final commit hash or mutable push
+status into tracked card text; exact payload/published commit and push metadata
+belongs in the ignored delivery manifest. This post-publish card metadata is
+deterministic finalization, not a substantive change to the reviewed payload. If
+this creates a new card-only diff before push, amend only the card with explicit
+staging.
 
 When the workspace provides `scripts/changerail_delivery_manifest.py`, prefer
 helper-assisted finalization through the shared Python runtime selector:
 
 ```bash
 bin/changerail-python scripts/changerail_delivery_manifest.py finalize-card "<card-path>" \
-  --commit "<commit>" --remote "<remote>" --branch "<branch>" \
+  --commit "<payload-commit>" --remote "<remote>" --branch "<branch>" \
   --push-status pending --timestamp "<utc>"
 git add -- <old-card-path> <new-card-path>
 git commit --amend --no-edit
@@ -178,13 +181,26 @@ git push
 If no upstream exists and project policy permits it, use `git push -u origin
 HEAD`. Never force-push.
 
+When `--no-push` is supplied, do not claim remote publication readiness. After
+the card-only amend, update the ignored manifest with skipped local-only publish
+evidence when the helper exists:
+
+```bash
+bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
+  ".runtime/changerail/delivery-manifests/<card-id>.json" \
+  --status skipped --payload-commit "<payload-commit>" \
+  --published-commit "<local-final-commit>" \
+  --reason "push skipped by --no-push" --mode local-only
+```
+
 After push, update ignored manifest publish metadata when the helper exists:
 
 ```bash
 bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
-  --status pushed --commit "<commit>" --remote "<remote>" --branch "<branch>" \
-  --pushed-at "<utc>" --mode review-gated
+  --status pushed --payload-commit "<payload-commit>" \
+  --published-commit "<published-commit>" --remote "<remote>" \
+  --branch "<branch>" --pushed-at "<utc>" --mode review-gated
 ```
 
 Never stage the ignored manifest.

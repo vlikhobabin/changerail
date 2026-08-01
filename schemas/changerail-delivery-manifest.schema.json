@@ -114,12 +114,54 @@
     "publishResult": {
       "type": "object",
       "required": ["status"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["payload_commit", "published_commit", "reason", "mode"],
+            "properties": {
+              "mode": {
+                "const": "local-only"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "pushed"
+              }
+            },
+            "required": ["status"]
+          },
+          "then": {
+            "required": ["status", "payload_commit", "published_commit", "remote", "branch", "pushed_at"]
+          }
+        }
+      ],
       "additionalProperties": false,
       "properties": {
         "status": {
           "enum": ["pending", "staged", "committed", "pushed", "skipped", "failed"]
         },
+        "payload_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "published_commit": {
+          "type": "string",
+          "minLength": 1
+        },
         "commit": {
+          "description": "Legacy ambiguous commit field retained for older runtime records. New publish flows should use payload_commit and published_commit.",
           "type": "string",
           "minLength": 1
         },

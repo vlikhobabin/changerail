@@ -19,6 +19,7 @@ from changerail_contract_schema import validate_with_schema
 SCHEMA_ID = "changerail.delivery-manifest.v1"
 SCHEMA_FILE = "changerail-delivery-manifest.schema.json"
 OPERATIONS = {"add", "modify", "delete", "rename", "unknown"}
+PUSHED_PUBLISH_REQUIRED_FIELDS = ("payload_commit", "published_commit", "remote", "branch", "pushed_at")
 CHANGE_RE = re.compile(r"^## Change\s+[0-9]+:\s*`?([a-z0-9][a-z0-9-]*)`?", re.MULTILINE)
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 SCP_REMOTE_RE = re.compile(r"^(?:(?P<user>[^@/:]+)@)?(?P<host>[^:/]+):(?P<path>.+)$")
@@ -69,9 +70,8 @@ def require_string(data: dict[str, Any], field: str, label: str, errors: list[st
 
 def validate_manifest(data: Any) -> list[str]:
     errors = validate_with_schema(data, SCHEMA_FILE)
-    if errors:
-        return errors
-    return validate_manifest_semantics(data)
+    errors.extend(validate_manifest_semantics(data))
+    return errors
 
 
 def validate_manifest_semantics(data: Any) -> list[str]:
@@ -79,11 +79,21 @@ def validate_manifest_semantics(data: Any) -> list[str]:
     manifest = require_object(data, "manifest", errors)
     if manifest is None:
         return errors
-    for index, entry in enumerate(manifest["committable_paths"]):
-        operation = entry.get("operation")
-        label = f"committable_paths[{index}]"
-        if operation is not None and operation not in OPERATIONS:
-            errors.append(f"{label}.operation must be one of: {', '.join(sorted(OPERATIONS))}")
+    committable_paths = manifest.get("committable_paths")
+    if isinstance(committable_paths, list):
+        for index, entry in enumerate(committable_paths):
+            if not isinstance(entry, dict):
+                continue
+            operation = entry.get("operation")
+            label = f"committable_paths[{index}]"
+            if operation is not None and operation not in OPERATIONS:
+                errors.append(f"{label}.operation must be one of: {', '.join(sorted(OPERATIONS))}")
+    publish = manifest.get("publish")
+    if isinstance(publish, dict) and publish.get("status") == "pushed":
+        for field in PUSHED_PUBLISH_REQUIRED_FIELDS:
+            value = publish.get(field)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"publish.{field} must be present when publish.status is pushed")
     return errors
 
 
@@ -177,10 +187,18 @@ def section_body(text: str, heading: str) -> str:
 
 def set_section_body(text: str, heading: str, body: str) -> str:
     pattern = re.compile(rf"(^## {re.escape(heading)}\s*\n)(.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL)
+    normalized_body = body.rstrip()
+
+    def replace(match: re.Match[str]) -> str:
+        separator = "\n" if match.end() >= len(text) else "\n\n"
+        return f"{match.group(1)}{normalized_body}{separator}"
+
     if pattern.search(text):
-        return pattern.sub(lambda match: f"{match.group(1)}{body.rstrip()}\n\n", text, count=1)
-    suffix = "" if text.endswith("\n") else "\n"
-    return f"{text}{suffix}\n## {heading}\n{body.rstrip()}\n"
+        return pattern.sub(replace, text, count=1)
+    prefix = text.rstrip("\n")
+    if prefix:
+        return f"{prefix}\n\n## {heading}\n{normalized_body}\n"
+    return f"## {heading}\n{normalized_body}\n"
 
 
 def parse_change_slugs(card_text: str) -> list[str]:
@@ -445,18 +463,65 @@ def update_publish(manifest_path: Path, args: argparse.Namespace) -> dict[str, A
     errors = validate_manifest(manifest)
     if errors:
         raise ManifestError("; ".join(errors), 1)
-    publish = {"status": args.status}
-    for field in ("commit", "remote", "branch", "pushed_at", "committed_at", "reason", "mode"):
+    publish = dict(manifest.get("publish") or {})
+    publish["status"] = args.status
+    payload_commit = getattr(args, "payload_commit", None)
+    published_commit = getattr(args, "published_commit", None)
+    legacy_commit = getattr(args, "commit", None)
+    if payload_commit:
+        publish["payload_commit"] = payload_commit
+    if published_commit:
+        publish["published_commit"] = published_commit
+    elif legacy_commit:
+        publish["published_commit"] = legacy_commit
+        publish["commit"] = legacy_commit
+    for field in ("remote", "branch", "pushed_at", "committed_at", "reason", "mode"):
         value = getattr(args, field)
         if value:
             publish[field] = value
     manifest["publish"] = publish
     manifest["updated_at"] = utc_now()
+    errors = validate_manifest(manifest)
+    if errors:
+        raise ManifestError("; ".join(errors), 1)
     write_json(manifest_path, manifest)
     return manifest
 
 
-def finalize_card(card_path: Path, workspace: Path, args: argparse.Namespace) -> dict[str, str]:
+def update_manifest_after_finalize(
+    manifest_path: Path,
+    workspace: Path,
+    target: Path,
+    args: argparse.Namespace,
+) -> bool:
+    if not manifest_path.exists():
+        return False
+    manifest = load_json(manifest_path)
+    errors = validate_manifest(manifest)
+    if errors:
+        raise ManifestError("; ".join(errors), 1)
+    _, card = read_card(target, workspace)
+    manifest["card"] = card
+    publish = dict(manifest.get("publish") or {})
+    publish.update(
+        {
+            "status": args.push_status,
+            "payload_commit": args.commit,
+            "remote": args.remote,
+            "branch": args.branch,
+            "committed_at": args.timestamp,
+        }
+    )
+    manifest["publish"] = publish
+    manifest["updated_at"] = utc_now()
+    errors = validate_manifest(manifest)
+    if errors:
+        raise ManifestError("; ".join(errors), 1)
+    write_json(manifest_path, manifest)
+    return True
+
+
+def finalize_card(card_path: Path, workspace: Path, args: argparse.Namespace) -> dict[str, Any]:
     source = card_path if card_path.is_absolute() else workspace / card_path
     if not source.is_file():
         raise ManifestError(f"card cannot be read: {source}", 2)
@@ -473,11 +538,11 @@ def finalize_card(card_path: Path, workspace: Path, args: argparse.Namespace) ->
     text = set_section_body(text, "Next", "- done")
 
     publish_sentence = (
-        f"Published reviewed payload as `{args.commit}`; push status `{args.push_status}`"
-        f" on `{args.branch}`/`{args.remote}`."
+        "Reviewed payload finalized through ChangeRail scoped publish; exact "
+        "payload and published commit ledger is retained in the ignored delivery manifest."
     )
     result_body = section_body(text, "Result").strip()
-    if args.commit not in result_body:
+    if publish_sentence not in result_body:
         if result_body and result_body != "not started":
             result_body = f"{result_body}\n\n{publish_sentence}"
         else:
@@ -485,18 +550,25 @@ def finalize_card(card_path: Path, workspace: Path, args: argparse.Namespace) ->
         text = set_section_body(text, "Result", result_body)
 
     log_body = section_body(text, "Log").rstrip()
-    log_line = (
-        f"- {args.timestamp} publish finalized card into `4.done` with commit "
-        f"`{args.commit}` and push status `{args.push_status}`."
-    )
+    log_line = f"- {args.timestamp} publish finalized card into `4.done`; exact ledger retained in ignored manifest."
     if log_line not in log_body:
         text = set_section_body(text, "Log", f"{log_body}\n{log_line}" if log_body else log_line)
+    text = text.rstrip() + "\n"
 
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
     if target != source:
         source.unlink()
-    return {"source_path": relpath(source, workspace), "target_path": relpath(target, workspace)}
+    manifest_path = args.manifest if args.manifest else default_manifest_path(workspace, {"id": card_id(relpath(source, workspace))})
+    if not manifest_path.is_absolute():
+        manifest_path = workspace / manifest_path
+    manifest_updated = update_manifest_after_finalize(manifest_path, workspace, target, args)
+    return {
+        "source_path": relpath(source, workspace),
+        "target_path": relpath(target, workspace),
+        "manifest": relpath(manifest_path, workspace),
+        "manifest_updated": manifest_updated,
+    }
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
@@ -603,6 +675,8 @@ def build_parser() -> argparse.ArgumentParser:
     publish = subparsers.add_parser("publish-update", help="update ignored manifest publish metadata")
     publish.add_argument("manifest", type=Path)
     publish.add_argument("--status", default="pending", choices=["pending", "staged", "committed", "pushed", "skipped", "failed"])
+    publish.add_argument("--payload-commit")
+    publish.add_argument("--published-commit")
     publish.add_argument("--commit")
     publish.add_argument("--remote")
     publish.add_argument("--branch")
@@ -617,6 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
     finalize.add_argument("card", type=Path)
     finalize.add_argument("--workspace", type=Path, default=Path("."))
     finalize.add_argument("--commit", required=True)
+    finalize.add_argument("--manifest", type=Path)
     finalize.add_argument("--remote", default="origin")
     finalize.add_argument("--branch", required=True)
     finalize.add_argument("--push-status", default="pending")

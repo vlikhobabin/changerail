@@ -33,6 +33,8 @@ Record at minimum:
 - `preexisting_dirty` from delivery-start `git status --short`;
 - card-owned `committable_paths` for source, tests, docs, skills, schemas,
   specs, OpenSpec archives and board updates;
+- publish ledger state including distinct reviewed `payload_commit` and final
+  `published_commit` when publish has reached those points;
 - `excluded_runtime_paths` for manifests, verdicts, raw logs, local evidence,
   temporary patches and runtime state.
 - concise verification evidence summaries when useful, with command, observed
@@ -65,3 +67,15 @@ paths and stop if pre-existing dirty state cannot be isolated.
 Review uses manifest evidence as audit input. It is acceptable to reference
 ignored runtime evidence paths, but do not place raw command logs, secrets,
 credentials, customer data or local traces in the manifest.
+
+Tracked done-card text should contain only stable completion state. Exact final
+commit hashes, mutable push status and timestamps are retained in this ignored
+manifest ledger so card-only finalization cannot invalidate itself.
+
+When publish records `status: pushed`, helper validation must fail closed unless
+`payload_commit`, `published_commit`, `remote`, `branch` and `pushed_at` are all
+present.
+
+When publish is explicitly local-only with `--no-push`, the manifest publish
+ledger must use `status: skipped`, `mode: local-only` and a reason such as
+`push skipped by --no-push` instead of claiming remote publication readiness.
