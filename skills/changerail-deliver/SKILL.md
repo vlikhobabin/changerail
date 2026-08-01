@@ -20,6 +20,11 @@ This skill is an orchestration layer. Before executing each phase, read and
 follow the effective `changerail-ff`, `changerail-do`, `changerail-review` or `changerail-pub`
 contract from the active workspace.
 
+For normal operator handoff, a deliver-ready card is an accepted board card
+with scoped ownership, observable acceptance, ordered change sections and known
+gates. It may still lack OpenSpec artifacts; `changerail-deliver` starts with
+`ff` and creates or completes those artifacts before `do`.
+
 ## Project Context
 
 Resolve the repository root from the current working directory or
@@ -84,6 +89,12 @@ For a single file path, queue exactly that card. For a directory path, queue
 `*.md` files in lexical order and skip obvious non-card files such as
 `README.md` and `card-template.md`.
 
+Do not require `openspec/changes/<change>/` directories before accepting a
+deliver-ready `2.todo` card. Missing artifacts are work for the fast-forward
+phase. If the accepted-card criteria themselves are missing, report the missing
+scope, owner, acceptance, ordered plan, dependency or handoff criteria instead
+of returning only a boolean readiness failure.
+
 Before starting, run:
 
 ```bash
@@ -120,9 +131,11 @@ explicit operator intent.
 
 ### 1. Fast-Forward
 
-Run the `changerail-ff` workflow for the current card. Continue only when ordered
-card-owned changes are known, apply-required artifacts are complete or already
-archived, and validation required by `changerail-ff` has passed.
+Run the `changerail-ff` workflow for the current card. This is the internal
+artifact-readiness phase for deliver-ready cards whose OpenSpec artifacts do
+not exist yet. Continue only when ordered card-owned changes are known,
+apply-required artifacts are complete or already archived, and validation
+required by `changerail-ff` has passed.
 
 ### 2. Deliver
 

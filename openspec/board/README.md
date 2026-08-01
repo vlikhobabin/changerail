@@ -9,7 +9,8 @@
 ## Layout
 
 - `1.backlog/` - идеи, проблемы и предложения до triage.
-- `2.todo/` - принятые задачи, которые нужно разложить на ordered changes.
+- `2.todo/` - deliver-ready задачи: scope принят, owner известен, acceptance
+  observable, ordered change plan записан.
 - `3.inprogress/` - задачи с apply-ready change-set, взятые в работу.
 - `4.done/` - завершенные задачи с зафиксированным результатом.
 - `5.canceled/` - закрытые без реализации или вынесенные за текущий scope.
@@ -45,13 +46,20 @@
   только executable story cards; coordination-only epic cards не включаются.
 - В `2.todo/` и `3.inprogress/` карточка должна содержать ordered sections
   `## Change 1:`, `## Change 2:` и так далее.
+- `deliver-ready` не является новой колонкой: это свойство карточки в
+  `2.todo`. OpenSpec artifacts могут отсутствовать до запуска
+  `$chrl-deliver`; internal `ff` phase создаст или дополнит их перед `do`.
+- Если карточка еще не deliver-ready, diagnostic должен назвать missing scope,
+  owner, acceptance, ordered plan, dependency или handoff criteria.
 - В `Related` указываются только публичные пути внутри ChangeRail или generic
   example-пути.
 
 ## Agent Workflow
 
 1. Создать или уточнить карточку в `1.backlog/`.
-2. После triage перенести карточку в `2.todo/` и описать ordered change plan.
+2. После triage перенести карточку в `2.todo/`, назначить owner, описать
+   observable acceptance, ordered change plan, dependencies и handoff через
+   `$chrl-deliver <card>`.
 3. Когда artifacts готовы, перенести карточку в `3.inprogress/`.
 4. Реализовать changes через ChangeRail/OpenSpec flow, записать результат, проверки
    и archive paths, оставив review-gated карточку в `3.inprogress/`.

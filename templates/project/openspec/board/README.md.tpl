@@ -5,7 +5,8 @@
 ## Layout
 
 - `1.backlog/` - идеи и проблемы до triage.
-- `2.todo/` - принятые задачи с ordered change plan.
+- `2.todo/` - deliver-ready задачи с принятым scope, owner, observable
+  acceptance и ordered change plan.
 - `3.inprogress/` - apply-ready stories в работе.
 - `4.done/` - завершенные задачи с результатом и verification.
 - `5.canceled/` - закрытые без реализации или вынесенные за scope.
@@ -15,6 +16,11 @@
 - Одна задача = один markdown-файл.
 - В `2.todo/` и `3.inprogress/` карточка содержит sections
   `## Change 1:`, `## Change 2:` и так далее.
+- `deliver-ready` - свойство карточки в `2.todo`, а не новая колонка. OpenSpec
+  artifacts могут отсутствовать до `$chrl-deliver`; internal `ff` phase создаст
+  или дополнит их перед `do`.
+- Если readiness diagnostic используется, он должен назвать missing scope,
+  owner, acceptance, ordered plan, dependency или handoff criteria.
 - `Related` содержит project-local paths или generic public examples.
 - Runtime evidence may be referenced, but raw runtime state stays ignored.
 
@@ -35,10 +41,13 @@ explore -> ff -> do -> review -> pub
 ```
 
 `deliver` выполняет supervised full flow для одной карточки или bounded queue,
-но обрабатывает карточки по одной. `do` реализует, проверяет, синхронизирует
-specs и архивирует changes, оставляя review-gated карточку в `3.inprogress`.
-`review` должен быть fresh context, который не планировал и не реализовывал
-payload. `pub` публикует только после fresh valid `go` verdict.
+но обрабатывает карточки по одной. Для принятой deliver-ready карточки normal
+operator handoff - `$chrl-deliver <card>` или canonical
+`$changerail-deliver <card>`; `ff/do/review/pub` остаются internal phases и
+explicit repair/debug/manual-resume commands. `do` реализует, проверяет,
+синхронизирует specs и архивирует changes, оставляя review-gated карточку в
+`3.inprogress`. `review` должен быть fresh context, который не планировал и не
+реализовывал payload. `pub` публикует только после fresh valid `go` verdict.
 
 Практический guide по доскам и двум агентам находится в
 `{{CHANGERAIL_ROOT}}/docs/board-and-two-agent-feature-flow.md`; reusable agent

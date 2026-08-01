@@ -44,8 +44,12 @@ not started
 - triage
 
 ## Change Plan Notes
-Когда карточка переходит в `2.todo`, замените эту секцию реальными ordered
-sections:
+Когда карточка переходит в `2.todo`, подготовьте deliver-ready contract:
+замените эту секцию реальными ordered sections, назначьте owner, оставьте
+observable acceptance, явно укажите dependencies и поставьте handoff на
+`$chrl-deliver <card>`. Создавать
+`openspec/changes/<change-slug>/` вручную при заполнении шаблона не нужно:
+`$chrl-deliver` создаст или дополнит artifacts через internal `ff`.
 
 ```md
 ## Change 1: `change-slug`
@@ -60,7 +64,7 @@ sections:
 - ...
 
 ### Depends On
-- ...
+- none
 
 ### Related
 - `openspec/changes/change-slug/`

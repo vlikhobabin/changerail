@@ -1,13 +1,13 @@
 # Формализовать deliver-ready contract карточки
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `020-one-command-delivery-experience`
@@ -52,7 +52,7 @@ plan и известные gates, но OpenSpec artifacts еще могут от
   boolean.
 
 ## Change Set
-- `formalize-deliver-ready-card-contract` (planned)
+- `formalize-deliver-ready-card-contract`
 
 ## Change 1: `formalize-deliver-ready-card-contract`
 
@@ -85,12 +85,29 @@ surfaces.
 - `010-core-release-contracts`
 
 ### Related
-- `openspec/changes/formalize-deliver-ready-card-contract/`
+- `openspec/changes/archive/2026-08-01-formalize-deliver-ready-card-contract/`
 
 ## Verify
-- Docs/template consistency smoke.
-- Bootstrap project smoke.
-- Skill discovery smoke, release baseline и `git diff --check`.
+- `openspec validate formalize-deliver-ready-card-contract --strict` passed.
+- `openspec validate --all --strict` passed with 15 items.
+- Docs/template consistency smoke for `deliver-ready`, `$chrl-deliver` and
+  five board columns passed.
+- `python3 scripts/smoke-bootstrap-project.py` passed: 8/8 checks.
+- `python3 scripts/smoke-wiring-discovery.py` passed: 172/172 checks.
+- `openspec validate changerail-agent-methodology --strict` passed.
+- `openspec validate changerail-project-templates --strict` passed.
+- `openspec validate changerail-skill-surface --strict` passed.
+- `openspec validate --all --strict` passed after spec sync with 15 items.
+- `bin/openspec archive formalize-deliver-ready-card-contract --yes --skip-specs`
+  passed after manual spec sync.
+- `git diff --check` plus trailing-whitespace scan for untracked files passed.
+- `python3 scripts/public-surface-scan.py ...` passed for touched docs,
+  templates, skills and OpenSpec artifacts: 15 files, 0 findings.
+- `python3 scripts/run-release-baseline.py` passed: 26/26 steps, including
+  public-surface scan and history scan with 618 files, 0 findings.
+
+## Archive
+- `openspec/changes/archive/2026-08-01-formalize-deliver-ready-card-contract/`
 
 ## Related
 - `openspec/board/1.backlog/020-00-one-command-delivery-experience-epic.md`
@@ -99,12 +116,24 @@ surfaces.
 - `templates/project/openspec/board/README.md.tpl`
 
 ## Result
-deliver-ready after series `010` exit audit
+implemented, verified, synced, archived, reviewed and published
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$chrl-deliver openspec/board/2.todo/020-01-formalize-deliver-ready-card-contract.md`
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z исходная карточка уточнена без введения новой board lane.
 - 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
   в `2.todo`, добавлен ordered Change 1 для package runner.
+- 2026-08-01T21:31:58Z `$chrl-deliver` fast-forward phase created apply-ready
+  OpenSpec artifacts for `formalize-deliver-ready-card-contract` and moved the
+  card to `3.inprogress`.
+- 2026-08-01T21:39:22Z implemented deliver-ready docs/templates/skill wording,
+  synced specs and archived
+  `openspec/changes/archive/2026-08-01-formalize-deliver-ready-card-contract/`;
+  card remains in `3.inprogress` for independent review.
+- 2026-08-01T21:44:22Z release baseline passed 26/26; payload ready for
+  independent review.
+- 2026-08-01T21:53:14Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

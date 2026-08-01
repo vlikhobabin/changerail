@@ -17,6 +17,12 @@ This is planning only. The skill may create or update board cards and
 `openspec/changes/<change>/` artifacts, but it does not implement code,
 archive changes or publish commits.
 
+Direct `$changerail-ff <card>` is an explicit planning, repair or manual-resume
+surface. It is not a required pre-step before `$changerail-deliver <card>`:
+`changerail-deliver` runs this planning/artifact phase internally for
+deliver-ready accepted ordered cards whose OpenSpec artifacts are still
+missing.
+
 ## Project Context
 
 At the start, resolve the repository root from the current working directory or
@@ -195,8 +201,9 @@ After all selected changes are apply-ready:
 1. Ensure every card `Related` and `Change Set` entry points to the actual
    change directory.
 2. Set `OpenSpec Stage` to `artifacts` or the local equivalent.
-3. Set `Next` to the project's delivery workflow. If the `changerail-do` surface is
-   installed, use:
+3. Set `Next` to the project's delivery workflow. If this direct fast-forward
+   run is handing off to the next explicit phase and the `changerail-do`
+   surface is installed, use:
    ```text
    $changerail-do <card-path>
    ```

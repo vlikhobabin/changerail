@@ -19,7 +19,7 @@ openspec/board/
 
 ```text
 1.backlog/      идеи, проблемы и будущие карточки до проработки
-2.todo/         принятые карточки с проработанным планом изменений
+2.todo/         deliver-ready карточки с принятым scope и ordered plan
 3.inprogress/   apply-ready карточки в работе или на review/publish этапе
 4.done/         опубликованные карточки с результатом и проверками
 5.canceled/     закрытые без реализации или вынесенные за scope
@@ -113,7 +113,8 @@ ChangeRail разделяет работу на несколько уровне�
 Что происходит по стадиям:
 
 1. `1.backlog`: есть идея/story, но еще нет плана изменений.
-2. `2.todo`: scope принят, карточка разложена на `## Change N:` секции.
+2. `2.todo`: scope принят, owner известен, acceptance observable, карточка
+   разложена на `## Change N:` секции и готова к `$chrl-deliver <card>`.
 3. `3.inprogress`: OpenSpec artifacts готовы; идет implementation, verification,
    archive, review или publish этап.
 4. `4.done`: fresh review вернул `go`, publish сделал scoped commit/push,
@@ -124,18 +125,37 @@ ChangeRail разделяет работу на несколько уровне�
 архивирует OpenSpec changes, но карточка остается в `3.inprogress` до
 independent review и publish.
 
+## Deliver-ready карточка
+
+`deliver-ready` - это не отдельная колонка и не дополнительный status. Для
+стандартной доски это карточка в `2.todo`, у которой:
+
+- scope принят оператором;
+- owner указан;
+- acceptance criteria observable;
+- ordered `## Change N:` plan записан;
+- dependencies указаны явно или как `none`;
+- `Next` ведет к `$chrl-deliver <card>` или canonical
+  `$changerail-deliver <card>`.
+
+OpenSpec artifacts не являются precondition для такого handoff. Когда оператор
+запускает `$chrl-deliver <card>`, internal `ff` phase создает или дополняет
+artifacts, затем workflow продолжает `do -> review -> pub`. Если карточка еще
+не deliver-ready, diagnostic должен назвать missing criteria, а не только
+вернуть `false`.
+
 ## Обычный single-card flow
 
-Для одной карточки пользователь обычно делает так:
+Для одной deliver-ready карточки пользователь обычно делает так:
 
 ```bash
-$chrl-deliver openspec/board/1.backlog/example-card.md
+$chrl-deliver openspec/board/2.todo/example-card.md
 ```
 
 Или canonical form:
 
 ```bash
-$changerail-deliver openspec/board/1.backlog/example-card.md
+$changerail-deliver openspec/board/2.todo/example-card.md
 ```
 
 `deliver` оркестрирует:
@@ -146,12 +166,17 @@ ff -> do -> review -> pub
 
 По фазам:
 
-- `ff` переносит backlog-карточку в `2.todo`, создает ordered changes и
-  OpenSpec artifacts;
+- `ff` создает или дополняет OpenSpec artifacts для ordered plan; если operator
+  явно стартовал с backlog-карточки, эта phase также выполняет triage/planning
+  work, разрешенный local board rules;
 - `do` реализует каждый card-owned change, запускает verification, sync specs
   и archive;
 - `review` получает fresh go/no-go verdict в отдельном контексте;
 - `pub` публикует только scoped payload и финализирует карточку в `4.done`.
+
+Phase-команды `$chrl-ff`, `$chrl-do`, `$chrl-review` и `$chrl-pub` остаются
+полезны для repair, debugging или manual resume после safety stop, но обычный
+operator handoff для принятой карточки начинается с `$chrl-deliver`.
 
 Если на любом этапе появляется blocker, workflow останавливается. Это не
 ошибка процесса: safety stop нужен, чтобы не смешивать scope и не публиковать
@@ -282,11 +307,11 @@ Runner пишет structured status под:
 ```bash
 /opt/changerail/bin/changerail-delivery-runner run \
   --workspace /opt/example-workspace/service-a \
-  openspec/board/1.backlog/example-card.md
+  openspec/board/2.todo/example-card.md
 
 /opt/changerail/bin/changerail-delivery-runner run \
   --workspace /opt/example-workspace/service-b \
-  openspec/board/1.backlog/another-card.md
+  openspec/board/2.todo/another-card.md
 ```
 
 Каждый runner пишет status под своим workspace:
@@ -338,6 +363,9 @@ effective `CODEX_HOME` выбирают конкретный child workspace. Co
 - У каждой карточки есть `Summary`, `Acceptance`, `Related` и источник.
 - Карточки не смешивают независимые темы.
 - Ожидаемое число changes в карточке не больше 5; более крупные темы разбиты.
+- Карточки, которые запускаются через `$chrl-deliver`, находятся в `2.todo` и
+  уже имеют deliver-ready criteria: owner, observable acceptance, ordered plan,
+  dependencies и handoff.
 - Порядок карточек проверен свежей сессией.
 - В рабочем дереве нет чужого dirty state, который будет смешан с delivery.
 - Понятно, кто выполняет роль оркестратора, кто запускает worker/runner и как
@@ -373,7 +401,7 @@ effective `CODEX_HOME` выбирают конкретный child workspace. Co
 Запустить одну карточку:
 
 ```text
-$chrl-deliver openspec/board/1.backlog/example-card.md
+$chrl-deliver openspec/board/2.todo/example-card.md
 ```
 
 Зафиксировать follow-up:

@@ -35,12 +35,18 @@ explore -> ff -> do -> review -> pub
 - `review`: выполнить независимый fresh-context аудит перед публикацией.
 - `pub`: проверить fresh verdict, подтвердить docs в reviewed payload, создать
   scoped commit и опубликовать результат.
-- `deliver`: выполнить supervised full flow для одной карточки или ordered batch.
+- `deliver`: принять deliver-ready карточку и выполнить supervised full flow
+  для одной карточки или ordered batch.
 
 Для ежедневного ручного invocation можно использовать короткие aliases
 `$chrl-*` в Codex и `/chrl:*` в Claude Code. Canonical/reference names остаются
 `$changerail-*` и `/changerail:*`; runtime paths, schema ids и OpenSpec
 namespaces продолжают использовать `changerail`.
+
+Обычный operator handoff для принятой карточки - `$chrl-deliver <card>`
+или canonical `$changerail-deliver <card>`. Phase-команды `ff`, `do`,
+`review` и `pub` остаются internal phases полного delivery, а также explicit
+repair/debug/manual-resume surface после safety stop.
 
 Для non-interactive supervised запусков ChangeRail может использовать tracked runner,
 который пишет machine-readable status/run record в ignored runtime state.
@@ -97,7 +103,8 @@ quality gate.
 Проектная доска живет в `openspec/board/`:
 
 - `1.backlog/`: неразобранные идеи и проблемы.
-- `2.todo/`: принятые stories, которым нужен или уже задан change plan.
+- `2.todo/`: принятые deliver-ready stories с owner, observable acceptance,
+  ordered change plan, dependencies/gates и понятным delivery handoff.
 - `3.inprogress/`: apply-ready stories в работе.
 - `4.done/`: завершенные stories с записанным результатом и verification.
 - `5.canceled/`: work closed без реализации или вынесенный за scope.
@@ -113,6 +120,16 @@ quality gate.
 Каждая секция ссылается на свой каталог
 `openspec/changes/<change-slug>/` и фиксирует, зачем нужен change, чего он
 должен достичь, зависимости и verification expectations.
+
+`deliver-ready` - это не новая колонка и не второй status field. Для стандартной
+доски это проверяемое свойство карточки в `2.todo`: scope принят, owner известен,
+acceptance observable, ordered `## Change N:` sections записаны, dependencies
+или `none` указаны, а `Next` ведет к `$chrl-deliver <card>` или
+`$changerail-deliver <card>`. OpenSpec artifacts не являются precondition для
+такого handoff: `$changerail-deliver` начинает с internal `ff`, создает или
+дополняет artifacts и только затем переходит к `do`. Если карточка не
+deliver-ready, agent или diagnostic должен назвать missing criteria, а не
+возвращать только boolean.
 
 Для review-gated карточек `changerail-do` завершает implementation payload:
 реализует changes, выполняет verification, синхронизирует specs и архивирует
@@ -150,8 +167,13 @@ instructions, но не реализует product/runtime changes.
 
 ## Fast-Forward Planning
 
-Fast-forward planning превращает board card в apply-ready changes. Хороший
-результат `ff`:
+Fast-forward planning превращает board card в apply-ready changes. Внутри
+`$changerail-deliver` это первая phase для deliver-ready карточек, у которых
+OpenSpec artifacts еще отсутствуют. Прямой `$changerail-ff <card>` полезен как
+explicit planning, repair или manual-resume surface, но не является обязательным
+pre-step перед `$changerail-deliver <card>`.
+
+Хороший результат `ff`:
 
 - сохраняет one story = one card;
 - делит implementation на небольшие ordered changes;
