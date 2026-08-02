@@ -43,6 +43,7 @@ SUPPORTED_HELPERS = (
 )
 SUPPORTED_WINDOWS_HELPERS = (
     *SUPPORTED_HELPERS,
+    "bootstrap-project",
     "changerail-delivery-runner",
     "changerail-delivery-metrics",
 )
@@ -959,7 +960,8 @@ def link_codex_auth(source: Path, target: Path) -> None:
 
 
 def run_verify(changerail_root: Path, target: Path) -> None:
-    verify = changerail_root / "bin" / "verify-project"
+    verify_name = "verify-project.cmd" if os.name == "nt" else "verify-project"
+    verify = changerail_root / "bin" / verify_name
     result = subprocess.run(
         [str(verify), str(target)],
         cwd=changerail_root,

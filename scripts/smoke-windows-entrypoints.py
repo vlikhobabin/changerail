@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BIN = ROOT / "bin"
 WINDOWS_SELECTOR = ROOT / "scripts" / "changerail_python_windows.py"
 SUPPORTED = (
+    "bootstrap-project",
     "openspec",
     "changerail-python",
     "verify-project",
@@ -26,6 +27,7 @@ SUPPORTED = (
     "changerail-delivery-metrics",
 )
 PYTHON_BACKED = (
+    "bootstrap-project",
     "verify-project",
     "changerail-review-verdict",
     "changerail-evidence",
@@ -145,6 +147,26 @@ def check_no_shell_fallbacks(checks: list[Check]) -> None:
         )
 
 
+def check_bootstrap_verify_handoff(checks: list[Check]) -> None:
+    text = (BIN / "bootstrap-project").read_text(encoding="utf-8")
+    add(
+        checks,
+        "bootstrap-project uses native verify wrapper on Windows",
+        'verify_name = "verify-project.cmd" if os.name == "nt" else "verify-project"' in text,
+        "bootstrap verification handoff selects verify-project.cmd on native Windows",
+    )
+
+
+def check_verify_openspec_handoff(checks: list[Check]) -> None:
+    text = (BIN / "verify-project").read_text(encoding="utf-8")
+    add(
+        checks,
+        "verify-project uses native OpenSpec wrapper on Windows",
+        'openspec_name = "openspec.cmd" if os.name == "nt" else "openspec"' in text,
+        "OpenSpec validation handoff selects openspec.cmd on native Windows",
+    )
+
+
 def run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
@@ -261,6 +283,8 @@ def run_smoke() -> dict[str, object]:
     check_selector_wrapper(checks)
     check_openspec_wrapper(checks)
     check_no_shell_fallbacks(checks)
+    check_bootstrap_verify_handoff(checks)
+    check_verify_openspec_handoff(checks)
     check_windows_selector_backend(checks)
     failed = sum(1 for check in checks if check.status != "pass")
     return {

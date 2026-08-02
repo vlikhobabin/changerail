@@ -4,9 +4,7 @@
 Зафиксировать concrete native Windows helper entrypoint contract: tracked
 `.cmd` wrappers, process invocation semantics, Python runtime selector usage and
 pinned OpenSpec launch behavior.
-
 ## Requirements
-
 ### Requirement: Supported native Windows helper wrappers
 ChangeRail MUST provide tracked `.cmd` wrappers for supported native Windows
 helper command entrypoints.
@@ -117,3 +115,20 @@ entrypoint verification.
 - **AND** the primary Linux release baseline outcome is recorded
 - **AND** live Windows host smoke is recorded as passed evidence or as an
   explicit blocker/caveat without claiming unsupported proof
+
+### Requirement: Native Windows bootstrap entrypoint
+ChangeRail MUST provide a tracked native Windows `.cmd` wrapper for the
+bootstrap helper used to create generated-copy consumer projects.
+
+#### Scenario: Maintainer inspects bootstrap wrapper
+- **WHEN** a maintainer inspects the tracked `bin/` helper surface
+- **THEN** `bin/bootstrap-project.cmd` exists
+- **AND** it routes execution through `changerail-python.cmd`
+- **AND** it propagates the helper exit code
+
+#### Scenario: Clean-clone lifecycle invokes bootstrap natively
+- **WHEN** the Windows clean-clone lifecycle proof bootstraps a disposable
+  consumer project
+- **THEN** it uses the cloned `bootstrap-project.cmd` native entrypoint
+- **AND** it does not require direct execution of the extensionless POSIX
+  `bin/bootstrap-project` script

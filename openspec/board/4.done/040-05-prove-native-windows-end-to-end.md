@@ -1,13 +1,13 @@
 # Доказать native Windows support end-to-end
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core + operator
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `040-native-windows-implementation`
@@ -16,8 +16,7 @@ story
 `05`
 
 ## Planning State
-deliver-ready after `030` exit audit; OpenSpec artifacts deferred to internal
-`ff` during `$chrl-deliver`
+apply-ready after internal `ff` during `$chrl-deliver`
 
 ## Source
 - `030-03-freeze-native-windows-architecture`
@@ -48,8 +47,8 @@ delivery smoke, update/refresh and final compatibility documentation.
 - Серия `020-one-command-delivery-experience` завершена.
 
 ## Change Set
-- `openspec/changes/prove-windows-clean-clone-lifecycle/` (planned)
-- `openspec/changes/publish-windows-support-claim/` (planned)
+- `openspec/changes/prove-windows-clean-clone-lifecycle/`
+- `openspec/changes/publish-windows-support-claim/`
 
 ## Verify
 - Two-host end-to-end report with sanitized evidence.
@@ -109,11 +108,36 @@ and final Linux release baseline.
 - `openspec/changes/publish-windows-support-claim/`
 
 ## Result
-ready for `$chrl-deliver`
+Implementation delivered and OpenSpec changes archived:
+
+- `bin/bootstrap-project.cmd` added and generated-copy Windows helper inventory
+  now includes `bootstrap-project(.cmd)`.
+- Native Windows bootstrap selects `verify-project.cmd`; `verify-project`
+  selects `openspec.cmd` for OpenSpec validation.
+- Added `scripts/windows-clean-clone-lifecycle.py` and wired it into
+  `scripts/smoke-windows-matrix.py --live`.
+- Updated compatibility, migration, adoption, release and wiring docs with the
+  retained evidence and explicit support blocker.
+
+Final live evidence:
+
+```text
+aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T133725Z-1ed04029/report.json
+focused clean-clone report: .runtime/changerail/windows-clean-clone-lifecycle/040-05-after-openspec-handoff/report.json
+local matrix report: .runtime/changerail/windows-smoke/20260802T134151Z-d6ad9e0f/report.json
+release baseline: python3 scripts/run-release-baseline.py -> pass (30/30)
+```
+
+Support claim outcome: no full two-host native Windows support claim yet.
+`windows-host-a` is blocked by missing Python `jsonschema` and missing
+Node/npm/npx. `windows-host-b` passes clean clone and `.cmd` launch, but is
+blocked by missing `npm` for MCP npm integrity verification during
+generated-copy bootstrap. Both blockers are recorded in `docs/compatibility.md`.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнять после `040-04` в tracked runner plan
-  `040-native-windows-implementation`.
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z provisional exit-gate card создана для двух Windows hosts.
@@ -122,3 +146,11 @@ ready for `$chrl-deliver`
   matrix.
 - 2026-08-02T08:24:42Z переведена в `2.todo` после exit audit `030`; planned
   changes записаны, artifacts будут созданы internal `ff` phase.
+- 2026-08-02T13:20:00Z internal `ff` создал apply-ready artifacts для
+  `prove-windows-clean-clone-lifecycle` и `publish-windows-support-claim`;
+  OpenSpec validation and whitespace checks passed; карточка переведена в
+  `3.inprogress`.
+- 2026-08-02T13:54:18Z implementation delivered; live matrix retained explicit
+  Windows host prerequisite blockers; local matrix, release baseline, OpenSpec
+  validation and diff checks passed; OpenSpec changes archived.
+- 2026-08-02T14:18:38Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

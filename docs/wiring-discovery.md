@@ -76,8 +76,12 @@ wiring и не коммитятся.
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
 bin/openspec                    -> /opt/changerail/bin/openspec
 bin/changerail-python           -> /opt/changerail/bin/changerail-python
+bin/bootstrap-project           -> /opt/changerail/bin/bootstrap-project
+bin/verify-project              -> /opt/changerail/bin/verify-project
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
 bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
+bin/changerail-delivery-runner  -> /opt/changerail/bin/changerail-delivery-runner
+bin/changerail-delivery-metrics -> /opt/changerail/bin/changerail-delivery-metrics
 ```
 
 Для Codex допустимы generated copies под `.codex/skills/changerail-*` и

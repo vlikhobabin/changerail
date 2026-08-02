@@ -456,8 +456,35 @@ inventory through secure runner-local configuration. SSH targets, usernames,
 credentials, private disposable roots and raw host output must remain outside
 tracked repository files.
 
+Current `040-05` native Windows clean-clone end-to-end result:
+
+```text
+aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T133725Z-1ed04029/report.json
+clean-clone child report: .runtime/changerail/windows-smoke/20260802T133725Z-1ed04029/primary/live/clean-clone-lifecycle/primary/report.json
+focused clean-clone report: .runtime/changerail/windows-clean-clone-lifecycle/040-05-after-openspec-handoff/report.json
+aggregate result: failed, 8/9 matrix items passed, clean-clone lifecycle blocked
+```
+
+This run does not establish full two-host native Windows support. It proves the
+tracked implementation and deterministic matrix pieces, then records host
+prerequisite blockers for the live clean-clone lifecycle:
+
+| Host | Passed evidence | Blocker |
+| --- | --- | --- |
+| `windows-host-a` | clean disposable clone and cleanup | Python `jsonschema` missing from the selected interpreter; Node/npm/npx unavailable, so `.cmd` entrypoint discovery and generated-copy bootstrap cannot complete |
+| `windows-host-b` | clean disposable clone, native `.cmd` helper launch, generated-copy manifest generation, native `openspec.cmd` validation handoff and cleanup | `npm` unavailable, so `verify-project.cmd` fails the MCP npm integrity gate during generated-copy bootstrap |
+
+Local deterministic matrix items passed in the same aggregate run:
+entrypoint smoke `56/56`, generated bootstrap smoke `15/15`, verifier/drift
+smoke `38/38`, Windows wiring Git safety smoke `6/6`, lab sample dry-run and
+runtime/wiring sample dry-run. Live readiness and live runtime/wiring smoke
+also passed on both hosts. The missing live clean-clone prerequisites must be
+remediated and the live matrix rerun before replacing this blocker with a full
+support claim.
+
 Implemented native runtime entrypoint surface:
 
+- `bin/bootstrap-project.cmd`
 - `bin/openspec.cmd`
 - `bin/changerail-python.cmd`
 - `bin/verify-project.cmd`
@@ -470,14 +497,15 @@ Python-backed `.cmd` wrappers launch through `changerail-python.cmd`, which
 uses the same Python `3.11+` and `requirements-runtime.txt` contract as the
 POSIX selector. `openspec.cmd` invokes the pinned OpenSpec CLI version through
 native Windows command launch. Deterministic wrapper behavior coverage is part
-of the `040-01` entrypoint verification change; live Windows host coverage
-remains required evidence or an explicit caveat before claiming full host
-support.
+of the `040-01` entrypoint verification change. `bootstrap-project` selects
+`verify-project.cmd` on native Windows, and `verify-project` selects
+`openspec.cmd` for OpenSpec validation on native Windows. Live Windows
+clean-clone coverage remains blocked by the prerequisites recorded above.
 
 Series `040-native-windows-implementation` owns the runtime implementation for
-this decision. Until that series is delivered, current bootstrap and verifier
-behavior remains the existing symlink-centric implementation described in the
-repo and consumer wiring docs.
+this decision. The generated-copy implementation is present, but final two-host
+support requires a passing clean-clone matrix after the Windows lab hosts
+provide the documented Python runtime modules and npm/npx tooling.
 
 ## Release Gate Tooling
 

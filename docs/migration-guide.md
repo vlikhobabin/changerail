@@ -19,6 +19,10 @@ credentials, traces или machine-local inventory.
 - Native Windows operators can launch supported helper surfaces through tracked
   `.cmd` entrypoints under `bin/` without relying on extensionless POSIX
   wrappers or implicit Bash.
+- Native Windows bootstrap uses generated project-local wiring by default,
+  includes `bootstrap-project.cmd` in generated helper copies, runs
+  `verify-project.cmd` from bootstrap and runs `openspec.cmd` from
+  `verify-project`.
 
 ### Required Actions
 
@@ -51,7 +55,36 @@ Runtime selector state remains ignored under
 On native Windows, use the `.cmd` entrypoint for supported helpers, for example:
 
 ```bat
-\opt\changerail\bin\verify-project.cmd \opt\example-project
+set CHANGERAIL_ROOT=C:\opt\changerail
+set PROJECT=C:\opt\example-project
+"%CHANGERAIL_ROOT%\bin\verify-project.cmd" "%PROJECT%"
+```
+
+Native Windows hosts must provide Python `3.11+` with
+`requirements-runtime.txt` installed and npm/npx for OpenSpec and MCP integrity
+verification:
+
+```bat
+py -3 -m pip install --disable-pip-version-check -r "%CHANGERAIL_ROOT%\requirements-runtime.txt"
+where node
+where npm
+where npx
+```
+
+For a new empty native Windows consumer, use generated-copy wiring and verify
+through native wrappers:
+
+```bat
+"%CHANGERAIL_ROOT%\bin\bootstrap-project.cmd" "%PROJECT%" --name example-project --kind generic
+"%CHANGERAIL_ROOT%\bin\verify-project.cmd" "%PROJECT%"
+```
+
+After updating ChangeRail, refresh generated-owned wiring and rerun
+verification:
+
+```bat
+"%CHANGERAIL_ROOT%\bin\bootstrap-project.cmd" "%PROJECT%" --refresh-wiring --skip-verify
+"%CHANGERAIL_ROOT%\bin\verify-project.cmd" "%PROJECT%"
 ```
 
 ### Rollback

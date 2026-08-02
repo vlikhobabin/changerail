@@ -70,6 +70,8 @@ Compatibility source of truth живет в [compatibility notes](compatibility.
 - Claude Code;
 - OpenSpec CLI.
 - automatically executed MCP npm package pins.
+- native Windows `.cmd`/generated-copy support claims and any live host
+  blockers.
 
 OpenSpec CLI compatibility должна явно ссылаться на pin в `bin/openspec`.
 MCP npm packages должны быть exact-version pinned в tracked config/templates и
@@ -177,6 +179,13 @@ tracked Python syntax inventory, Python runtime selector smoke,
 smoke matrix, generated drift fixture, public-surface scans,
 `git diff --check` и ignored-status check. Raw runtime reports остаются under
 `.runtime/` and are not committed.
+
+Native Windows release claims require one of two reviewed outcomes: a passing
+`python3 scripts/smoke-windows-matrix.py --live --inventory
+internal/windows-lab-inventory.json --json` run, or an explicit blocker in
+compatibility notes that names only generic host ids, sanitized dependency
+state and ignored evidence paths. Missing Python runtime modules, missing npm or
+missing npx are host prerequisites, not a full support pass.
 
 ## CI Gate
 

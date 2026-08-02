@@ -320,6 +320,15 @@ def live_items(cycle_dir: Path, workspace: Path, inventory: Path, timeout: float
     raw_dir = cycle_dir / "raw"
     output_root = relpath(cycle_dir / "live", workspace)
     run_id = cycle_dir.name
+    clean_timeout = max(timeout, 900.0)
+    head_result = subprocess.run(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    head = head_result.stdout.strip() if head_result.returncode == 0 else ""
 
     lab_command, lab_display = python_command(
         "scripts/windows-lab-probe.py",
@@ -351,6 +360,24 @@ def live_items(cycle_dir: Path, workspace: Path, inventory: Path, timeout: float
         f"{timeout:g}",
         "--json",
     )
+    clean_command, clean_display = python_command(
+        "scripts/windows-clean-clone-lifecycle.py",
+        "--workspace",
+        workspace,
+        "run",
+        "--inventory",
+        inventory,
+        "--source",
+        "bundle",
+        "--output-root",
+        Path(output_root) / "clean-clone-lifecycle",
+        "--run-id",
+        run_id,
+        "--timeout",
+        f"{clean_timeout:g}",
+        *(("--ref", head) if head else ()),
+        "--json",
+    )
     return [
         run_child(
             name="Windows lab live readiness",
@@ -371,6 +398,16 @@ def live_items(cycle_dir: Path, workspace: Path, inventory: Path, timeout: float
             raw_dir=raw_dir,
             workspace=workspace,
             timeout=max(timeout + 60.0, 180.0),
+        ),
+        run_child(
+            name="Windows clean-clone lifecycle live proof",
+            category="live",
+            command=clean_command,
+            display_command=clean_display,
+            cwd=workspace,
+            raw_dir=raw_dir,
+            workspace=workspace,
+            timeout=max((clean_timeout * len(EXPECTED_HOST_IDS)) + 120.0, 1800.0),
         ),
     ]
 

@@ -185,8 +185,12 @@ git -C /opt/changerail status --short
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
 bin/openspec                    -> /opt/changerail/bin/openspec
 bin/changerail-python           -> /opt/changerail/bin/changerail-python
+bin/bootstrap-project           -> /opt/changerail/bin/bootstrap-project
+bin/verify-project              -> /opt/changerail/bin/verify-project
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
 bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
+bin/changerail-delivery-runner  -> /opt/changerail/bin/changerail-delivery-runner
+bin/changerail-delivery-metrics -> /opt/changerail/bin/changerail-delivery-metrics
 ```
 
 Практический shell-фрагмент для агента:
@@ -202,8 +206,12 @@ ln -sfnT "$ChangeRail/claude/commands/changerail" "$PROJECT/.claude/commands/cha
 ln -sfnT "$ChangeRail/claude/commands/chrl" "$PROJECT/.claude/commands/chrl"
 ln -sfnT "$ChangeRail/bin/openspec" "$PROJECT/bin/openspec"
 ln -sfnT "$ChangeRail/bin/changerail-python" "$PROJECT/bin/changerail-python"
+ln -sfnT "$ChangeRail/bin/bootstrap-project" "$PROJECT/bin/bootstrap-project"
+ln -sfnT "$ChangeRail/bin/verify-project" "$PROJECT/bin/verify-project"
 ln -sfnT "$ChangeRail/bin/changerail-review-verdict" "$PROJECT/bin/changerail-review-verdict"
 ln -sfnT "$ChangeRail/bin/changerail-evidence" "$PROJECT/bin/changerail-evidence"
+ln -sfnT "$ChangeRail/bin/changerail-delivery-runner" "$PROJECT/bin/changerail-delivery-runner"
+ln -sfnT "$ChangeRail/bin/changerail-delivery-metrics" "$PROJECT/bin/changerail-delivery-metrics"
 
 for skill_path in "$ChangeRail"/skills/*; do
   [ -f "$skill_path/SKILL.md" ] || continue
@@ -220,6 +228,37 @@ done
 - `.claude/commands/chrl` содержит ручную копию старых команд;
 - `.codex/skills/<skill>` является локальной копией, а не symlink-ом;
 - `bin/openspec` уже используется проектом для другого wrapper-а.
+
+## Native Windows Consumer
+
+Для native Windows default не используйте symlink или junction wiring как
+обычный путь. Для нового пустого consumer project запускайте
+`bootstrap-project.cmd`; он выбирает generated-copy wiring, копирует
+project-local `.cmd` helpers и записывает ownership manifest в
+`openspec/changerail-wiring.json`:
+
+```bat
+set CHANGERAIL_ROOT=C:\opt\changerail
+set PROJECT=C:\opt\example-project
+"%CHANGERAIL_ROOT%\bin\bootstrap-project.cmd" "%PROJECT%" --name example-project --kind generic
+"%CHANGERAIL_ROOT%\bin\verify-project.cmd" "%PROJECT%"
+```
+
+После обновления ChangeRail refresh должен менять только generated-owned
+artifacts и не трогать project-owned files:
+
+```bat
+"%CHANGERAIL_ROOT%\bin\bootstrap-project.cmd" "%PROJECT%" --refresh-wiring --skip-verify
+"%CHANGERAIL_ROOT%\bin\verify-project.cmd" "%PROJECT%"
+```
+
+Минимальные prerequisites для native Windows verification: Git for Windows,
+Python `3.11+` with `requirements-runtime.txt`, `cmd.exe`, and Node/npm/npx for
+OpenSpec launch and MCP npm integrity verification. Если `verify-project.cmd`
+сообщает missing `jsonschema`, выполните install в выбранный Python runtime;
+если он сообщает missing `npm`, сначала установите supported Node/npm toolchain
+и rerun verification. Full Windows support claim требует passing live matrix или
+tracked explicit blocker в ChangeRail compatibility notes.
 
 ## Project-local файлы
 
@@ -342,8 +381,12 @@ git -C /opt/example-project status --short
 `verify-project` проверяет:
 
 - symlink-и `.claude`, `.codex/skills` и `bin/`;
+- generated-owned native Windows wiring and `.cmd` helper copies when the
+  project uses generated-copy backend;
 - `.mcp.json` и `.codex/config.toml`;
 - `openspec/config.yaml` и `bin/openspec validate --all --strict`;
+- MCP npm pins through a real `npm view` integrity lookup unless a deterministic
+  smoke fixture is being used;
 - обязательные `.gitignore` patterns для runtime/auth state;
 - что запрещенный runtime/auth state не попал в tracked files.
 

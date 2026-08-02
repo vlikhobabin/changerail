@@ -1008,9 +1008,10 @@ def check_mcp_npm_pins(
 
 
 def check_openspec_validate(project: Path) -> Check:
-    wrapper = project / "bin" / "openspec"
+    openspec_name = "openspec.cmd" if os.name == "nt" else "openspec"
+    wrapper = project / "bin" / openspec_name
     if not wrapper.exists():
-        return Check("bin/openspec validate --all --strict", False, "bin/openspec missing")
+        return Check("bin/openspec validate --all --strict", False, f"bin/{openspec_name} missing")
     try:
         result = subprocess.run(
             [str(wrapper), "validate", "--all", "--strict", "--no-interactive"],
@@ -1022,7 +1023,7 @@ def check_openspec_validate(project: Path) -> Check:
             timeout=120,
         )
     except OSError as exc:
-        return Check("bin/openspec validate --all --strict", False, f"cannot execute bin/openspec: {exc}")
+        return Check("bin/openspec validate --all --strict", False, f"cannot execute bin/{openspec_name}: {exc}")
     if result.returncode != 0:
         return Check("bin/openspec validate --all --strict", False, result.stdout.strip() or "failed")
     return Check("bin/openspec validate --all --strict", True, "OpenSpec validation passed")
@@ -1043,9 +1044,10 @@ def check_targeted_openspec_validate(project: Path) -> Check:
     changes = active_openspec_changes(project)
     if not changes:
         return Check("targeted OpenSpec validation", True, "no active OpenSpec changes declared")
-    wrapper = project / "bin" / "openspec"
+    openspec_name = "openspec.cmd" if os.name == "nt" else "openspec"
+    wrapper = project / "bin" / openspec_name
     if not wrapper.exists():
-        return Check("targeted OpenSpec validation", False, "bin/openspec missing")
+        return Check("targeted OpenSpec validation", False, f"bin/{openspec_name} missing")
     failures: list[str] = []
     for change in changes:
         try:
@@ -1059,7 +1061,7 @@ def check_targeted_openspec_validate(project: Path) -> Check:
                 timeout=120,
             )
         except OSError as exc:
-            failures.append(f"{change}: cannot execute bin/openspec: {exc}")
+            failures.append(f"{change}: cannot execute bin/{openspec_name}: {exc}")
             continue
         if result.returncode != 0:
             output = result.stdout.strip() or f"openspec validate {change} failed"
