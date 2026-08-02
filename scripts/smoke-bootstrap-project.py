@@ -373,7 +373,12 @@ def git_probe_check(proof_root: Path, name: str, command: list[str], message: st
         name,
         "git",
         message,
-        {"exit_code": result.returncode, "output_line_count": len([line for line in output.splitlines() if line.strip()])},
+        {
+            "exit_code": result.returncode,
+            "output_line_count": len([line for line in output.splitlines() if line.strip()]),
+            "safe": result.returncode == 0,
+            "unsafe_paths": [],
+        },
         proof_evidence(command=" ".join(command), stdout=output, exit_code=result.returncode),
     )
 

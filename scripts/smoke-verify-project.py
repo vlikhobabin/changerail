@@ -246,7 +246,12 @@ def git_probe_check(proof_root: Path, name: str, command: list[str], message: st
         name,
         "git",
         message,
-        {"exit_code": result.returncode, "output_line_count": len([line for line in output.splitlines() if line.strip()])},
+        {
+            "exit_code": result.returncode,
+            "output_line_count": len([line for line in output.splitlines() if line.strip()]),
+            "safe": result.returncode == 0,
+            "unsafe_paths": [],
+        },
         proof_evidence(command=" ".join(command), stdout=output, exit_code=result.returncode),
     )
 
@@ -537,6 +542,31 @@ def verify_json(changerail_root: Path, project: Path, env: dict[str, str]) -> tu
     return result, data
 
 
+def drift_report(
+    changerail_root: Path,
+    project: Path,
+    report_path: Path,
+    env: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], dict[str, object]]:
+    result = run(
+        [
+            "python3",
+            "scripts/smoke-drift.py",
+            "--project",
+            str(project),
+            "--report",
+            str(report_path),
+        ],
+        changerail_root,
+        env,
+    )
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    return result, data
+
+
 def check_result(
     data: dict[str, object],
     *,
@@ -575,6 +605,14 @@ def browser_mcp_default_offenders(changerail_root: Path) -> list[str]:
             if needle in text:
                 offenders.append(f"{path.relative_to(changerail_root)} contains {needle}")
     return offenders
+
+
+def first_project_class(data: dict[str, object]) -> str:
+    projects = data.get("projects", [])
+    if not projects or not isinstance(projects[0], dict):
+        return ""
+    value = projects[0].get("class")
+    return value if isinstance(value, str) else ""
 
 
 def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
@@ -633,7 +671,7 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
 
         stale_project = run_dir / "bad-generated-stale"
         shutil.copytree(generated_project, stale_project, symlinks=True)
-        old_text = "stale generated copy fixture\n"
+        old_text = "stale generated copy fixture fake-secret-sentinel\n"
         stale_target = stale_project / "bin" / "openspec"
         stale_target.write_text(old_text, encoding="utf-8")
         set_manifest_digest(stale_project, "bin/openspec", digest_file(stale_target))
@@ -645,14 +683,34 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
                 if stale_generated.returncode != 0
                 and "stale generated wiring" in stale_generated.stdout
                 and "--refresh-wiring" in stale_generated.stdout
+                and "fake-secret-sentinel" not in stale_generated.stdout
                 else "fail",
                 stale_generated.stdout.strip(),
             )
         )
 
+        missing_project = run_dir / "bad-generated-missing"
+        shutil.copytree(generated_project, missing_project, symlinks=True)
+        (missing_project / "bin" / "openspec").unlink()
+        missing_generated, missing_data = verify_json(changerail_root, missing_project, fake_env)
+        checks.append(
+            Check(
+                "missing generated artifact fails",
+                "pass"
+                if missing_generated.returncode != 0
+                and "generated artifact missing" in missing_generated.stdout
+                and check_result(missing_data, name="bin/openspec", status="fail", severity="blocking")
+                else "fail",
+                missing_generated.stdout.strip(),
+            )
+        )
+
         divergent_project = run_dir / "bad-generated-project-owned-divergence"
         shutil.copytree(generated_project, divergent_project, symlinks=True)
-        (divergent_project / "bin" / "openspec").write_text("project-owned change\n", encoding="utf-8")
+        (divergent_project / "bin" / "openspec").write_text(
+            "project-owned change fake-secret-sentinel\n",
+            encoding="utf-8",
+        )
         divergent_generated, _ = verify_json(changerail_root, divergent_project, fake_env)
         checks.append(
             Check(
@@ -660,8 +718,65 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
                 "pass"
                 if divergent_generated.returncode != 0
                 and "project-owned divergence" in divergent_generated.stdout
+                and "fake-secret-sentinel" not in divergent_generated.stdout
                 else "fail",
                 divergent_generated.stdout.strip(),
+            )
+        )
+
+        drift_valid, drift_valid_data = drift_report(
+            changerail_root,
+            generated_project,
+            run_dir / "drift-generated-valid.json",
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "drift generated wiring passes",
+                "pass"
+                if drift_valid.returncode == 0
+                and first_project_class(drift_valid_data) == "changerail_source"
+                and drift_valid_data.get("summary", {}).get("status") == "pass"
+                else "fail",
+                drift_valid.stdout.strip(),
+            )
+        )
+
+        drift_stale, drift_stale_data = drift_report(
+            changerail_root,
+            stale_project,
+            run_dir / "drift-generated-stale.json",
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "drift stale generated wiring fails",
+                "pass"
+                if drift_stale.returncode != 0
+                and first_project_class(drift_stale_data) == "broken_wiring"
+                and "stale generated wiring" in json.dumps(drift_stale_data, ensure_ascii=False)
+                and "fake-secret-sentinel" not in json.dumps(drift_stale_data, ensure_ascii=False)
+                else "fail",
+                drift_stale.stdout.strip(),
+            )
+        )
+
+        drift_divergent, drift_divergent_data = drift_report(
+            changerail_root,
+            divergent_project,
+            run_dir / "drift-generated-diverged.json",
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "drift project-owned generated divergence fails",
+                "pass"
+                if drift_divergent.returncode != 0
+                and first_project_class(drift_divergent_data) == "broken_wiring"
+                and "project-owned divergence" in json.dumps(drift_divergent_data, ensure_ascii=False)
+                and "fake-secret-sentinel" not in json.dumps(drift_divergent_data, ensure_ascii=False)
+                else "fail",
+                drift_divergent.stdout.strip(),
             )
         )
 

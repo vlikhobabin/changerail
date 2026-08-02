@@ -179,3 +179,46 @@ artifacts.
   explicitly marked generated-owned for the requested operation
 - **AND** cleanup does not remove project-owned files or recurse through
   symlink or junction targets
+
+### Requirement: Generated Windows wiring verification matrix
+The native Windows generated-copy default MUST have deterministic verification
+coverage for fresh, stale, missing, diverged and refreshed generated artifacts
+before ChangeRail claims the generated wiring model is enforced.
+
+#### Scenario: Generated wiring enforcement is verified locally
+- **WHEN** the local release baseline runs generated wiring verifier smoke
+- **THEN** deterministic fixtures cover valid generated content, stale copies,
+  missing generated files, project-owned divergence and successful refresh
+
+#### Scenario: Generated wiring diagnostics are sanitized
+- **WHEN** verifier or drift diagnostics report generated Windows wiring
+  failures
+- **THEN** they avoid credential values, private hostnames and private Windows
+  absolute paths
+
+### Requirement: Windows wiring Git safety fixture matrix
+The native Windows support model MUST include deterministic Git safety fixture
+coverage for generated, symlink and junction wiring modes before those modes
+are treated as safe to publish.
+
+#### Scenario: Git safety matrix runs locally
+- **WHEN** release baseline runs focused Windows wiring safety smoke
+- **THEN** fixtures cover generated-copy, symlink fallback and junction fallback
+  path classes
+- **AND** each fixture records porcelain status, dry-run add and index
+  inspection evidence
+- **AND** junction Git proof checks include explicit `safe: true` and
+  `unsafe_paths: []` classifications
+
+#### Scenario: Unsafe staging fails closed
+- **WHEN** a fixture shows that Git would stage ChangeRail source, ignored
+  runtime state, credentials or out-of-scope files
+- **THEN** the smoke fails closed and reports the unsafe path class without
+  exposing secret values or raw unsafe paths
+
+#### Scenario: Rename and uninstall remain bounded
+- **WHEN** Windows wiring is renamed, refreshed, uninstalled or partially
+  cleaned up in a fixture
+- **THEN** only manifest-owned generated artifacts or current-run-owned link
+  paths are modified
+- **AND** project-owned files remain untouched and visible to Git safety checks

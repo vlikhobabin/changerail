@@ -200,6 +200,7 @@ The CI workflow runs:
   scripts;
 - `scripts/smoke-python-runtime.py`;
 - `scripts/smoke-windows-entrypoints.py`;
+- `scripts/smoke-windows-wiring-git-safety.py`;
 - `ruff check bin scripts` with pinned release-gate tooling;
 - `scripts/smoke-release-ci.py` to validate the workflow command inventory;
 - public-surface scans for current files and reachable history;

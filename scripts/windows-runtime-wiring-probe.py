@@ -423,6 +423,8 @@ except Exception as exc:
     if (-not [string]::IsNullOrEmpty($porcelainText)) {{ $porcelain = $porcelainText -split "`n" }}
     $gitStatusDetails = @{{
       exit_code = $porcelainExit
+      safe = ($porcelainExit -eq 0)
+      unsafe_paths = @()
       entry_count = @($porcelain).Count
       mentions_directory_symlink = $porcelainText.Contains(".codex/skills/changerail-ff-link")
       mentions_file_symlink = $porcelainText.Contains("bin/openspec-link")
@@ -442,6 +444,8 @@ except Exception as exc:
     if (-not [string]::IsNullOrEmpty($dryRunText)) {{ $dryRun = $dryRunText -split "`n" }}
     $dryRunDetails = @{{
       exit_code = $dryRunExit
+      safe = ($dryRunExit -eq 0)
+      unsafe_paths = @()
       entry_count = @($dryRun).Count
       mentions_directory_symlink = $dryRunText.Contains(".codex/skills/changerail-ff-link")
       mentions_file_symlink = $dryRunText.Contains("bin/openspec-link")
@@ -467,6 +471,8 @@ except Exception as exc:
     $indexDetails = @{{
       git_add_exit_code = $addExit
       ls_files_exit_code = $indexExit
+      safe = ($addExit -eq 0 -and $indexExit -eq 0)
+      unsafe_paths = @()
       index_entry_count = @($index).Count
       has_directory_symlink_entry = $indexText.Contains(".codex/skills/changerail-ff-link")
       has_file_symlink_entry = $indexText.Contains("bin/openspec-link")
@@ -926,6 +932,8 @@ try:
         porcelain_text = (porcelain["stdout"] + "\n" + porcelain["stderr"]).strip()
         porcelain_details = {
             "exit_code": porcelain["exit_code"],
+            "safe": porcelain["ok"],
+            "unsafe_paths": [],
             "entry_count": len([line for line in porcelain_text.splitlines() if line.strip()]),
             "mentions_directory_symlink": git_mentions(porcelain_text, ".codex/skills/changerail-ff-link"),
             "mentions_file_symlink": git_mentions(porcelain_text, "bin/openspec-link"),
@@ -947,6 +955,8 @@ try:
         dry_text = (dry_run["stdout"] + "\n" + dry_run["stderr"]).strip()
         dry_details = {
             "exit_code": dry_run["exit_code"],
+            "safe": dry_run["ok"],
+            "unsafe_paths": [],
             "entry_count": len([line for line in dry_text.splitlines() if line.strip()]),
             "mentions_directory_symlink": git_mentions(dry_text, ".codex/skills/changerail-ff-link"),
             "mentions_file_symlink": git_mentions(dry_text, "bin/openspec-link"),
@@ -964,6 +974,8 @@ try:
         index_details = {
             "git_add_exit_code": git_add["exit_code"],
             "ls_files_exit_code": index["exit_code"],
+            "safe": git_add["ok"] and index["ok"],
+            "unsafe_paths": [],
             "index_entry_count": len([line for line in index_text.splitlines() if line.strip()]),
             "has_directory_symlink_entry": git_mentions(index_text, ".codex/skills/changerail-ff-link"),
             "has_file_symlink_entry": git_mentions(index_text, "bin/openspec-link"),

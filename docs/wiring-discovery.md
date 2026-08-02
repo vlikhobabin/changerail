@@ -107,6 +107,10 @@ Windows generated wiring rules:
 - `bin/bootstrap-project <project> --refresh-wiring` refreshes generated-owned
   artifacts from the ChangeRail source of truth and refuses project-owned
   divergence.
+- Drift gate consumes `verify-project --json`; stale, missing or project-owned
+  generated wiring is reported as `broken_wiring` with failed verifier check
+  details and refresh remediation instead of being treated as current
+  ChangeRail source wiring.
 - Symlink mode допустим только после explicit operator opt-in and positive
   proof. On native Windows bootstrap can run a direct symlink probe; otherwise
   `--windows-fallback-proof <json>` must provide schema-valid source metadata
@@ -117,13 +121,21 @@ Windows generated wiring rules:
   link-aware cleanup и Git-safety evidence. `--windows-fallback-proof <json>`
   must provide schema-valid source metadata and concrete evidence for passed
   junction creation, cleanup, Git status, dry-run add and index-safety checks
-  before the fallback can report success. Status-only check lists are rejected.
+  before the fallback can report success. Each Git check must explicitly report
+  `safe: true` and `unsafe_paths: []`. Status-only or command-only check lists
+  are rejected. Unsafe proof diagnostics summarize unsafe path classes without
+  printing raw paths or credential-like values.
 - Machine-local source roots, raw Windows lab reports, credentials and runtime
   state остаются ignored.
 
 Native Windows smoke после реализации должен проверить generated-copy wiring,
 `.cmd` launch, drift/refresh, cleanup, Git status/add/index behavior, paths со
 spaces и non-ASCII, оба Windows lab hosts или explicit blocker/caveat.
+Deterministic local Git safety fixtures run through:
+
+```bash
+python3 scripts/smoke-windows-wiring-git-safety.py
+```
 
 ## Smoke
 

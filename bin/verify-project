@@ -93,6 +93,19 @@ JUNCTION_PROOF_GROUPS = (
     ("git_add_dry_run_safe", "git_add_dry_run"),
     ("git_index_safe", "git_index_mode", "git_index_inspection"),
 )
+GIT_SAFETY_PROOF_NAMES = {
+    "git_status_safe",
+    "git_status_porcelain",
+    "git_add_dry_run_safe",
+    "git_add_dry_run",
+    "git_index_safe",
+    "git_index_mode",
+    "git_index_inspection",
+}
+UNSAFE_GIT_PATH_MARKERS = (
+    ("credential", ("auth", "credential", "password", "passwd", "secret", "token")),
+    ("runtime", (".runtime/", ".artifacts/", ".ai/", ".codex/tmp/", ".codex/sessions/")),
+)
 
 
 @dataclass
@@ -436,6 +449,48 @@ def proof_check_has_concrete_evidence(check: dict[str, object]) -> bool:
     return proof_evidence_is_concrete(check.get("evidence"))
 
 
+def git_safety_proof_error(name: str, check: dict[str, object]) -> str | None:
+    if name not in GIT_SAFETY_PROOF_NAMES:
+        return None
+    details = check.get("details")
+    if not isinstance(details, dict):
+        return f"{name} missing Git safety details"
+    if details.get("safe") is not True:
+        if details.get("safe") is False:
+            return f"{name} reports unsafe Git staging evidence"
+        return f"{name} missing positive Git safety classification"
+    if "unsafe_paths" not in details:
+        return f"{name} missing unsafe_paths Git safety classification"
+    unsafe_paths = details.get("unsafe_paths")
+    if not isinstance(unsafe_paths, list):
+        return f"{name} unsafe_paths must be an array"
+    unsafe = [path for path in unsafe_paths if isinstance(path, str) and path.strip()]
+    if unsafe:
+        return f"{name} reports unsafe Git staging paths: {unsafe_git_path_summary(unsafe)}"
+    return None
+
+
+def unsafe_git_path_summary(paths: list[str]) -> str:
+    counts: dict[str, int] = {}
+    for path in paths:
+        label = unsafe_git_path_label(path)
+        counts[label] = counts.get(label, 0) + 1
+    categories = ", ".join(f"{label}={count}" for label, count in sorted(counts.items()))
+    return f"{len(paths)} path(s) ({categories})"
+
+
+def unsafe_git_path_label(path: str) -> str:
+    normalized = path.replace("\\", "/").lower()
+    for label, markers in UNSAFE_GIT_PATH_MARKERS:
+        if any(marker in normalized for marker in markers):
+            return label
+    if len(normalized) >= 3 and normalized[1] == ":" and normalized[2] == "/":
+        return "absolute-windows-path"
+    if normalized.startswith("/"):
+        return "absolute-path"
+    return "project-path"
+
+
 def fallback_proof_errors(proof: object, backend: str, groups: tuple[tuple[str, ...], ...]) -> list[str]:
     if not isinstance(proof, dict):
         return ["proof is missing or is not an object"]
@@ -465,6 +520,10 @@ def fallback_proof_errors(proof: object, backend: str, groups: tuple[tuple[str, 
     ]
     if missing:
         errors.append("missing concrete passed evidence: " + ", ".join(missing))
+    for name, check in checks.items():
+        error = git_safety_proof_error(name, check)
+        if error:
+            errors.append(error)
     return errors
 
 

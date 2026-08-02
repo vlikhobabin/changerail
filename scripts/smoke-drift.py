@@ -285,7 +285,23 @@ def summarize_verify(data: dict[str, object] | None, fallback: str) -> dict[str,
         return {"status": "error", "message": fallback}
     summary = data.get("summary")
     if isinstance(summary, dict):
-        return summary
+        result = dict(summary)
+        checks = data.get("checks", [])
+        if isinstance(checks, list):
+            failed_checks: list[dict[str, object]] = []
+            for check in checks:
+                if not isinstance(check, dict) or check.get("status") != "fail":
+                    continue
+                failed_checks.append(
+                    {
+                        "name": check.get("name", ""),
+                        "severity": check.get("severity", ""),
+                        "message": check.get("message", ""),
+                    }
+                )
+            if failed_checks:
+                result["failed_checks"] = failed_checks
+        return result
     return {"status": "error", "message": "verify-project did not emit a summary"}
 
 

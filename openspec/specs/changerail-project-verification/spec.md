@@ -385,3 +385,69 @@ policy lacks positive proof.
 - **AND** the proof MUST include schema-valid source metadata and concrete
   per-check evidence, not only passed status names
 - **AND** missing or negative proof is a blocking failure
+
+### Requirement: Generated Windows wiring verification smoke matrix
+ChangeRail MUST provide deterministic smoke coverage proving that
+`verify-project` accepts only fresh generated Windows wiring and fails closed on
+stale, missing or project-owned generated artifacts.
+
+#### Scenario: Fresh generated wiring passes
+- **WHEN** `python3 scripts/smoke-verify-project.py` creates a generated
+  Windows consumer fixture
+- **THEN** `bin/verify-project <path> --json` reports passing checks for the
+  generated wiring manifest and representative generated file and directory
+  artifacts
+
+#### Scenario: Missing generated artifact fails
+- **WHEN** a manifest-owned generated artifact is absent from the consumer
+  fixture
+- **THEN** `bin/verify-project <path> --json` exits non-zero
+- **AND** the failed check identifies the missing generated artifact
+
+#### Scenario: Stale generated artifact fails with remediation
+- **WHEN** a generated-owned artifact no longer matches the current ChangeRail
+  source digest
+- **THEN** `bin/verify-project <path> --json` exits non-zero
+- **AND** the failed check identifies stale generated wiring and the
+  `--refresh-wiring` remediation path
+
+#### Scenario: Project-owned divergence remains blocking
+- **WHEN** generated wiring content diverges without matching manifest-owned
+  generated state
+- **THEN** `bin/verify-project <path> --json` exits non-zero
+- **AND** the failed check distinguishes project-owned divergence from stale
+  generated-copy drift
+
+### Requirement: Windows wiring Git safety verification
+`verify-project` and its focused smoke coverage MUST prove Windows wiring paths
+are safe to stage using Git porcelain status, dry-run add and index inspection.
+
+#### Scenario: Generated wiring is Git-safe
+- **WHEN** a generated Windows consumer fixture is inspected
+- **THEN** verification evidence includes `git status --porcelain`,
+  `git add --dry-run` and index inspection for generated command, skill and
+  helper paths
+- **AND** no evidence would stage ChangeRail source, ignored runtime state,
+  credentials or out-of-scope files
+
+#### Scenario: Symlink fallback Git safety is checked
+- **WHEN** a Windows symlink fallback fixture is inspected
+- **THEN** Git safety evidence proves the link path itself is stageable only
+  within the consumer project scope
+- **AND** unsafe traversal into ChangeRail source or ignored runtime state is a
+  blocking failure
+
+#### Scenario: Junction fallback Git safety is checked
+- **WHEN** a Windows junction fallback fixture is inspected
+- **THEN** Git safety evidence includes porcelain status, dry-run add and index
+  inspection for the junction path class
+- **AND** each Git proof check explicitly reports `safe: true` and
+  `unsafe_paths: []`
+- **AND** any evidence that would stage out-of-scope content is a blocking
+  failure
+
+#### Scenario: Credentials are not exposed
+- **WHEN** Git safety fixtures include credential-like ignored files
+- **THEN** diagnostics do not print credential contents
+- **AND** diagnostics do not print raw unsafe path values from the retained proof
+- **AND** the checks fail closed if the credential-like path becomes stageable

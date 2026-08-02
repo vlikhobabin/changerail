@@ -1,13 +1,13 @@
 # Добавить Windows verification, drift и Git safety
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `040-native-windows-implementation`
@@ -50,14 +50,29 @@ or staging behavior.
 - `010-05-add-verification-profiles-and-severity`
 
 ## Change Set
-- `openspec/changes/enforce-windows-wiring-verification/` (planned)
-- `openspec/changes/add-windows-git-safety-gates/` (planned)
+- `openspec/changes/archive/2026-08-02-enforce-windows-wiring-verification/`
+- `openspec/changes/archive/2026-08-02-add-windows-git-safety-gates/`
 
 ## Verify
-- Windows verifier fixtures for generated valid/stale/missing/diverged wiring.
-- Git index/status/dry-run fixtures for generated, symlink and junction paths.
-- Drift smoke on both Windows hosts or explicit blocker/caveat.
-- Linux verification regressions and public-surface scan.
+- `python3 scripts/smoke-verify-project.py` passed: generated valid/stale,
+  missing and project-owned divergence fixtures plus drift classification.
+- `python3 scripts/smoke-windows-wiring-git-safety.py` passed `6/6` after
+  review rescue: generated, symlink and junction Git status/dry-run/index
+  fixtures; incomplete command-only junction proof rejection; scrubbed unsafe
+  proof diagnostics; explicit rename/uninstall ownership boundaries.
+- `python3 scripts/smoke-bootstrap-project.py` passed after fallback proof
+  validator hardening.
+- `python3 scripts/smoke-release-ci.py` passed with Windows wiring Git safety
+  smoke in required CI inventory.
+- `bin/openspec validate <change> --strict`, capability validation,
+  `openspec validate --all --strict`, `git diff --check`, untracked artifact
+  whitespace scan and `python3 scripts/public-surface-scan.py` passed.
+- Live two-host Windows drift/smoke remains for downstream cards `040-04` and
+  `040-05`; this card added deterministic local fail-closed fixtures.
+
+## Archive
+- `openspec/changes/archive/2026-08-02-enforce-windows-wiring-verification/`
+- `openspec/changes/archive/2026-08-02-add-windows-git-safety-gates/`
 
 ## Related
 - `openspec/board/1.backlog/040-00-native-windows-implementation-epic.md`
@@ -65,6 +80,7 @@ or staging behavior.
 - `openspec/board/4.done/030-03-freeze-native-windows-architecture.md`
 - `bin/verify-project`
 - `scripts/smoke-drift.py`
+- `scripts/smoke-windows-wiring-git-safety.py`
 
 ## Change 1: `enforce-windows-wiring-verification`
 
@@ -86,7 +102,7 @@ diagnostics.
 - `010-05-add-verification-profiles-and-severity`
 
 ### Related
-- `openspec/changes/enforce-windows-wiring-verification/`
+- `openspec/changes/archive/2026-08-02-enforce-windows-wiring-verification/`
 
 ## Change 2: `add-windows-git-safety-gates`
 
@@ -107,14 +123,18 @@ cleanup/rename scenarios.
 - `enforce-windows-wiring-verification`
 
 ### Related
-- `openspec/changes/add-windows-git-safety-gates/`
+- `openspec/changes/archive/2026-08-02-add-windows-git-safety-gates/`
 
 ## Result
-ready for `$chrl-deliver`
+Implementation delivered, specs synced and card-owned changes archived. Review
+cycle 1 returned `no-go`; scoped rescue fixed R1-R3 and review cycle 2
+returned `go`.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and
+published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнять после `040-02` в tracked runner plan
-  `040-native-windows-implementation`.
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z provisional card создана из Git junction report.
@@ -122,3 +142,16 @@ ready for `$chrl-deliver`
   must enforce generated ownership and explicit link fallback gates.
 - 2026-08-02T08:24:42Z переведена в `2.todo` после exit audit `030`; planned
   changes записаны, artifacts будут созданы internal `ff` phase.
+- 2026-08-02T11:31:10Z internal `ff` создал apply-ready artifacts для
+  `enforce-windows-wiring-verification` и `add-windows-git-safety-gates`;
+  `openspec validate <change> --strict` и whitespace checks прошли.
+- 2026-08-02T11:48:01Z `do` реализовал verifier/drift/Git safety gates,
+  синхронизировал specs и архивировал оба card-owned changes; deterministic
+  smoke, OpenSpec validation, whitespace и public-surface scan прошли.
+- 2026-08-02T12:08:12Z review rescue fixed R1-R3: Git proof checks now require
+  explicit `safe: true` and `unsafe_paths: []`, unsafe proof diagnostics are
+  scrubbed, and `scripts/smoke-windows-wiring-git-safety.py` covers incomplete
+  proof plus explicit rename/uninstall boundaries; focused and baseline smokes
+  passed.
+- 2026-08-02T12:19:03Z publish finalized card into `4.done`; exact ledger
+  retained in ignored manifest.

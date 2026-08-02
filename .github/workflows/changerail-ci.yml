@@ -57,6 +57,9 @@ jobs:
       - name: Windows entrypoint smoke
         run: python3 scripts/smoke-windows-entrypoints.py
 
+      - name: Windows wiring Git safety smoke
+        run: python3 scripts/smoke-windows-wiring-git-safety.py
+
       - name: Python lint
         run: ruff check bin scripts
 
