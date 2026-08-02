@@ -208,6 +208,94 @@ python3 scripts/smoke-review-fingerprint.py
 python3 scripts/smoke-contract-schemas.py
 ```
 
+## Native Windows Lab
+
+Status: research lab available through operator-managed SSH inventory for
+series `030-native-windows-discovery`.
+
+The native Windows lab is a controlled research surface, not permanent CI
+infrastructure. Tracked ChangeRail files identify hosts only as
+`windows-host-a` and `windows-host-b`. Raw hostnames, usernames, SSH targets,
+credentials, private Windows paths, disposable root mappings and raw session
+logs remain in ignored operator/runtime files.
+
+Default ignored inventory path:
+
+```text
+internal/windows-lab-inventory.json
+```
+
+Public-safe inventory shape:
+
+```json
+{
+  "schema": "changerail.windows-lab-inventory.v1",
+  "hosts": [
+    {
+      "id": "windows-host-a",
+      "ssh_command": "ssh windows-host-a",
+      "disposable_root": "C:/Temp/changerail-lab-a"
+    },
+    {
+      "id": "windows-host-b",
+      "ssh_command": "ssh windows-host-b",
+      "disposable_root": "C:/Temp/changerail-lab-b"
+    }
+  ]
+}
+```
+
+Protocol rules:
+
+- run probes through `scripts/windows-lab-probe.py`;
+- use only non-interactive SSH commands with per-host timeout;
+- create a per-run child directory under each ignored `disposable_root`;
+- transfer only deterministic test fixtures into that disposable directory;
+- clean up only files and directories created by the probe, and make cleanup
+  idempotent;
+- do not write to real ChangeRail or consumer repositories on the Windows
+  hosts;
+- do not request UAC, `runas`, administrator elevation or persistent machine
+  configuration without a separate operator action recorded by the active card;
+- retain raw command output only under ignored `.runtime/changerail/` evidence
+  paths;
+- copy only command class, generic host id, outcome and sanitized capability
+  values into tracked cards or docs.
+
+Local dry-run validation does not contact real Windows hosts:
+
+```bash
+python3 scripts/windows-lab-probe.py dry-run --sample --json
+```
+
+Live research probes use the ignored inventory and write sanitized reports under
+ignored runtime state:
+
+```bash
+python3 scripts/windows-lab-probe.py run \
+  --inventory internal/windows-lab-inventory.json --json
+```
+
+Current `030-01` native Windows lab baseline:
+
+```text
+retained report: .runtime/changerail/windows-lab/20260802T060958Z/report.json
+aggregate result: passed, 2/2 hosts ready
+command class: non-interactive SSH + PowerShell readiness probe
+```
+
+| Host | OS baseline | Filesystem | Git | Python | Shell | Privilege |
+| --- | --- | --- | --- | --- | --- | --- |
+| `windows-host-a` | Windows 11 Pro, version `10.0.22631`, build `22631`, `64-bit` | disposable root present, `NTFS` | `git version 2.43.0.windows.1` | `python`: `Python 3.13.1`; `py -3`: `Python 3.13.1` | Windows PowerShell `5.1.22621.4391`, Desktop edition | current SSH token reported `elevated=true`; Developer Mode `unknown` |
+| `windows-host-b` | Windows 11 Pro, version `10.0.26200`, build `26200`, `64-bit` | disposable root present, `NTFS` | `git version 2.45.2.windows.1` | `python`: `Python 3.13.1`; `py -3`: `Python 3.13.1` | Windows PowerShell `5.1.26100.8972`, Desktop edition | current SSH token reported `elevated=true`; Developer Mode `unknown` |
+
+Readiness checks passed on both hosts: SSH access, non-interactive PowerShell
+execution, disposable root setup, deterministic fixture write/read and
+idempotent cleanup. The elevated-token observation records the current SSH
+session capability only; it does not authorize elevated destructive probes.
+Future elevated-mode research still requires separate operator action in the
+active card.
+
 ## Release Gate Tooling
 
 Status: pinned direct Python tooling for the release gate.
