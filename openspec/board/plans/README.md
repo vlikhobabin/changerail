@@ -23,3 +23,5 @@ package runner.
   delivery карточки `010-01`.
 - `020-one-command-delivery-experience.json` - карточки `020-01`..`020-05`
   после exit audit серии `010`.
+- `030-native-windows-discovery.json` - карточки `030-01`..`030-03` после exit
+  audit серии `020` и ignored Windows lab readiness.

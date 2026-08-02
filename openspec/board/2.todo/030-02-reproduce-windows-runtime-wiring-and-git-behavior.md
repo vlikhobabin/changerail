@@ -1,7 +1,7 @@
 # Воспроизвести Windows runtime, wiring и Git behavior
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core + operator
@@ -67,10 +67,13 @@ upgrade behavior.
 - `scripts/smoke-wiring-discovery.py`
 
 ## Result
-not started
+ready for `$chrl-deliver`
 
 ## Next
-- Передать comparison evidence в `030-03`.
+- Выполнять после `030-01`; передать comparison evidence в `030-03`.
 
 ## Log
 - 2026-08-01T15:07:29Z три исходных Windows reports объединены в один research scope.
+- 2026-08-02T05:48:42Z переведена в `2.todo` после readiness pass: оба
+  Windows hosts доступны через ignored inventory, story зависит от lab protocol
+  и support matrix из `030-01`.

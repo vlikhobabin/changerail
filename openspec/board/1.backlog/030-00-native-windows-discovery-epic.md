@@ -76,15 +76,17 @@ symlink, shell, Git или Python behavior.
 - `bin/verify-project`
 
 ## Result
-not deliver-ready; waiting for ignored Windows lab inventory
+ready for tracked runner plan
 
 ## Next
-- Создать или заполнить ignored `internal/windows-lab-inventory.json` с двумя
-  SSH targets для `windows-host-a` и `windows-host-b`; затем перевести
-  `030-01`..`030-03` в `2.todo` и создать tracked runner plan.
+- Запустить tracked runner plan `030-native-windows-discovery` для
+  `030-01`..`030-03`; после exit audit полностью перепланировать серию `040`.
 
 ## Log
 - 2026-08-01T15:07:29Z native Windows support выделен в research-first series.
 - 2026-08-02T00:58:19Z exit audit после `020` прошел, но local SSH config и
   ignored inventory не содержат готового mapping для двух Windows hosts; серию
   нельзя запускать non-interactive runner-ом до operator inventory.
+- 2026-08-02T05:48:42Z readiness обновлен после operator SSH handoff: ignored
+  inventory заполнен двумя generic Windows host ids, SSH/Git/Python prerequisite
+  подтвержден на обоих hosts, private connection data остается ignored.

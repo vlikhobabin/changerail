@@ -1,0 +1,37 @@
+{
+  "cards": [
+    {
+      "card": "030-01-establish-windows-lab-and-support-matrix.md",
+      "id": "030-01",
+      "workspace": "changerail"
+    },
+    {
+      "card": "030-02-reproduce-windows-runtime-wiring-and-git-behavior.md",
+      "depends_on": [
+        "030-01"
+      ],
+      "id": "030-02",
+      "workspace": "changerail"
+    },
+    {
+      "card": "030-03-freeze-native-windows-architecture.md",
+      "depends_on": [
+        "030-02"
+      ],
+      "id": "030-03",
+      "workspace": "changerail"
+    }
+  ],
+  "description": "План runner для серии 030 после exit audit серии 020 и Windows lab readiness",
+  "id": "030-native-windows-discovery",
+  "max_parallel": 1,
+  "per_workspace_parallelism": 1,
+  "push_mode": "push",
+  "schema": "changerail.delivery-plan.v1",
+  "workspaces": [
+    {
+      "alias": "changerail",
+      "path": "."
+    }
+  ]
+}

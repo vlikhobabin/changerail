@@ -1,7 +1,7 @@
 # Зафиксировать native Windows architecture и test plan
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -63,10 +63,12 @@ test matrix, затем полностью перепланировать сер
 - `docs/compatibility.md`
 
 ## Result
-not started
+ready for `$chrl-deliver`
 
 ## Next
-- Провести mandatory refresh серии `040`; только затем принимать `040-01`.
+- Выполнять после `030-02`; затем провести mandatory refresh серии `040`.
 
 ## Log
 - 2026-08-01T15:07:29Z карточка создана как research exit gate.
+- 2026-08-02T05:48:42Z переведена в `2.todo` как завершающая карточка серии
+  `030`; ее publish должен обновить планирование серии `040`.

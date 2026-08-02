@@ -1,7 +1,7 @@
 # Подготовить Windows lab и support matrix
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core + operator
@@ -62,13 +62,15 @@ Windows probes.
 - `docs/compatibility.md`
 
 ## Result
-not deliver-ready; waiting for ignored Windows host mapping
+ready for `$chrl-deliver`
 
 ## Next
-- После появления ignored `internal/windows-lab-inventory.json` перевести в
-  `2.todo` и запускать первой карточкой серии `030`.
+- Запустить первой карточкой tracked runner plan `030-native-windows-discovery`.
 
 ## Log
 - 2026-08-01T15:07:29Z карточка создана для controlled Windows research.
 - 2026-08-02T00:58:19Z readiness pass после `020` нашел clean Linux baseline,
   но не нашел локальный Windows host inventory; карточка остается в backlog.
+- 2026-08-02T05:48:42Z operator provided two Windows SSH targets in ignored
+  inventory; SSH/Git/Python prerequisite confirmed on both hosts without
+  recording host identities in tracked files.
