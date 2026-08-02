@@ -9,17 +9,18 @@ notes, migration guide и проверки.
 Current ChangeRail version:
 
 ```text
-0.3.0
+0.4.0
 ```
 
 Source: root `VERSION`.
 
-`0.3.0` changes ChangeRail delivery runner behavior, consumer Codex auth setup
-guidance and approved optional browser MCP package verification. It does not
-change Codex CLI, Claude Code or OpenSpec CLI pins, and it does not add browser
-MCP packages to default ChangeRail config or generated templates. Existing
-consumers should run project-local verification and restart active agent
-sessions after updating.
+`0.4.0` formalizes the shared Python runtime selector, adds native Windows
+`.cmd` entrypoints and generated-copy wiring, publishes two-host clean-clone
+Windows evidence for prepared operator-managed hosts, and hardens delivery
+review, publish, evidence and CI smoke contracts. It does not change Codex CLI,
+Claude Code, OpenSpec CLI or MCP npm package pins. Existing consumers should
+install runtime dependencies, run project-local verification and restart active
+agent sessions after updating.
 
 ## Codex CLI
 

@@ -6,6 +6,10 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
+- none
+
+## 0.3.0 -> 0.4.0
+
 ### What Changed
 
 - ChangeRail Python helpers now share one runtime selector:
@@ -23,6 +27,14 @@ credentials, traces или machine-local inventory.
   includes `bootstrap-project.cmd` in generated helper copies, runs
   `verify-project.cmd` from bootstrap and runs `openspec.cmd` from
   `verify-project`.
+- Review verdict freshness validation now binds verdicts to Git tree identity
+  and diff fingerprints.
+- Publish finalization separates payload and published commits in ignored
+  delivery manifests.
+- Delivery runner preflight proves remote publish targets, classifies failures
+  and supports resume after a fresh transient remote proof.
+- Delivery evidence, manifest handoff summaries, one-command delivery smoke and
+  queue metrics are part of the release gate.
 
 ### Required Actions
 
@@ -30,15 +42,20 @@ For operators maintaining the source checkout:
 
 ```bash
 cd /opt/changerail
+git pull --ff-only
 python3 -m pip install --disable-pip-version-check -r requirements-runtime.txt
-python3 scripts/smoke-python-runtime.py
+/opt/changerail/bin/verify-project /opt/example-project
 ```
 
-For consumer projects that keep generated wrapper symlinks, refresh wiring so
-`bin/changerail-python` points at the ChangeRail source of truth:
+Restart active Codex/Claude sessions after updating so loaded skill and
+workflow-contract text is refreshed.
+
+For consumer projects that keep generated wrapper copies or copied ChangeRail
+helpers, refresh wiring so `bin/changerail-python` and the `.cmd` wrappers point
+at the current ChangeRail source of truth:
 
 ```bash
-ln -sfnT /opt/changerail/bin/changerail-python /opt/example-project/bin/changerail-python
+/opt/changerail/bin/bootstrap-project /opt/example-project --refresh-wiring --skip-verify
 /opt/changerail/bin/verify-project /opt/example-project
 ```
 
@@ -51,6 +68,14 @@ CHANGERAIL_PYTHON=/opt/example-project/.runtime/python/bin/python \
 
 Runtime selector state remains ignored under
 `.runtime/changerail/python-runtime/`.
+
+If local automation writes review verdicts directly, refresh it to include the
+current `workspace.tree_sha` and `workspace.diff_fingerprint` fields produced
+by:
+
+```bash
+/opt/changerail/bin/changerail-review-verdict fingerprint --workspace /opt/example-project
+```
 
 On native Windows, use the `.cmd` entrypoint for supported helpers, for example:
 
@@ -90,7 +115,7 @@ verification:
 ### Rollback
 
 Unset `CHANGERAIL_PYTHON` or point it at the previous supported local Python,
-then return `/opt/changerail` to the previous reviewed ref and rerun project
+then return `/opt/changerail` to `v0.3.0` and rerun project
 verification.
 
 ## 0.2.0 -> 0.3.0

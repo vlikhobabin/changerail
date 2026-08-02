@@ -19,6 +19,55 @@ changes помечаются префиксом `BREAKING:`.
 ### Breaking
 - none
 
+## 0.4.0 - 2026-08-02
+
+### Added
+- Added a shared Python runtime selector `bin/changerail-python` plus
+  `.cmd` entrypoints for the supported helper surface, including bootstrap,
+  OpenSpec, verification, review verdict, retained evidence, delivery runner
+  and delivery metrics helpers.
+- Added generated-copy native Windows project wiring with bootstrap refresh,
+  verifier/drift ownership checks, Git-safety coverage and deterministic
+  local fixtures.
+- Added native Windows lab protocol, support matrix, smoke aggregation and
+  two-host clean-clone lifecycle evidence for prepared operator-managed
+  Windows hosts.
+- Added retained delivery evidence indexing, manifest scope/handoff summaries,
+  verification profiles, severity reporting and one-command delivery
+  regression coverage.
+- Added review-cycle rescue-budget metrics and aggregate queue status metrics.
+
+### Changed
+- Review verdict freshness now binds reviewed evidence to Git tree identity and
+  diff fingerprints.
+- Publish finalization now separates payload commits from published commits and
+  keeps mutable publish ledger data in ignored manifests.
+- Delivery runner preflight now proves remote publish targets, classifies
+  failure causes and supports resume after a fresh transient remote proof.
+- Delivery cards now have an explicit deliver-ready contract, and board series
+  docs cover the release, delivery operations and Windows implementation waves.
+- Compatibility, migration, adoption and release docs now include the native
+  Windows generated-copy support claim and its prerequisites.
+
+### Fixed
+- Fixed skill frontmatter validation and publish-target preflight enforcement.
+- Fixed stale/impossible publish finalization metadata and manifest handoff
+  gaps.
+- Fixed Windows probe cleanup/import issues and native launcher assumptions
+  around extensionless POSIX wrappers, implicit Bash and unsafe staging.
+- Fixed generated board template docs so clean-clone bootstrap smoke does not
+  leak machine-local checkout paths.
+- Fixed delivery contract smoke so custom/fake launchers do not require a
+  locally installed `codex` binary in `PATH`; the default `bin/codex` launcher
+  still requires `codex`.
+
+### Breaking
+- BREAKING: ChangeRail Python helper entrypoints now enforce Python `3.11+`
+  and runtime dependencies from `requirements-runtime.txt` through
+  `bin/changerail-python`.
+- BREAKING: Review verdict freshness validation now requires tree/diff identity
+  to match the reviewed workspace state.
+
 ## 0.3.0 - 2026-07-26
 
 ### Added
