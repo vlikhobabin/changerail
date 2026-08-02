@@ -62,7 +62,7 @@ def steps() -> list[Step]:
         Step("retained evidence smoke", ["python3", "scripts/smoke-retained-evidence.py"]),
         Step("delivery manifest smoke", ["python3", "scripts/smoke-delivery-manifest.py"]),
         Step("delivery manifest derive smoke", ["python3", "scripts/smoke-delivery-manifest-derive.py"]),
-        Step("delivery runner smoke", ["python3", "scripts/smoke-delivery-runner.py"]),
+        Step("delivery runner one-command smoke", ["python3", "scripts/smoke-delivery-runner.py"]),
         Step("delivery metrics smoke", ["python3", "scripts/smoke-delivery-metrics.py"]),
         Step("openspec archive diagnostics smoke", ["python3", "scripts/smoke-openspec-archive-diagnostics.py"]),
         Step("generated drift fixture reset", ["rm", "-rf", ".runtime/changerail/ci-drift"]),

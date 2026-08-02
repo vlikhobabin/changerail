@@ -18,7 +18,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "bin" / "changerail-delivery-runner"
 VERDICT_HELPER = ROOT / "scripts" / "changerail_review_verdict.py"
+MANIFEST_HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
+EVIDENCE_HELPER = ROOT / "bin" / "changerail-evidence"
 CARD = "openspec/board/3.inprogress/harden-delivery-operations.md"
+ONE_COMMAND_CARD = "openspec/board/2.todo/one-command-delivery-smoke.md"
+ONE_COMMAND_DONE_CARD = "openspec/board/4.done/one-command-delivery-smoke.md"
+ONE_COMMAND_CHANGE = "one-command-delivery-smoke"
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -130,6 +135,424 @@ def write_fake_launcher(path: Path) -> None:
             ]
         )
         + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def write_fake_one_command_launcher(path: Path) -> None:
+    path.write_text(
+        r'''#!/usr/bin/env python3
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+WORKSPACE = Path.cwd()
+REVIEW_HELPER = Path(%r)
+DEFAULT_CARD = %r
+DONE_CARD = %r
+CHANGE = %r
+NOW = "2026-08-01T00:00:00Z"
+
+
+def emit(payload):
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def fail(message, code=1):
+    emit({"type": "tool/result", "data": {"status": "failed", "message": message}})
+    sys.exit(code)
+
+
+def git(*args):
+    result = subprocess.run(["git", *args], cwd=WORKSPACE, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        fail(result.stderr.strip() or result.stdout.strip() or "git command failed", result.returncode)
+    return result.stdout.strip()
+
+
+def write_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def card_from_prompt():
+    prompt = sys.argv[-1] if sys.argv else ""
+    parts = prompt.split()
+    for index, value in enumerate(parts):
+        if value in {"$changerail-deliver", "$chrl-deliver"} and index + 1 < len(parts):
+            return parts[index + 1]
+    return os.environ.get("CHANGERAIL_ONE_COMMAND_CARD", DEFAULT_CARD)
+
+
+def rel(path):
+    return path.relative_to(WORKSPACE).as_posix()
+
+
+def card_id(card_path):
+    return Path(card_path).name.removesuffix(".md")
+
+
+def final_card_text(card_path):
+    return "\n".join(
+        [
+            "# One-command delivery smoke",
+            "",
+            "## Status",
+            "4.done",
+            "",
+            "## Owner",
+            "ChangeRail smoke",
+            "",
+            "## OpenSpec Stage",
+            "published",
+            "",
+            "## Acceptance",
+            "- One-command delivery fixture reached reviewed publish.",
+            "",
+            "## Change Set",
+            f"- `{CHANGE}` (archived)",
+            "",
+            "## Archive",
+            f"- `openspec/changes/archive/2026-08-01-{CHANGE}/`",
+            "",
+            "## Result",
+            "Reviewed payload finalized through ChangeRail scoped publish; exact ledger retained in ignored manifest.",
+            "",
+            "## Next",
+            "- done",
+            "",
+            "## Log",
+            "- 2026-08-01T00:00:00Z one-command delivery smoke finalized the card into `4.done`.",
+            "",
+        ]
+    )
+
+
+def write_evidence(card_path):
+    cid = card_id(card_path)
+    evidence_dir = WORKSPACE / ".runtime" / "changerail" / "evidence" / cid
+    raw_path = evidence_dir / "outputs" / "one-command-success.txt"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_text("one-command delivery smoke produced reviewed publish state\n", encoding="utf-8")
+    index_path = evidence_dir / "index.json"
+    raw_rel = rel(raw_path)
+    payload = {
+        "schema": "changerail.evidence-index.v1",
+        "updated_at": NOW,
+        "workspace": {"root": str(WORKSPACE), "repository": WORKSPACE.name},
+        "scope": {"card_id": cid, "card_path": card_path, "changes": [CHANGE]},
+        "entries": [
+            {
+                "id": "one-command-success",
+                "path": raw_rel,
+                "role": "raw_output",
+                "storage": "runtime",
+                "phase": "do",
+                "classification": "mandatory",
+                "change": CHANGE,
+                "kind": "smoke-output",
+                "command": {
+                    "argv": ["python3", "scripts/smoke-delivery-runner.py"],
+                    "display": "python3 scripts/smoke-delivery-runner.py",
+                },
+                "status": "passed",
+                "exit_code": 0,
+                "started_at": NOW,
+                "ended_at": NOW,
+                "duration_seconds": 0,
+                "summary": "one-command delivery fake child produced final repository state",
+                "raw_output_path": raw_rel,
+                "redacted": False,
+            }
+        ],
+    }
+    write_json(index_path, payload)
+    return rel(index_path), raw_rel
+
+
+def fingerprint():
+    result = subprocess.run(
+        [sys.executable, str(REVIEW_HELPER), "fingerprint", "--workspace", str(WORKSPACE)],
+        cwd=WORKSPACE,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail(result.stderr.strip() or result.stdout.strip() or "fingerprint failed", result.returncode)
+    return json.loads(result.stdout)
+
+
+def write_verdict(card_path, result, reviewed_path, evidence_index=None, raw_output=None):
+    cid = card_id(card_path)
+    data = fingerprint()
+    if result == "go":
+        acceptance = [
+            {
+                "criterion": "one-command delivery reached reviewed publish",
+                "verdict": "pass",
+                "evidence": "local smoke fixture final card, manifest, evidence and Git history align",
+                "evidence_refs": [
+                    {
+                        "id": "one-command-success",
+                        "index_path": evidence_index,
+                        "raw_output_path": raw_output,
+                        "classification": "mandatory",
+                    }
+                ],
+            }
+        ]
+        findings = []
+        audit = {"claims_checked": 1, "claims_unbacked": 0}
+    else:
+        acceptance = [
+            {
+                "criterion": "review budget permits same-card rescue",
+                "verdict": "fail",
+                "evidence": "smoke fixture exhausted review rescue budget",
+            }
+        ]
+        findings = [
+            {
+                "id": "R1",
+                "severity": "blocker",
+                "area": "process",
+                "summary": "same-card review rescue budget is exhausted",
+            }
+        ]
+        audit = {"claims_checked": 1, "claims_unbacked": 0}
+    payload = {
+        "schema": "changerail.review-verdict.v1",
+        "reviewed_at": NOW,
+        "card": {"id": cid, "path": reviewed_path},
+        "workspace": {
+            "root": data["workspace"],
+            "head_commit": data["head_commit"],
+            "tree_sha": data["tree_sha"],
+            "diff_fingerprint": data["diff_fingerprint"],
+        },
+        "reviewer": {
+            "kind": "codex-exec",
+            "independence": {
+                "fresh_context": True,
+                "did_not_plan_or_implement": True,
+                "basis": "fresh fake reviewer context in deterministic smoke fixture",
+            },
+        },
+        "result": result,
+        "review_cycle": 1 if result == "go" else 6,
+        "acceptance": acceptance,
+        "findings": findings,
+        "evidence_audit": audit,
+    }
+    verdict_path = WORKSPACE / ".runtime" / "changerail" / "reviews" / f"{cid}.json"
+    write_json(verdict_path, payload)
+    return rel(verdict_path), data["tree_sha"]
+
+
+def write_history(card_path, result, verdict_path, exhausted):
+    cid = card_id(card_path)
+    cycle = {
+        "review_cycle": 1 if result == "go" else 6,
+        "same_card_rescue_attempt": 0 if result == "go" else 5,
+        "result": result,
+        "reviewed_at": NOW,
+        "verdict_path": verdict_path,
+        "findings": {"blocker": 0 if result == "go" else 1, "major": 0, "minor": 0},
+        "acceptance": {
+            "pass": 1 if result == "go" else 0,
+            "fail": 0 if result == "go" else 1,
+            "unverifiable": 0,
+            "not_applicable": 0,
+        },
+        "finding_details": []
+        if result == "go"
+        else [{"id": "R1", "severity": "blocker", "summary": "same-card review rescue budget is exhausted"}],
+    }
+    payload = {
+        "schema": "changerail.review-cycle-history.v1",
+        "updated_at": NOW,
+        "card": {"id": cid, "path": card_path},
+        "workspace": {"root": str(WORKSPACE), "head_commit": git("rev-parse", "HEAD")},
+        "cycles": [cycle],
+        "rescue_budget": {
+            "limit": 5,
+            "used": 0 if result == "go" else 5,
+            "remaining": 5 if result == "go" else 0,
+            "exhausted": exhausted,
+        },
+    }
+    write_json(WORKSPACE / ".runtime" / "changerail" / "reviews" / f"{cid}.history.json", payload)
+
+
+def manifest_payload(card_path, done_path, archive_dir, spec_path, verdict_path, evidence_index, raw_output):
+    cid = card_id(card_path)
+    manifest_path = WORKSPACE / ".runtime" / "changerail" / "delivery-manifests" / f"{cid}.json"
+    history_path = WORKSPACE / ".runtime" / "changerail" / "reviews" / f"{cid}.history.json"
+    evidence_root = WORKSPACE / ".runtime" / "changerail" / "evidence" / cid
+    return {
+        "schema": "changerail.delivery-manifest.v1",
+        "updated_at": NOW,
+        "workspace": {"root": str(WORKSPACE), "repository": WORKSPACE.name},
+        "card": {"id": cid, "path": card_path, "status": "4.done"},
+        "changes": [
+            {
+                "slug": CHANGE,
+                "state": "archived",
+                "order": 1,
+                "archive_path": rel(archive_dir),
+            }
+        ],
+        "committable_paths": [
+            {
+                "path": rel(done_path),
+                "kind": "board",
+                "phase": "pub",
+                "operation": "rename",
+                "source_path": card_path,
+                "target_path": rel(done_path),
+            },
+            {
+                "path": rel(archive_dir / "proposal.md"),
+                "kind": "openspec_archive",
+                "phase": "archive",
+                "operation": "add",
+                "target_path": rel(archive_dir / "proposal.md"),
+            },
+            {
+                "path": rel(archive_dir / "tasks.md"),
+                "kind": "openspec_archive",
+                "phase": "archive",
+                "operation": "add",
+                "target_path": rel(archive_dir / "tasks.md"),
+            },
+            {
+                "path": rel(spec_path),
+                "kind": "openspec_spec",
+                "phase": "do",
+                "operation": "add",
+                "target_path": rel(spec_path),
+            },
+        ],
+        "excluded_runtime_paths": [
+            {"path": rel(manifest_path), "kind": "manifest", "phase": "do", "reason": "ignored runtime manifest"},
+            {"path": verdict_path, "kind": "review-verdict", "phase": "review", "reason": "ignored runtime verdict"},
+            {"path": rel(history_path), "kind": "review-history", "phase": "review", "reason": "ignored runtime history"},
+            {"path": rel(evidence_root), "kind": "evidence", "phase": "do", "reason": "ignored retained evidence"},
+        ],
+        "preexisting_dirty": [],
+        "verification_summary": {
+            "result": "passed",
+            "summary": "one-command delivery smoke produced final observable state",
+            "commands": [
+                {
+                    "command": "python3 scripts/smoke-delivery-runner.py",
+                    "outcome": "one-command fixture passed",
+                    "evidence": {
+                        "id": "one-command-success",
+                        "index_path": evidence_index,
+                        "raw_output_path": raw_output,
+                        "classification": "mandatory",
+                    },
+                }
+            ],
+        },
+        "review_summary": {
+            "result": "go",
+            "summary": "fake independent review passed for one-command smoke",
+            "review_cycle": 1,
+            "verdict_path": verdict_path,
+            "findings": {"blocker": 0, "major": 0, "minor": 0},
+        },
+        "final_card_state": {
+            "path": rel(done_path),
+            "status": "4.done",
+            "result_summary": "reviewed payload finalized through scoped publish",
+        },
+        "publish": {"status": "pending"},
+    }
+
+
+def run_success(card_path):
+    source = WORKSPACE / card_path
+    if not source.is_file():
+        fail(f"card not found: {card_path}")
+    done = WORKSPACE / "openspec" / "board" / "4.done" / source.name
+    done.parent.mkdir(parents=True, exist_ok=True)
+    done.write_text(final_card_text(card_path), encoding="utf-8")
+    source.unlink()
+
+    archive_dir = WORKSPACE / "openspec" / "changes" / "archive" / f"2026-08-01-{CHANGE}"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    (archive_dir / "proposal.md").write_text("## Why\n\nOne-command smoke archive.\n", encoding="utf-8")
+    (archive_dir / "tasks.md").write_text("## 1. Smoke\n\n- [x] 1.1 Delivered by fake child.\n", encoding="utf-8")
+    spec_path = WORKSPACE / "openspec" / "specs" / "changerail-delivery-runner" / "spec.md"
+    spec_path.parent.mkdir(parents=True, exist_ok=True)
+    spec_path.write_text(
+        "### Requirement: One-command smoke fixture\n"
+        "Temporary fixture spec written by the fake delivery child.\n",
+        encoding="utf-8",
+    )
+
+    evidence_index, raw_output = write_evidence(card_path)
+    verdict_path, reviewed_tree = write_verdict(card_path, "go", rel(done), evidence_index, raw_output)
+    write_history(card_path, "go", verdict_path, False)
+    manifest_path = WORKSPACE / ".runtime" / "changerail" / "delivery-manifests" / f"{card_id(card_path)}.json"
+    write_json(manifest_path, manifest_payload(card_path, done, archive_dir, spec_path, verdict_path, evidence_index, raw_output))
+
+    git("add", "-A", "--", card_path, rel(done), rel(archive_dir), rel(spec_path))
+    git("-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "deliver one-command smoke")
+    published = git("rev-parse", "HEAD")
+    git("push", "origin", "HEAD")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["updated_at"] = NOW
+    manifest["publish"] = {
+        "status": "pushed",
+        "payload_commit": published,
+        "published_commit": published,
+        "remote": "origin",
+        "branch": git("branch", "--show-current"),
+        "pushed_at": NOW,
+    }
+    manifest["notes"] = [f"reviewed_tree={reviewed_tree}"]
+    write_json(manifest_path, manifest)
+    emit({"type": "item.completed", "item": {"id": "msg-one-command", "type": "agent_message", "text": "delivered"}})
+
+
+def run_review_budget_exhausted(card_path):
+    verdict_path, _tree = write_verdict(card_path, "no-go", card_path)
+    write_history(card_path, "no-go", verdict_path, True)
+    emit({"type": "external-review/no-go", "data": {"result": "no-go", "rescue_budget": {"exhausted": True}}})
+
+
+stdin = sys.stdin.read()
+emit(
+    {
+        "argv": sys.argv,
+        "stdin_len": len(stdin),
+        "cwd": os.getcwd(),
+        "CODEX_WORKDIR": os.environ.get("CODEX_WORKDIR"),
+        "CODEX_HOME": os.environ.get("CODEX_HOME"),
+    }
+)
+mode = os.environ.get("CHANGERAIL_ONE_COMMAND_MODE", "success")
+card = card_from_prompt()
+if mode == "success":
+    run_success(card)
+elif mode == "review-budget-exhausted":
+    run_review_budget_exhausted(card)
+elif mode == "noop":
+    pass
+else:
+    fail(f"unknown one-command mode: {mode}", 2)
+emit({"usage": {"input_tokens": 3, "cached_input_tokens": 1, "uncached_input_tokens": 2, "output_tokens": 5, "reasoning_tokens": 1, "total_tokens": 8}})
+sys.exit(1 if mode == "review-budget-exhausted" else 0)
+'''
+        % (str(VERDICT_HELPER), ONE_COMMAND_CARD, ONE_COMMAND_DONE_CARD, ONE_COMMAND_CHANGE),
         encoding="utf-8",
     )
     path.chmod(0o755)
@@ -477,6 +900,379 @@ def write_no_go_verdict(workspace: Path, card: str) -> Path:
     )
     require_ok(validate, "review verdict validate")
     return verdict_path
+
+
+def write_one_command_card(workspace: Path) -> None:
+    path = workspace / ONE_COMMAND_CARD
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "# One-command delivery smoke",
+                "",
+                "## Status",
+                "2.todo",
+                "",
+                "## Owner",
+                "ChangeRail smoke",
+                "",
+                "## OpenSpec Stage",
+                "story",
+                "",
+                "## Acceptance",
+                "- One-command delivery reaches reviewed publish.",
+                "- Runtime manifest, verdict, evidence and runner status align.",
+                "",
+                "## Change Set",
+                f"- `{ONE_COMMAND_CHANGE}` (planned)",
+                "",
+                f"## Change 1: `{ONE_COMMAND_CHANGE}`",
+                "",
+                "### Why",
+                "Prove the one-command runner handoff with a local smoke fixture.",
+                "",
+                "### Goal",
+                "Reach reviewed publish through one runner invocation.",
+                "",
+                "### Acceptance",
+                "- Final state is observable in Git, card and runtime evidence.",
+                "",
+                "### Depends On",
+                "- none",
+                "",
+                "### Related",
+                f"- `openspec/changes/{ONE_COMMAND_CHANGE}/`",
+                "",
+                "## Result",
+                "not started",
+                "",
+                "## Next",
+                f"- `$chrl-deliver {ONE_COMMAND_CARD}`",
+                "",
+                "## Log",
+                "- 2026-08-01T00:00:00Z smoke card created.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def create_one_command_workspace(tmp: Path, name: str) -> Path:
+    workspace = create_workspace(tmp, name, publish_ready=False)
+    write_one_command_card(workspace)
+    git(["add", ONE_COMMAND_CARD], workspace)
+    git(
+        [
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=changerail-smoke@example.invalid",
+            "commit",
+            "-m",
+            "add one-command smoke card",
+        ],
+        workspace,
+    )
+    configure_upstream_baseline(workspace)
+    return workspace
+
+
+def remote_head(workspace: Path) -> str:
+    branch = git(["branch", "--show-current"], workspace)
+    output = git(["ls-remote", "origin", f"refs/heads/{branch}"], workspace)
+    return output.split()[0]
+
+
+def manifest_scope_paths(manifest: dict[str, Any]) -> set[str]:
+    paths: set[str] = set()
+    for entry in manifest.get("committable_paths", []):
+        if not isinstance(entry, dict):
+            continue
+        for key in ("path", "source_path", "target_path"):
+            value = entry.get(key)
+            if isinstance(value, str):
+                paths.add(value)
+    return paths
+
+
+def changed_paths_in_head(workspace: Path) -> set[str]:
+    output = git(["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], workspace)
+    return {line for line in output.splitlines() if line}
+
+
+def assert_one_command_success(workspace: Path, runtime: Path, run_id: str, baseline: str) -> None:
+    status = load_status(runtime, run_id)
+    if status["result"] != "DELIVERED" or status.get("terminal_outcome") != "DELIVERED":
+        raise AssertionError(f"one-command run did not deliver: {status}")
+    published = head_commit(workspace)
+    if not published or published == baseline:
+        raise AssertionError(f"one-command run did not create a payload commit: {published}")
+    if status.get("commit") != published:
+        raise AssertionError(f"runner status commit does not match workspace HEAD: {status}")
+    if remote_head(workspace) != published:
+        raise AssertionError("one-command run did not push the final commit to the local bare remote")
+    if (workspace / ONE_COMMAND_CARD).exists() or not (workspace / ONE_COMMAND_DONE_CARD).is_file():
+        raise AssertionError("final card was not uniquely moved to 4.done")
+
+    manifest_path = workspace / ".runtime" / "changerail" / "delivery-manifests" / "one-command-delivery-smoke.json"
+    verdict_path = workspace / ".runtime" / "changerail" / "reviews" / "one-command-delivery-smoke.json"
+    history_path = workspace / ".runtime" / "changerail" / "reviews" / "one-command-delivery-smoke.history.json"
+    evidence_index = workspace / ".runtime" / "changerail" / "evidence" / "one-command-delivery-smoke" / "index.json"
+    for path in (manifest_path, verdict_path, history_path, evidence_index):
+        if not path.is_file():
+            raise AssertionError(f"expected runtime artifact missing: {path}")
+
+    require_ok(
+        run([sys.executable, str(MANIFEST_HELPER), "validate", str(manifest_path), "--json"]),
+        "one-command manifest validate",
+    )
+    require_ok(
+        run([str(EVIDENCE_HELPER), "validate", str(evidence_index), "--workspace", str(workspace), "--json"]),
+        "one-command evidence validate",
+    )
+    require_ok(run([sys.executable, str(VERDICT_HELPER), "validate", str(verdict_path), "--json"]), "verdict validate")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    if manifest["publish"]["published_commit"] != published or manifest["publish"]["status"] != "pushed":
+        raise AssertionError(f"manifest publish metadata does not match final commit: {manifest['publish']}")
+    if manifest["review_summary"]["verdict_path"] != ".runtime/changerail/reviews/one-command-delivery-smoke.json":
+        raise AssertionError(f"manifest does not reference canonical verdict: {manifest['review_summary']}")
+    if history.get("rescue_budget", {}).get("exhausted") is not False:
+        raise AssertionError(f"success history should record non-exhausted rescue budget: {history}")
+    if verdict["workspace"]["tree_sha"] != git(["rev-parse", "HEAD^{tree}"], workspace):
+        raise AssertionError("reviewed tree does not match the final committed tree")
+
+    changed = changed_paths_in_head(workspace)
+    scope = manifest_scope_paths(manifest)
+    if not changed <= scope:
+        raise AssertionError(f"commit changed paths outside manifest scope: changed={changed} scope={scope}")
+    if any(path.startswith(".runtime/") for path in changed):
+        raise AssertionError(f"runtime evidence leaked into the commit: {changed}")
+    if git(["status", "--short"], workspace):
+        raise AssertionError("one-command workspace is dirty after publish")
+    card_text = (workspace / ONE_COMMAND_DONE_CARD).read_text(encoding="utf-8")
+    for forbidden in (published, "push status"):
+        if forbidden in card_text:
+            raise AssertionError(f"final card contains mutable publish metadata: {forbidden}")
+    if status.get("performance", {}).get("publish", {}).get("pushed_at") != "2026-08-01T00:00:00Z":
+        raise AssertionError(f"runner status did not summarize publish timing: {status.get('performance')}")
+
+
+def check_one_command_delivery_success(tmp: Path) -> None:
+    workspace = create_one_command_workspace(tmp, "one-command-success")
+    launcher = tmp / "fake-one-command-success"
+    runtime = tmp / "runtime"
+    baseline = head_commit(workspace)
+    if not baseline:
+        raise AssertionError("one-command baseline commit missing")
+    write_fake_one_command_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            ONE_COMMAND_CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "one-command-success",
+            "--launcher",
+            str(launcher),
+        ],
+        env={**runner_env(), "CHANGERAIL_ONE_COMMAND_MODE": "success"},
+    )
+    require_ok(result, "one-command delivery success")
+    assert_one_command_success(workspace, runtime, "one-command-success", baseline)
+
+
+def check_one_command_delivery_resume_after_preflight(tmp: Path) -> None:
+    workspace = create_one_command_workspace(tmp, "one-command-resume")
+    launcher = tmp / "fake-one-command-resume"
+    runtime = tmp / "runtime"
+    baseline = head_commit(workspace)
+    if not baseline:
+        raise AssertionError("one-command resume baseline commit missing")
+    write_fake_one_command_launcher(launcher)
+    prior = run(
+        [
+            str(RUNNER),
+            "preflight",
+            ONE_COMMAND_CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "one-command-resume-prior",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "dns"),
+    )
+    if prior.returncode == 0:
+        raise AssertionError("one-command prior preflight unexpectedly passed")
+    prior_check = publish_target_check(json.loads(prior.stdout))
+    if prior_check.get("failure_class") != "dns":
+        raise AssertionError(f"prior preflight did not record a transient dns failure: {prior_check}")
+
+    resumed = run(
+        [
+            str(RUNNER),
+            "resume",
+            "--status-path",
+            str(runtime / "one-command-resume-prior" / "status.json"),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "one-command-resume",
+            "--launcher",
+            str(launcher),
+        ],
+        env={**fake_git_env(tmp, "success"), "CHANGERAIL_ONE_COMMAND_MODE": "success"},
+    )
+    require_ok(resumed, "one-command resume")
+    status = load_status(runtime, "one-command-resume")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["resume prior status"]["status"] != "pass":
+        raise AssertionError(f"resume did not accept prior remote failure: {checks['resume prior status']}")
+    if checks["publish target"]["status"] != "pass":
+        raise AssertionError(f"resume did not repeat successful publish-target preflight: {checks['publish target']}")
+    assert_one_command_success(workspace, runtime, "one-command-resume", baseline)
+
+
+def write_stale_go_verdict(workspace: Path, card: str) -> Path:
+    card_name = Path(card).name.removesuffix(".md")
+    data = review_fingerprint(workspace)
+    verdict = {
+        "schema": "changerail.review-verdict.v1",
+        "reviewed_at": "2026-08-01T00:00:00Z",
+        "card": {"id": card_name, "path": card},
+        "workspace": {
+            "root": data["workspace"],
+            "head_commit": "0" * 40,
+            "tree_sha": data["tree_sha"],
+            "diff_fingerprint": data["diff_fingerprint"],
+        },
+        "reviewer": {
+            "kind": "codex-exec",
+            "independence": {
+                "fresh_context": True,
+                "did_not_plan_or_implement": True,
+                "basis": "fresh smoke reviewer context with intentionally stale fingerprint",
+            },
+        },
+        "result": "go",
+        "review_cycle": 1,
+        "acceptance": [
+            {
+                "criterion": "published payload",
+                "verdict": "pass",
+                "evidence": "stale smoke fixture",
+            }
+        ],
+        "findings": [],
+        "evidence_audit": {"claims_checked": 1, "claims_unbacked": 0},
+    }
+    verdict_path = workspace / ".runtime" / "changerail" / "reviews" / f"{card_name}.json"
+    verdict_path.parent.mkdir(parents=True, exist_ok=True)
+    verdict_path.write_text(json.dumps(verdict, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    require_ok(run([sys.executable, str(VERDICT_HELPER), "validate", str(verdict_path), "--json"]), "stale schema validate")
+    return verdict_path
+
+
+def check_one_command_delivery_stale_verdict_blocks(tmp: Path) -> None:
+    workspace = create_one_command_workspace(tmp, "one-command-stale-verdict")
+    launcher = tmp / "fake-one-command-stale-verdict"
+    runtime = tmp / "runtime"
+    baseline = head_commit(workspace)
+    if not baseline:
+        raise AssertionError("one-command stale baseline commit missing")
+    write_fake_one_command_launcher(launcher)
+    write_stale_go_verdict(workspace, ONE_COMMAND_CARD)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            ONE_COMMAND_CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "one-command-stale-verdict",
+            "--launcher",
+            str(launcher),
+        ],
+        env={**runner_env(), "CHANGERAIL_ONE_COMMAND_MODE": "noop"},
+    )
+    if result.returncode == 0:
+        raise AssertionError("stale verdict scenario unexpectedly delivered")
+    status = load_status(runtime, "one-command-stale-verdict")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "review_verdict_invalid":
+        raise AssertionError(f"stale verdict was not fail-closed: {status}")
+    if remote_head(workspace) != baseline or head_commit(workspace) != baseline:
+        raise AssertionError("stale verdict scenario unexpectedly committed or pushed")
+    if not (workspace / ONE_COMMAND_CARD).is_file() or (workspace / ONE_COMMAND_DONE_CARD).exists():
+        raise AssertionError("stale verdict scenario moved the card despite blocking")
+
+
+def check_one_command_delivery_review_budget_no_go(tmp: Path) -> None:
+    workspace = create_one_command_workspace(tmp, "one-command-review-budget")
+    launcher = tmp / "fake-one-command-review-budget"
+    runtime = tmp / "runtime"
+    baseline = head_commit(workspace)
+    if not baseline:
+        raise AssertionError("one-command review budget baseline commit missing")
+    write_fake_one_command_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            ONE_COMMAND_CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "one-command-review-budget",
+            "--launcher",
+            str(launcher),
+        ],
+        env={**runner_env(), "CHANGERAIL_ONE_COMMAND_MODE": "review-budget-exhausted"},
+    )
+    if result.returncode == 0:
+        raise AssertionError("exhausted review budget scenario unexpectedly delivered")
+    status = load_status(runtime, "one-command-review-budget")
+    if status.get("result") != "NO-GO" or status.get("terminal_outcome") != "NO-GO":
+        raise AssertionError(f"exhausted review budget did not report NO-GO: {status}")
+    if remote_head(workspace) != baseline or head_commit(workspace) != baseline:
+        raise AssertionError("exhausted review budget scenario unexpectedly committed or pushed")
+    if not (workspace / ONE_COMMAND_CARD).is_file() or (workspace / ONE_COMMAND_DONE_CARD).exists():
+        raise AssertionError("exhausted review budget scenario moved the card despite NO-GO")
+    history_path = workspace / ".runtime" / "changerail" / "reviews" / "one-command-delivery-smoke.history.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    if history.get("rescue_budget") != {"limit": 5, "used": 5, "remaining": 0, "exhausted": True}:
+        raise AssertionError(f"review budget exhaustion was not recorded: {history}")
+    verdict_path = workspace / ".runtime" / "changerail" / "reviews" / "one-command-delivery-smoke.json"
+    validate = run(
+        [
+            sys.executable,
+            str(VERDICT_HELPER),
+            "validate",
+            str(verdict_path),
+            "--check-fresh",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ]
+    )
+    require_ok(validate, "exhausted review budget verdict validate")
 
 
 def check_success_run(tmp: Path) -> None:
@@ -2335,6 +3131,10 @@ def check_queue_no_push_requires_ahead(tmp: Path) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-delivery-runner-") as tmp:
         workspace = Path(tmp)
+        check_one_command_delivery_success(workspace)
+        check_one_command_delivery_resume_after_preflight(workspace)
+        check_one_command_delivery_stale_verdict_blocks(workspace)
+        check_one_command_delivery_review_budget_no_go(workspace)
         check_success_run(workspace)
         check_default_workspace_run(workspace)
         check_performance_summary_run(workspace)

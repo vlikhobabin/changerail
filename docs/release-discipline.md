@@ -210,7 +210,8 @@ The CI workflow runs:
 - `scripts/smoke-retained-evidence.py`;
 - `scripts/smoke-delivery-manifest.py`;
 - `scripts/smoke-delivery-manifest-derive.py`;
-- `scripts/smoke-delivery-runner.py`;
+- `scripts/smoke-delivery-runner.py`, including one-command delivery success,
+  transient preflight resume and fail-closed review-gated regression coverage;
 - `scripts/smoke-delivery-metrics.py`;
 - `scripts/smoke-openspec-archive-diagnostics.py`;
 - `scripts/smoke-drift.py` against a generated generic runtime project.
