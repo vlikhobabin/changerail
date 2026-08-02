@@ -327,10 +327,91 @@ symlink behavior is explicitly `not-applicable` for this run.
 | Explicit Bash invocation | unsupported: Bash unavailable | failed through the host Bash/WSL environment | Not portable across the two-host lab and unsuitable as the native default. |
 | Git porcelain/dry-run/index inspection | passed; all linked/generated paths were mentioned | passed; all linked/generated paths were mentioned | Git does not make wiring invisible: status, `git add --dry-run` and index inspection must be part of Windows safety checks. |
 
-Architecture implication for `030-03`: native Windows support should not depend
-on direct extensionless wrapper launch or implicit Bash. Symlink and junction
-strategies need explicit Git-safety and privilege/Developer Mode handling.
-Generated copies avoid link privileges but introduce drift/refresh ownership.
+Current `030-03` native Windows architecture decision:
+
+```text
+status: architecture frozen; implementation planned in series 040
+runtime default: tracked .cmd entrypoints
+wiring default: generated project-local copies with verifier/drift ownership
+```
+
+The selected native Windows default is intentionally conservative. Native
+Windows support must not depend on direct extensionless wrapper launch, implicit
+Bash, Developer Mode, administrator elevation or junction traversal. The
+default implementation path is:
+
+| Surface | Default | Bounded fallbacks | Evidence basis |
+| --- | --- | --- | --- |
+| Command entrypoints | tracked `bin/*.cmd` wrappers | Python helper invocation for Python-backed helpers; PowerShell only for diagnostics or explicit fallback; POSIX wrapper only in POSIX/WSL environments | `.cmd`, PowerShell and Python wrapper launches passed on both hosts; extensionless direct launch and implicit Bash did not |
+| Project wiring | generated project-local command, skill and helper copies owned by a verifier-readable manifest | symlink mode only after explicit operator opt-in and verified Developer Mode/privilege; junction mode only as an explicit compatibility fallback with link-aware cleanup and Git-safety evidence | generated copy drift and refresh were deterministic; symlink success was observed only under elevated tokens; Git sees junction paths |
+| Bootstrap/verify/drift | one wiring classification shared by bootstrap, `verify-project`, drift checks and refresh | local absolute config only through explicit operator opt-in | current bootstrap is symlink-centric, so implementation work belongs to series `040` |
+
+Prerequisites for the selected native Windows support path:
+
+- Windows host with `cmd.exe` and Windows PowerShell available for diagnostics
+  and lab automation.
+- Python `3.11` or newer reachable through `python` or `py -3` for
+  ChangeRail Python helpers.
+- Git for Windows available for repository checks, `git status --porcelain`,
+  `git add --dry-run` and index inspection.
+- Developer Mode, administrator elevation and symlink privilege are not
+  prerequisites for the generated-copy default.
+- Symlink fallback requires explicit operator selection and positive
+  least-privilege or privilege evidence on the target host.
+- Junction fallback requires explicit operator selection, link-aware cleanup and
+  fail-closed Git-safety checks before any staging recommendation.
+
+Tracked/generated/ignored ownership:
+
+- ChangeRail tracked source owns templates, skill directories, Claude command
+  wrappers, helper scripts, future `.cmd` wrappers, schemas, specs and docs.
+- Consumer tracked files may include rendered project config and generated
+  command, skill and helper wiring copies when they are declared
+  generated-owned by a manifest or tracked project policy.
+- Generated copied wiring must carry enough source identity, content digest or
+  equivalent metadata for `verify-project` and drift checks to distinguish
+  valid generated content from stale copies or project-owned divergence.
+- Machine-local source roots, Windows lab inventory, raw SSH/session output,
+  raw reports, temporary refresh state, credentials and agent runtime state
+  remain ignored.
+- Refresh/upgrade updates only manifest-owned generated files and must not
+  overwrite project-owned files silently.
+- Cleanup removes only files created by the current run or marked
+  generated-owned; symlink and junction paths must be treated as links rather
+  than traversed recursively.
+
+Threat model for implementation:
+
+- Junction traversal can expose ChangeRail source to consumer Git operations;
+  junction mode is therefore explicit fallback only.
+- Accidental staging is blocked by explicit path staging plus Git porcelain,
+  dry-run add and index checks for generated, symlink and junction paths.
+- Credentials near Codex, Claude, MCP, SSH or runtime state must never be
+  copied, printed or committed.
+- Windows command construction must preserve argv, cwd, environment and exit
+  code, and must handle spaces and non-ASCII paths without shell
+  reinterpretation.
+- Untrusted repository content must not be interpolated into shell strings; use
+  structured argv or an equivalent quoting discipline.
+
+Mandatory implementation test matrix for series `040`:
+
+- deterministic local fixtures for `.cmd` wrappers, argv/cwd/env/exit-code
+  propagation, spaces and non-ASCII paths;
+- generated-copy wiring fixtures for fresh bootstrap, stale copy detection,
+  explicit refresh, project-owned divergence and partial-failure cleanup;
+- Git safety fixtures for status, dry-run staging and index inspection;
+- negative fixtures for extensionless launch, implicit Bash assumptions,
+  unsupported symlink fallback and unsafe junction fallback;
+- live sanitized smoke on `windows-host-a` and `windows-host-b`, or an explicit
+  blocker/caveat before claiming host coverage;
+- repeatability after cleanup;
+- primary Linux release baseline to preserve existing POSIX behavior.
+
+Series `040-native-windows-implementation` owns the runtime implementation for
+this decision. Until that series is delivered, current bootstrap and verifier
+behavior remains the existing symlink-centric implementation described in the
+repo and consumer wiring docs.
 
 ## Release Gate Tooling
 
