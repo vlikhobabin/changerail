@@ -296,6 +296,42 @@ session capability only; it does not authorize elevated destructive probes.
 Future elevated-mode research still requires separate operator action in the
 active card.
 
+Current `030-02` native Windows runtime/wiring reproduction:
+
+```text
+primary report: .runtime/changerail/windows-runtime-wiring/20260802T070216Z/report.json
+repeatability report: .runtime/changerail/windows-runtime-wiring/20260802T070225Z/report.json
+aggregate result: passed, 2/2 hosts completed cleanup
+command class: non-interactive SSH + remote Python disposable runtime/wiring probe
+repeatability: 0 per-check status mismatches between primary and cleanup rerun
+```
+
+Both hosts ran the same disposable fixture. Current SSH sessions again reported
+`elevated=true`, Developer Mode remained `unknown`, and the harness did not
+request UAC, `runas` or persistent elevation. Therefore direct `os.symlink`
+was observed under the current SSH token, while non-elevated Developer Mode
+symlink behavior is explicitly `not-applicable` for this run.
+
+| Strategy | `windows-host-a` | `windows-host-b` | Trade-offs |
+| --- | --- | --- | --- |
+| Direct directory `os.symlink` | passed under current elevated SSH token | passed under current elevated SSH token | Small tracked surface, but privilege/Developer Mode portability is not proven by this lab token. |
+| Direct file `os.symlink` | passed under current elevated SSH token | passed under current elevated SSH token | File links behave separately from directory links; same privilege caveat as directory symlinks. |
+| Non-elevated Developer Mode symlink proof | not applicable: token already elevated, Developer Mode `unknown` | not applicable: token already elevated, Developer Mode `unknown` | Requires a future explicitly non-elevated host token before using as the default portability claim. |
+| Directory junction | passed | passed | No Developer Mode evidence required in this run, but Git sees the junction path during status/add/index checks and cleanup must be link-aware. |
+| Generated copy drift | passed: source update left copy stale | passed: source update left copy stale | Most portable and Git-friendly, but requires explicit drift detection and refresh on ChangeRail source updates. |
+| Generated copy source refresh | passed: explicit refresh matched source | passed: explicit refresh matched source | Upgrade behavior is deterministic only when the generator owns refresh semantics. |
+| Direct extensionless `bin/openspec` launch | failed with Win32 application error | failed with Win32 application error | Native Windows direct process launch cannot rely on extensionless shell scripts. |
+| `.cmd` wrapper launch | passed | passed | Best native operator entrypoint candidate among wrapper variants observed here. |
+| PowerShell wrapper launch | passed | passed | Works on both hosts, but adds PowerShell quoting/execution-policy surface. |
+| Python wrapper launch | passed | passed | Works on both hosts because Python is present; couples runtime entrypoint to Python availability. |
+| Explicit Bash invocation | unsupported: Bash unavailable | failed through the host Bash/WSL environment | Not portable across the two-host lab and unsuitable as the native default. |
+| Git porcelain/dry-run/index inspection | passed; all linked/generated paths were mentioned | passed; all linked/generated paths were mentioned | Git does not make wiring invisible: status, `git add --dry-run` and index inspection must be part of Windows safety checks. |
+
+Architecture implication for `030-03`: native Windows support should not depend
+on direct extensionless wrapper launch or implicit Bash. Symlink and junction
+strategies need explicit Git-safety and privilege/Developer Mode handling.
+Generated copies avoid link privileges but introduce drift/refresh ownership.
+
 ## Release Gate Tooling
 
 Status: pinned direct Python tooling for the release gate.
