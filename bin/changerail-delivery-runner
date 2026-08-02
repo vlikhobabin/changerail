@@ -227,6 +227,15 @@ def auth_state(codex_home: Path, env: dict[str, str]) -> Check:
     return Check("CODEX auth", "fail", f"no auth marker or supported auth environment variable found; {AUTH_REMEDIATION}")
 
 
+def codex_binary_state(launcher: Path) -> Check:
+    default_launcher = (repo_root_from_script() / "bin" / "codex").resolve(strict=False)
+    selected_launcher = launcher.resolve(strict=False)
+    if selected_launcher != default_launcher:
+        return Check("codex binary", "skip", f"custom launcher selected: {selected_launcher}")
+    found = shutil.which("codex")
+    return Check("codex binary", "pass" if found else "fail", found or "not found")
+
+
 def no_push_selected(args: argparse.Namespace) -> bool:
     return any(value == "--no-push" for value in getattr(args, "deliver_arg", []) or [])
 
@@ -1448,7 +1457,7 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
             "pass" if not stale else "fail",
             "no stale symlinks" if not stale else f"stale symlinks: {', '.join(stale[:10])}; {AUTH_REMEDIATION}",
         ),
-        Check("codex binary", "pass" if shutil.which("codex") else "fail", shutil.which("codex") or "not found"),
+        codex_binary_state(launcher),
         publish_target_state(args),
     ]
     if args.connectivity_url:

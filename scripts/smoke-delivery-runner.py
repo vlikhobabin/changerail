@@ -54,6 +54,30 @@ def runner_env(mode: str | None = None) -> dict[str, str]:
     return env
 
 
+def no_codex_path_env(tmp: Path) -> dict[str, str]:
+    bin_dir = tmp / "no-codex-path"
+    bin_dir.mkdir(exist_ok=True)
+    tools = {
+        "python": sys.executable,
+        "python3": sys.executable,
+    }
+    for name in ("git", "readlink", "dirname", "sed", "mkdir"):
+        found = shutil.which(name)
+        if not found:
+            raise AssertionError(f"required tool not found for isolated PATH: {name}")
+        tools[name] = found
+    for name, target in tools.items():
+        link = bin_dir / name
+        if not link.exists():
+            link.symlink_to(target)
+    env = runner_env()
+    env["PATH"] = str(bin_dir)
+    env["CHANGERAIL_PYTHON"] = sys.executable
+    if shutil.which("codex", path=env["PATH"]):
+        raise AssertionError(f"isolated PATH unexpectedly contains codex: {env['PATH']}")
+    return env
+
+
 def require_ok(result: subprocess.CompletedProcess[str], label: str) -> None:
     if result.returncode == 0:
         return
@@ -1796,12 +1820,67 @@ def check_preflight(tmp: Path) -> None:
             raise AssertionError(f"auth state did not pass: {checks['CODEX auth']}")
         if checks["CODEX_HOME symlinks"]["status"] != "pass":
             raise AssertionError(f"symlink diagnostics did not pass: {checks['CODEX_HOME symlinks']}")
+        if checks["codex binary"]["status"] != "skip" or "custom launcher selected" not in checks["codex binary"]["message"]:
+            raise AssertionError(f"custom launcher should skip PATH codex probe: {checks['codex binary']}")
         if checks["publish target"]["status"] != "pass" or "reachable=true" not in checks["publish target"]["message"]:
             raise AssertionError(f"publish target did not pass: {checks['publish target']}")
         if not (runtime / "preflight" / "status.json").is_file():
             raise AssertionError("preflight status was not written")
     finally:
         server.shutdown()
+
+
+def check_custom_launcher_without_path_codex(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "custom-launcher-no-path-codex")
+    launcher = tmp / "fake-codex-without-path-codex"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "custom-launcher-no-path-codex",
+            "--launcher",
+            str(launcher),
+            "--json",
+        ],
+        env=no_codex_path_env(tmp),
+    )
+    require_ok(result, "custom launcher without PATH codex preflight")
+    checks = {check["name"]: check for check in json.loads(result.stdout)["preflight"]["checks"]}
+    if checks["codex binary"]["status"] != "skip":
+        raise AssertionError(f"custom launcher should not require PATH codex: {checks['codex binary']}")
+
+
+def check_default_launcher_requires_path_codex(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "default-launcher-no-path-codex")
+    runtime = tmp / "runtime"
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "default-launcher-no-path-codex",
+            "--json",
+        ],
+        env=no_codex_path_env(tmp),
+    )
+    if result.returncode == 0:
+        raise AssertionError("default launcher without PATH codex unexpectedly passed")
+    checks = {check["name"]: check for check in json.loads(result.stdout)["preflight"]["checks"]}
+    if checks["codex binary"]["status"] != "fail" or checks["codex binary"]["message"] != "not found":
+        raise AssertionError(f"default launcher should require PATH codex: {checks['codex binary']}")
 
 
 def set_configured_upstream(workspace: Path, remote_url: str) -> None:
@@ -2203,8 +2282,10 @@ def check_stale_symlink_preflight(tmp: Path) -> None:
 
 def check_queue_plan_preflight(tmp: Path) -> None:
     consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-consumer")
+    runner = tmp / "fake-queue-preflight-ready-runner"
     plan = consumer / "delivery-plan.json"
     runtime = tmp / "queue-runtime"
+    write_fake_queue_runner(runner)
     write_queue_plan(plan, queue_plan_fixture())
 
     dry_run = run(
@@ -2246,7 +2327,7 @@ def check_queue_plan_preflight(tmp: Path) -> None:
             "--run-id",
             "queue-preflight",
             "--launcher",
-            str(RUNNER),
+            str(runner),
             "--json",
         ]
     )
@@ -2371,8 +2452,10 @@ def check_queue_preflight_remote_failure_class(tmp: Path) -> None:
 
 def check_generated_queue_plan(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-generated")
+    runner = tmp / "fake-generated-plan-preflight-runner"
     plan = consumer / "generated-delivery-plan.json"
     runtime = tmp / "queue-generated-runtime"
+    write_fake_queue_runner(runner)
     generate = run(
         [
             str(RUNNER),
@@ -2439,7 +2522,7 @@ def check_generated_queue_plan(tmp: Path) -> None:
             "--run-id",
             "generated-preflight",
             "--launcher",
-            str(RUNNER),
+            str(runner),
             "--json",
         ]
     )
@@ -3150,6 +3233,8 @@ def main() -> int:
         check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
+        check_custom_launcher_without_path_codex(workspace)
+        check_default_launcher_requires_path_codex(workspace)
         check_publish_target_preflight(workspace)
         check_remote_preflight_failure_classes(workspace)
         check_remote_preflight_resume_success(workspace)
