@@ -51,6 +51,7 @@ def steps() -> list[Step]:
         Step("python runtime smoke", ["python3", "scripts/smoke-python-runtime.py"]),
         Step("windows entrypoint smoke", ["python3", "scripts/smoke-windows-entrypoints.py"]),
         Step("windows wiring Git safety smoke", ["python3", "scripts/smoke-windows-wiring-git-safety.py"]),
+        Step("windows smoke matrix", ["python3", "scripts/smoke-windows-matrix.py"]),
         Step("python lint", ["ruff", "check", "bin", "scripts"]),
         Step("ci workflow contract", ["python3", "scripts/smoke-release-ci.py"]),
         Step("public surface scan self-test", ["python3", "scripts/public-surface-scan.py", "--self-test"]),

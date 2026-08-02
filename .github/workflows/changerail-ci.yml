@@ -60,6 +60,9 @@ jobs:
       - name: Windows wiring Git safety smoke
         run: python3 scripts/smoke-windows-wiring-git-safety.py
 
+      - name: Windows smoke matrix
+        run: python3 scripts/smoke-windows-matrix.py
+
       - name: Python lint
         run: ruff check bin scripts
 

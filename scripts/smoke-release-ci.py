@@ -34,6 +34,7 @@ REQUIRED_COMMANDS = {
     "python runtime smoke": "python3 scripts/smoke-python-runtime.py",
     "windows entrypoint smoke": "python3 scripts/smoke-windows-entrypoints.py",
     "windows wiring Git safety smoke": "python3 scripts/smoke-windows-wiring-git-safety.py",
+    "windows smoke matrix": "python3 scripts/smoke-windows-matrix.py",
     "python lint": "ruff check bin scripts",
     "release ci smoke": "python3 scripts/smoke-release-ci.py",
     "public surface scan self-test": "python3 scripts/public-surface-scan.py --self-test",

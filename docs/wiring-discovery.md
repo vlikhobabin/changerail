@@ -131,7 +131,16 @@ Windows generated wiring rules:
 Native Windows smoke после реализации должен проверить generated-copy wiring,
 `.cmd` launch, drift/refresh, cleanup, Git status/add/index behavior, paths со
 spaces и non-ASCII, оба Windows lab hosts или explicit blocker/caveat.
-Deterministic local Git safety fixtures run through:
+The aggregate deterministic matrix runs through:
+
+```bash
+python3 scripts/smoke-windows-matrix.py --json
+```
+
+Live host execution remains explicit and uses ignored
+`internal/windows-lab-inventory.json`; tracked summaries may mention only
+`windows-host-a`, `windows-host-b`, command class, outcome and ignored evidence
+paths. Deterministic local Git safety fixtures also remain available through:
 
 ```bash
 python3 scripts/smoke-windows-wiring-git-safety.py

@@ -415,6 +415,47 @@ Mandatory implementation test matrix for series `040`:
 - repeatability after cleanup;
 - primary Linux release baseline to preserve existing POSIX behavior.
 
+Automated native Windows smoke is aggregated by:
+
+```bash
+python3 scripts/smoke-windows-matrix.py --json
+```
+
+Default local mode is platform-neutral: it runs from the current ChangeRail
+checkout, creates disposable fixtures under ignored `.runtime/changerail/`,
+executes the focused entrypoint, bootstrap, verifier/drift and Git-safety
+smokes, and validates the public-safe Windows lab report shape without
+contacting real Windows hosts. A local pass is not a two-host support claim;
+it only proves the deterministic fixture contract.
+
+Repeatability after cleanup is checked with:
+
+```bash
+python3 scripts/smoke-windows-matrix.py --repeat --json
+```
+
+The repeat run executes the same local matrix after cleanup and reports any
+status mismatch in the retained matrix report.
+
+Live two-host smoke is explicit and uses ignored operator inventory:
+
+```bash
+python3 scripts/smoke-windows-matrix.py --live \
+  --inventory internal/windows-lab-inventory.json --json
+```
+
+The live matrix may track only generic host ids `windows-host-a` and
+`windows-host-b`. It writes sanitized structured reports under ignored
+`.runtime/changerail/windows-smoke/` and retains raw child command output only
+below that ignored run directory. If either host is unavailable, cleanup fails
+or a live probe cannot complete, the card or operator report must record a
+sanitized blocker/caveat before claiming host coverage.
+
+Future Windows CI can use the same live command only when the runner provides
+inventory through secure runner-local configuration. SSH targets, usernames,
+credentials, private disposable roots and raw host output must remain outside
+tracked repository files.
+
 Implemented native runtime entrypoint surface:
 
 - `bin/openspec.cmd`
