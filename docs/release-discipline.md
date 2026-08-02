@@ -199,6 +199,7 @@ The CI workflow runs:
 - `scripts/compile-python-inventory.py` for tracked Python helpers and smoke
   scripts;
 - `scripts/smoke-python-runtime.py`;
+- `scripts/smoke-windows-entrypoints.py`;
 - `ruff check bin scripts` with pinned release-gate tooling;
 - `scripts/smoke-release-ci.py` to validate the workflow command inventory;
 - public-surface scans for current files and reachable history;

@@ -32,6 +32,7 @@ REQUIRED_COMMANDS = {
     "contract schema validation": "python3 scripts/smoke-contract-schemas.py",
     "python syntax inventory": "python3 scripts/compile-python-inventory.py",
     "python runtime smoke": "python3 scripts/smoke-python-runtime.py",
+    "windows entrypoint smoke": "python3 scripts/smoke-windows-entrypoints.py",
     "python lint": "ruff check bin scripts",
     "release ci smoke": "python3 scripts/smoke-release-ci.py",
     "public surface scan self-test": "python3 scripts/public-surface-scan.py --self-test",

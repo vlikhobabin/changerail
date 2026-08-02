@@ -16,6 +16,9 @@ credentials, traces или machine-local inventory.
   editing tracked shebangs.
 - Unsupported runtimes fail early with remediation diagnostics before
   helper-specific imports run.
+- Native Windows operators can launch supported helper surfaces through tracked
+  `.cmd` entrypoints under `bin/` without relying on extensionless POSIX
+  wrappers or implicit Bash.
 
 ### Required Actions
 
@@ -44,6 +47,12 @@ CHANGERAIL_PYTHON=/opt/example-project/.runtime/python/bin/python \
 
 Runtime selector state remains ignored under
 `.runtime/changerail/python-runtime/`.
+
+On native Windows, use the `.cmd` entrypoint for supported helpers, for example:
+
+```bat
+\opt\changerail\bin\verify-project.cmd \opt\example-project
+```
 
 ### Rollback
 

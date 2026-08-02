@@ -49,6 +49,7 @@ def steps() -> list[Step]:
         Step("contract schema validation", ["python3", "scripts/smoke-contract-schemas.py"]),
         Step("python syntax inventory", ["python3", "scripts/compile-python-inventory.py"]),
         Step("python runtime smoke", ["python3", "scripts/smoke-python-runtime.py"]),
+        Step("windows entrypoint smoke", ["python3", "scripts/smoke-windows-entrypoints.py"]),
         Step("python lint", ["ruff", "check", "bin", "scripts"]),
         Step("ci workflow contract", ["python3", "scripts/smoke-release-ci.py"]),
         Step("public surface scan self-test", ["python3", "scripts/public-surface-scan.py", "--self-test"]),

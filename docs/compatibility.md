@@ -201,6 +201,7 @@ Verification:
 
 ```bash
 python3 scripts/smoke-python-runtime.py
+python3 scripts/smoke-windows-entrypoints.py
 python3 scripts/smoke-delivery-runner.py
 python3 scripts/smoke-delivery-metrics.py
 python3 scripts/smoke-review-verdict-validation.py
@@ -364,7 +365,7 @@ Prerequisites for the selected native Windows support path:
 Tracked/generated/ignored ownership:
 
 - ChangeRail tracked source owns templates, skill directories, Claude command
-  wrappers, helper scripts, future `.cmd` wrappers, schemas, specs and docs.
+  wrappers, helper scripts, `.cmd` wrappers, schemas, specs and docs.
 - Consumer tracked files may include rendered project config and generated
   command, skill and helper wiring copies when they are declared
   generated-owned by a manifest or tracked project policy.
@@ -407,6 +408,24 @@ Mandatory implementation test matrix for series `040`:
   blocker/caveat before claiming host coverage;
 - repeatability after cleanup;
 - primary Linux release baseline to preserve existing POSIX behavior.
+
+Implemented native runtime entrypoint surface:
+
+- `bin/openspec.cmd`
+- `bin/changerail-python.cmd`
+- `bin/verify-project.cmd`
+- `bin/changerail-review-verdict.cmd`
+- `bin/changerail-evidence.cmd`
+- `bin/changerail-delivery-runner.cmd`
+- `bin/changerail-delivery-metrics.cmd`
+
+Python-backed `.cmd` wrappers launch through `changerail-python.cmd`, which
+uses the same Python `3.11+` and `requirements-runtime.txt` contract as the
+POSIX selector. `openspec.cmd` invokes the pinned OpenSpec CLI version through
+native Windows command launch. Deterministic wrapper behavior coverage is part
+of the `040-01` entrypoint verification change; live Windows host coverage
+remains required evidence or an explicit caveat before claiming full host
+support.
 
 Series `040-native-windows-implementation` owns the runtime implementation for
 this decision. Until that series is delivered, current bootstrap and verifier
