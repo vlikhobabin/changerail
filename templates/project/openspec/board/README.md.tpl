@@ -49,6 +49,6 @@ explicit repair/debug/manual-resume commands. `do` реализует, пров�
 `3.inprogress`. `review` должен быть fresh context, который не планировал и не
 реализовывал payload. `pub` публикует только после fresh valid `go` verdict.
 
-Практический guide по доскам и двум агентам находится в
-`{{CHANGERAIL_ROOT}}/docs/board-and-two-agent-feature-flow.md`; reusable agent
-contract встроен в project `AGENTS.md` из `{{CHANGERAIL_ROOT}}/AGENTS.shared.md`.
+Практический guide по доскам и двум агентам находится в ChangeRail docs из
+{{CHANGERAIL_ROOT_LABEL}}; reusable agent contract встроен в project `AGENTS.md`
+из `{{CHANGERAIL_SHARED_SOURCE}}`.
