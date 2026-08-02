@@ -25,3 +25,5 @@ package runner.
   после exit audit серии `010`.
 - `030-native-windows-discovery.json` - карточки `030-01`..`030-03` после exit
   audit серии `020` и ignored Windows lab readiness.
+- `040-native-windows-implementation.json` - карточки `040-01`..`040-05` после
+  exit audit серии `030` и полного refresh native Windows implementation cards.

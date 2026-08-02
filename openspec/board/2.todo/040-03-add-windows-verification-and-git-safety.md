@@ -1,7 +1,7 @@
 # Добавить Windows verification, drift и Git safety
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -16,7 +16,8 @@ story
 `03`
 
 ## Planning State
-refreshed after `030-03`; pending deliver-ready decomposition
+deliver-ready after `030` exit audit; OpenSpec artifacts deferred to internal
+`ff` during `$chrl-deliver`
 
 ## Source
 - `030-03-freeze-native-windows-architecture`
@@ -49,7 +50,8 @@ or staging behavior.
 - `010-05-add-verification-profiles-and-severity`
 
 ## Change Set
-- none yet; run `$changerail-ff` after `040-02`
+- `openspec/changes/enforce-windows-wiring-verification/` (planned)
+- `openspec/changes/add-windows-git-safety-gates/` (planned)
 
 ## Verify
 - Windows verifier fixtures for generated valid/stale/missing/diverged wiring.
@@ -59,18 +61,64 @@ or staging behavior.
 
 ## Related
 - `openspec/board/1.backlog/040-00-native-windows-implementation-epic.md`
-- `openspec/board/1.backlog/040-02-add-windows-wiring-backend.md`
-- `openspec/board/3.inprogress/030-03-freeze-native-windows-architecture.md`
+- `openspec/board/2.todo/040-02-add-windows-wiring-backend.md`
+- `openspec/board/4.done/030-03-freeze-native-windows-architecture.md`
 - `bin/verify-project`
 - `scripts/smoke-drift.py`
 
+## Change 1: `enforce-windows-wiring-verification`
+
+### Why
+`verify-project` and drift checks need to distinguish generated Windows wiring
+from stale, missing or project-owned content.
+
+### Goal
+Validate the generated wiring ownership model in project verification and drift
+diagnostics.
+
+### Acceptance
+- Verifier covers valid, stale, missing and diverged generated artifacts.
+- Drift gate reports required refresh after ChangeRail source updates.
+- Diagnostics remain sanitized and actionable.
+
+### Depends On
+- `040-02-add-windows-wiring-backend`
+- `010-05-add-verification-profiles-and-severity`
+
+### Related
+- `openspec/changes/enforce-windows-wiring-verification/`
+
+## Change 2: `add-windows-git-safety-gates`
+
+### Why
+Generated, symlink and junction paths can accidentally expose ChangeRail source,
+runtime state or credentials unless Git behavior is verified fail-closed.
+
+### Goal
+Add Git status, dry-run add and index checks for Windows wiring modes and
+cleanup/rename scenarios.
+
+### Acceptance
+- Git safety covers generated, symlink and junction paths.
+- Unsafe fallback evidence fails closed.
+- Ignore rules remain minimal and do not hide project-owned source.
+
+### Depends On
+- `enforce-windows-wiring-verification`
+
+### Related
+- `openspec/changes/add-windows-git-safety-gates/`
+
 ## Result
-refreshed; implementation not started
+ready for `$chrl-deliver`
 
 ## Next
-- После publish `040-02`: `$changerail-ff openspec/board/1.backlog/040-03-add-windows-verification-and-git-safety.md`
+- Выполнять после `040-02` в tracked runner plan
+  `040-native-windows-implementation`.
 
 ## Log
 - 2026-08-01T15:07:29Z provisional card создана из Git junction report.
 - 2026-08-02T07:27:00Z refreshed against `030-03`: verifier/drift/Git safety
   must enforce generated ownership and explicit link fallback gates.
+- 2026-08-02T08:24:42Z переведена в `2.todo` после exit audit `030`; planned
+  changes записаны, artifacts будут созданы internal `ff` phase.

@@ -77,19 +77,19 @@ Windows hosts.
   решения.
 
 ## Related
-- `openspec/board/1.backlog/010-00-core-release-contracts-epic.md`
-- `openspec/board/1.backlog/020-00-one-command-delivery-experience-epic.md`
-- `openspec/board/1.backlog/030-00-native-windows-discovery-epic.md`
+- `openspec/board/4.done/010-00-core-release-contracts-epic.md`
+- `openspec/board/4.done/020-00-one-command-delivery-experience-epic.md`
+- `openspec/board/4.done/030-00-native-windows-discovery-epic.md`
 - `openspec/board/1.backlog/040-00-native-windows-implementation-epic.md`
 - `bin/changerail-delivery-runner`
 - `skills/chrl-deliver/SKILL.md`
 
 ## Result
-not started
+series `010`..`030` complete; series `040` ready for package runner
 
 ## Next
-- Подготовить ignored Windows lab inventory для `030`; после этого выполнить
-  readiness pass, tracked plan и runner по `030-01`..`030-03`.
+- Запустить tracked runner plan `040-native-windows-implementation` и после
+  exit audit закрыть program epic.
 
 ## Log
 - 2026-08-01T15:34:23Z program epic создана для orchestration серий `010`-`040`.
@@ -100,3 +100,7 @@ not started
 - 2026-08-02T00:58:19Z exit audit после `020` прошел release baseline 27/27.
   Readiness для `030` заблокирован до появления ignored mapping для двух
   Windows hosts.
+- 2026-08-02T08:16:40Z series `030` завершена tracked runner plan:
+  `030-01`..`030-03` delivered, workspace clean, `HEAD == origin/main`.
+- 2026-08-02T08:24:42Z exit audit после `030` прошел release baseline 27/27;
+  series `040` перепланирована и готовится к package runner.

@@ -16,8 +16,7 @@ epic
 `00`
 
 ## Planning State
-refreshed after `030-03`; executable cards remain backlog until individual
-readiness
+readiness passed after `030` exit audit; executable cards moved to `2.todo`
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -73,22 +72,24 @@ safety, automated two-host smoke and final clean-clone end-to-end proof.
 - Compatibility и migration docs отражают реальную support matrix.
 
 ## Related
-- `openspec/board/1.backlog/030-00-native-windows-discovery-epic.md`
-- `openspec/board/3.inprogress/030-03-freeze-native-windows-architecture.md`
+- `openspec/board/4.done/030-00-native-windows-discovery-epic.md`
+- `openspec/board/4.done/030-03-freeze-native-windows-architecture.md`
 - `docs/compatibility.md`
 - `docs/wiring-discovery.md`
 - `docs/migration-guide.md`
 - `openspec/specs/changerail-windows-native-architecture/spec.md`
 
 ## Result
-series refreshed against `030-03`; implementation not started
+ready for tracked runner plan
 
 ## Next
-- После publish `030-03` подготовить `040-01` к delivery через
-  `$changerail-ff openspec/board/1.backlog/040-01-add-windows-runtime-entrypoints.md`.
+- Запустить tracked runner plan `040-native-windows-implementation` для
+  `040-01`..`040-05`.
 
 ## Log
 - 2026-08-01T15:07:29Z provisional epic создана отдельно от discovery series.
 - 2026-08-02T07:27:00Z epic refreshed after `030-03`: selected `.cmd`
   entrypoints and generated-copy Windows wiring default; executable cards
   remain in `1.backlog`.
+- 2026-08-02T08:24:42Z exit audit `030` green; story cards `040-01`..`040-05`
+  переведены в `2.todo`, порядок сохранен, tracked runner plan подготовлен.

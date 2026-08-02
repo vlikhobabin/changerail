@@ -1,7 +1,7 @@
 # Доказать native Windows support end-to-end
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core + operator
@@ -16,7 +16,8 @@ story
 `05`
 
 ## Planning State
-refreshed after `030-03`; pending deliver-ready decomposition
+deliver-ready after `030` exit audit; OpenSpec artifacts deferred to internal
+`ff` during `$chrl-deliver`
 
 ## Source
 - `030-03-freeze-native-windows-architecture`
@@ -47,7 +48,8 @@ delivery smoke, update/refresh and final compatibility documentation.
 - Серия `020-one-command-delivery-experience` завершена.
 
 ## Change Set
-- none yet; run `$changerail-ff` after `040-04`
+- `openspec/changes/prove-windows-clean-clone-lifecycle/` (planned)
+- `openspec/changes/publish-windows-support-claim/` (planned)
 
 ## Verify
 - Two-host end-to-end report with sanitized evidence.
@@ -56,20 +58,67 @@ delivery smoke, update/refresh and final compatibility documentation.
 
 ## Related
 - `openspec/board/1.backlog/040-00-native-windows-implementation-epic.md`
-- `openspec/board/1.backlog/040-04-add-windows-automated-smoke.md`
-- `openspec/board/3.inprogress/030-03-freeze-native-windows-architecture.md`
+- `openspec/board/2.todo/040-04-add-windows-automated-smoke.md`
+- `openspec/board/4.done/030-03-freeze-native-windows-architecture.md`
 - `docs/compatibility.md`
 - `docs/migration-guide.md`
 - `docs/consumer-adoption-runbook.md`
 
+## Change 1: `prove-windows-clean-clone-lifecycle`
+
+### Why
+The final support claim needs a clean-clone proof on both native Windows hosts,
+not only isolated unit and smoke coverage.
+
+### Goal
+Run and retain sanitized evidence for a disposable clean-clone lifecycle using
+native `.cmd` entrypoints, generated-copy wiring, verify/drift and scoped
+delivery smoke.
+
+### Acceptance
+- Both hosts complete the lifecycle or record an explicit support blocker.
+- Skill/command discovery is included in the proof.
+- No-push delivery smoke uses explicit staging scope and leaves runtime files
+  out of tracked state.
+
+### Depends On
+- `040-04-add-windows-automated-smoke`
+
+### Related
+- `openspec/changes/prove-windows-clean-clone-lifecycle/`
+
+## Change 2: `publish-windows-support-claim`
+
+### Why
+The public compatibility and migration docs must reflect actual retained
+evidence before ChangeRail claims native Windows support.
+
+### Goal
+Update compatibility, migration and adoption docs from the two-host evidence
+and final Linux release baseline.
+
+### Acceptance
+- Compatibility matrix and migration guide match retained sanitized evidence.
+- Windows smoke matrix and Linux release baseline are green.
+- Public-surface current and history scans pass before support claim.
+
+### Depends On
+- `prove-windows-clean-clone-lifecycle`
+
+### Related
+- `openspec/changes/publish-windows-support-claim/`
+
 ## Result
-refreshed; implementation not started
+ready for `$chrl-deliver`
 
 ## Next
-- После publish `040-04`: `$changerail-ff openspec/board/1.backlog/040-05-prove-native-windows-end-to-end.md`
+- Выполнять после `040-04` в tracked runner plan
+  `040-native-windows-implementation`.
 
 ## Log
 - 2026-08-01T15:07:29Z provisional exit-gate card создана для двух Windows hosts.
 - 2026-08-02T07:27:00Z refreshed against `030-03`: end-to-end proof must consume
   implemented `.cmd`, generated wiring, verifier/drift/Git safety and smoke
   matrix.
+- 2026-08-02T08:24:42Z переведена в `2.todo` после exit audit `030`; planned
+  changes записаны, artifacts будут созданы internal `ff` phase.

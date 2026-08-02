@@ -1,7 +1,7 @@
 # Серия 030: Исследование native Windows support
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 ChangeRail core + operator
@@ -76,11 +76,11 @@ symlink, shell, Git или Python behavior.
 - `bin/verify-project`
 
 ## Result
-ready for tracked runner plan
+done; series `030` delivered by tracked runner plan
 
 ## Next
-- Запустить tracked runner plan `030-native-windows-discovery` для
-  `030-01`..`030-03`; после exit audit полностью перепланировать серию `040`.
+- Использовать frozen native Windows architecture как entry gate для серии
+  `040-native-windows-implementation`.
 
 ## Log
 - 2026-08-01T15:07:29Z native Windows support выделен в research-first series.
@@ -90,3 +90,8 @@ ready for tracked runner plan
 - 2026-08-02T05:48:42Z readiness обновлен после operator SSH handoff: ignored
   inventory заполнен двумя generic Windows host ids, SSH/Git/Python prerequisite
   подтвержден на обоих hosts, private connection data остается ignored.
+- 2026-08-02T08:16:40Z tracked runner plan `030-native-windows-discovery`
+  завершил `030-01`..`030-03` с результатом `DELIVERED`; workspace clean,
+  `HEAD == origin/main`.
+- 2026-08-02T08:24:42Z exit audit после серии `030` прошел: OpenSpec 20/20,
+  public-surface current/history scans clean, release baseline 27/27.
