@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -28,6 +29,7 @@ EXPECTED_SCHEMAS = (
 )
 MCP_FILES = (".mcp.json", ".codex/config.toml")
 OPTIONAL_BROWSER_MCP_NEEDLES = ("@playwright/mcp", "chrome-devtools-mcp")
+WIRING_MANIFEST = Path("openspec/changerail-wiring.json")
 
 
 @dataclass
@@ -137,6 +139,283 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
         env=env,
         timeout=180,
     )
+
+
+def digest_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def bootstrap_generated_project(changerail_root: Path, project: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            project.name,
+            "--kind",
+            "generic",
+            "--wiring-platform",
+            "windows",
+            "--wiring-backend",
+            "generated-copy",
+        ],
+        changerail_root,
+        env,
+    )
+
+
+def generated_manifest(project: Path) -> dict[str, object]:
+    return json.loads((project / WIRING_MANIFEST).read_text(encoding="utf-8"))
+
+
+def write_generated_manifest(project: Path, manifest: dict[str, object]) -> None:
+    (project / WIRING_MANIFEST).write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def set_manifest_digest(project: Path, rel_path: str, digest: str) -> None:
+    manifest = generated_manifest(project)
+    artifacts = manifest.get("artifacts", [])
+    if not isinstance(artifacts, list):
+        raise RuntimeError("generated manifest artifacts must be a list")
+    for entry in artifacts:
+        if isinstance(entry, dict) and entry.get("path") == rel_path:
+            entry["digest"] = digest
+            write_generated_manifest(project, manifest)
+            return
+    raise RuntimeError(f"generated manifest entry missing: {rel_path}")
+
+
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def proof_evidence(
+    *,
+    command: str | None = None,
+    operation: str | None = None,
+    stdout: str = "",
+    exit_code: int = 0,
+) -> dict[str, object]:
+    evidence: dict[str, object] = {
+        "exit_code": exit_code,
+        "stdout_sha256": sha256_text(stdout),
+    }
+    if command:
+        evidence["command"] = command
+    if operation:
+        evidence["operation"] = operation
+    return evidence
+
+
+def proof_check(
+    name: str,
+    category: str,
+    message: str,
+    details: dict[str, object],
+    evidence: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "category": category,
+        "status": "passed",
+        "message": message,
+        "details": details,
+        "evidence": evidence,
+    }
+
+
+def git_probe_check(proof_root: Path, name: str, command: list[str], message: str) -> dict[str, object]:
+    result = subprocess.run(
+        command,
+        cwd=proof_root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=30,
+    )
+    output = result.stdout.strip()
+    return proof_check(
+        name,
+        "git",
+        message,
+        {"exit_code": result.returncode, "output_line_count": len([line for line in output.splitlines() if line.strip()])},
+        proof_evidence(command=" ".join(command), stdout=output, exit_code=result.returncode),
+    )
+
+
+def status_only_windows_fallback_proof(mode: str) -> dict[str, object]:
+    checks = {
+        "symlink": [
+            {"name": "direct_os_symlink_directory", "status": "passed"},
+            {"name": "direct_os_symlink_file", "status": "passed"},
+            {"name": "symlink_privilege_or_developer_mode", "status": "passed"},
+        ],
+        "junction": [
+            {"name": "junction_directory", "status": "passed"},
+            {"name": "link_aware_cleanup", "status": "passed"},
+            {"name": "git_status_safe", "status": "passed"},
+            {"name": "git_add_dry_run_safe", "status": "passed"},
+            {"name": "git_index_safe", "status": "passed"},
+        ],
+    }[mode]
+    return {
+        "schema": "changerail.windows-wiring-proof.v1",
+        "mode": mode,
+        "checks": checks,
+    }
+
+
+def hash_only_windows_fallback_proof(mode: str) -> dict[str, object]:
+    if mode == "symlink":
+        check_names = (
+            "direct_os_symlink_directory",
+            "direct_os_symlink_file",
+            "symlink_privilege_or_developer_mode",
+        )
+    elif mode == "junction":
+        check_names = (
+            "junction_directory",
+            "link_aware_cleanup",
+            "git_status_safe",
+            "git_add_dry_run_safe",
+            "git_index_safe",
+        )
+    else:
+        raise ValueError(mode)
+    return {
+        "schema": "changerail.windows-wiring-proof.v1",
+        "mode": mode,
+        "source": {
+            "kind": "retained-command-evidence",
+            "tool": "scripts/smoke-verify-project.py",
+            "fixture": "hash-only",
+        },
+        "checks": [
+            proof_check(
+                name,
+                "fixture",
+                "hash-only assertion fixture must not count as evidence",
+                {"fixture": "hash-only"},
+                {
+                    "stdout_sha256": sha256_text(f"{mode}:{name}:stdout"),
+                    "raw_output_sha256": sha256_text(f"{mode}:{name}:raw"),
+                },
+            )
+            for name in check_names
+        ],
+    }
+
+
+def write_windows_fallback_proof(run_dir: Path, mode: str) -> Path:
+    proof_root = run_dir / f"{mode}-fallback-proof-evidence"
+    if proof_root.exists():
+        shutil.rmtree(proof_root)
+    proof_root.mkdir(parents=True)
+    if mode == "symlink":
+        source_dir = proof_root / "source-dir"
+        source_file = proof_root / "source-file.txt"
+        directory_link = proof_root / "directory-link"
+        file_link = proof_root / "file-link.txt"
+        source_dir.mkdir()
+        source_file.write_text("proof\n", encoding="utf-8")
+        os.symlink(source_dir, directory_link, target_is_directory=True)
+        os.symlink(source_file, file_link, target_is_directory=False)
+        checks = [
+            proof_check(
+                "direct_os_symlink_directory",
+                "filesystem",
+                "fixture os.symlink created a directory link",
+                {"link_type": "directory", "fixture": "local-retained-evidence"},
+                proof_evidence(operation="os.symlink", stdout="directory link created"),
+            ),
+            proof_check(
+                "direct_os_symlink_file",
+                "filesystem",
+                "fixture os.symlink created a file link",
+                {"link_type": "file", "fixture": "local-retained-evidence"},
+                proof_evidence(operation="os.symlink", stdout="file link created"),
+            ),
+            proof_check(
+                "symlink_privilege_or_developer_mode",
+                "filesystem",
+                "fixture proved directory and file symlink capability",
+                {"directory_link": "passed", "file_link": "passed", "fixture": "local-retained-evidence"},
+                proof_evidence(operation="os.symlink", stdout="directory and file symlink capability proved"),
+            ),
+        ]
+    elif mode == "junction":
+        git_root = proof_root / "git-consumer"
+        git_root.mkdir()
+        (git_root / "README.md").write_text("junction proof fixture\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(git_root), "init"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, timeout=30)
+        checks = [
+            proof_check(
+                "junction_directory",
+                "filesystem",
+                "retained Windows probe transcript recorded junction creation",
+                {"link_type": "junction", "fixture": "local-retained-evidence"},
+                proof_evidence(
+                    command="cmd /c mklink /J .codex\\skills\\changerail-ff-junction <source>",
+                    stdout="Junction created for retained proof fixture",
+                ),
+            ),
+            proof_check(
+                "link_aware_cleanup",
+                "cleanup",
+                "retained cleanup transcript recorded link path removal without target traversal",
+                {"cleanup": "passed", "fixture": "local-retained-evidence"},
+                proof_evidence(operation="remove-created-link-path", stdout="link path removed; target retained"),
+            ),
+            git_probe_check(
+                git_root,
+                "git_status_safe",
+                ["git", "-C", str(git_root), "status", "--porcelain=v1", "--untracked-files=all"],
+                "git status porcelain completed for retained fixture",
+            ),
+            git_probe_check(
+                git_root,
+                "git_add_dry_run_safe",
+                ["git", "-C", str(git_root), "add", "--dry-run", "."],
+                "git add dry-run completed for retained fixture",
+            ),
+            git_probe_check(
+                git_root,
+                "git_index_safe",
+                ["git", "-C", str(git_root), "ls-files", "--stage"],
+                "git index inspection completed for retained fixture",
+            ),
+        ]
+    else:
+        raise ValueError(mode)
+    path = run_dir / f"{mode}-fallback-proof.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "changerail.windows-wiring-proof.v1",
+                "mode": mode,
+                "source": {
+                    "kind": "retained-command-evidence",
+                    "tool": "scripts/smoke-verify-project.py",
+                    "fixture": "local",
+                },
+                "checks": checks,
+            },
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def git(project: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -330,6 +609,234 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "all contract schemas checked",
             "pass" if verify.returncode == 0 and not missing_schema_checks else "fail",
             "all expected schemas present" if not missing_schema_checks else "missing: " + ", ".join(missing_schema_checks),
+        )
+    )
+
+    generated_project = run_dir / "generated-windows-project"
+    generated_bootstrap = bootstrap_generated_project(changerail_root, generated_project, fake_env)
+    if generated_bootstrap.returncode != 0:
+        checks.append(Check("generated Windows wiring passes", "fail", generated_bootstrap.stdout.strip()))
+    else:
+        generated_verify, generated_data = verify_json(changerail_root, generated_project, fake_env)
+        checks.append(
+            Check(
+                "generated Windows wiring passes",
+                "pass"
+                if generated_verify.returncode == 0
+                and generated_data.get("summary", {}).get("status") in {"pass", "pass-with-diagnostics"}
+                and check_result(generated_data, name="openspec/changerail-wiring.json", status="pass")
+                and check_result(generated_data, name="bin/openspec.cmd", status="pass")
+                else "fail",
+                generated_verify.stdout.strip(),
+            )
+        )
+
+        stale_project = run_dir / "bad-generated-stale"
+        shutil.copytree(generated_project, stale_project, symlinks=True)
+        old_text = "stale generated copy fixture\n"
+        stale_target = stale_project / "bin" / "openspec"
+        stale_target.write_text(old_text, encoding="utf-8")
+        set_manifest_digest(stale_project, "bin/openspec", digest_file(stale_target))
+        stale_generated, _ = verify_json(changerail_root, stale_project, fake_env)
+        checks.append(
+            Check(
+                "stale generated wiring fails",
+                "pass"
+                if stale_generated.returncode != 0
+                and "stale generated wiring" in stale_generated.stdout
+                and "--refresh-wiring" in stale_generated.stdout
+                else "fail",
+                stale_generated.stdout.strip(),
+            )
+        )
+
+        divergent_project = run_dir / "bad-generated-project-owned-divergence"
+        shutil.copytree(generated_project, divergent_project, symlinks=True)
+        (divergent_project / "bin" / "openspec").write_text("project-owned change\n", encoding="utf-8")
+        divergent_generated, _ = verify_json(changerail_root, divergent_project, fake_env)
+        checks.append(
+            Check(
+                "project-owned generated divergence fails",
+                "pass"
+                if divergent_generated.returncode != 0
+                and "project-owned divergence" in divergent_generated.stdout
+                else "fail",
+                divergent_generated.stdout.strip(),
+            )
+        )
+
+        refresh = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(generated_project),
+                "--refresh-wiring",
+            ],
+            changerail_root,
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "generated wiring refresh passes",
+                "pass" if refresh.returncode == 0 and "wiring refreshed" in refresh.stdout else "fail",
+                refresh.stdout.strip(),
+            )
+        )
+
+    symlink_proof_project = run_dir / "symlink-fallback-proof-project"
+    symlink_proof = write_windows_fallback_proof(run_dir, "symlink")
+    symlink_positive = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(symlink_proof_project),
+            "--name",
+            "symlink-fallback-proof-project",
+            "--kind",
+            "generic",
+            "--wiring-platform",
+            "windows",
+            "--wiring-backend",
+            "symlink",
+            "--windows-fallback-proof",
+            str(symlink_proof),
+        ],
+        changerail_root,
+        fake_env,
+    )
+    if symlink_positive.returncode != 0:
+        checks.append(Check("Windows symlink fallback proof verifies", "fail", symlink_positive.stdout.strip()))
+    else:
+        symlink_verify, symlink_data = verify_json(changerail_root, symlink_proof_project, fake_env)
+        checks.append(
+            Check(
+                "Windows symlink fallback proof verifies",
+                "pass"
+                if symlink_verify.returncode == 0
+                and check_result(symlink_data, name="Windows symlink fallback proof", status="pass")
+                else "fail",
+                symlink_verify.stdout.strip(),
+            )
+        )
+        manifest = generated_manifest(symlink_proof_project)
+        manifest["fallback_proof"] = status_only_windows_fallback_proof("symlink")
+        write_generated_manifest(symlink_proof_project, manifest)
+        status_only_verify = run(
+            [str(changerail_root / "bin" / "verify-project"), str(symlink_proof_project)],
+            changerail_root,
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "status-only fallback proof fails verification",
+                "pass"
+                if status_only_verify.returncode != 0
+                and "invalid symlink fallback proof" in status_only_verify.stdout
+                else "fail",
+                status_only_verify.stdout.strip(),
+            )
+        )
+        manifest = generated_manifest(symlink_proof_project)
+        manifest["fallback_proof"] = hash_only_windows_fallback_proof("symlink")
+        write_generated_manifest(symlink_proof_project, manifest)
+        hash_only_verify = run(
+            [str(changerail_root / "bin" / "verify-project"), str(symlink_proof_project)],
+            changerail_root,
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "hash-only fallback proof fails verification",
+                "pass"
+                if hash_only_verify.returncode != 0
+                and "invalid symlink fallback proof" in hash_only_verify.stdout
+                else "fail",
+                hash_only_verify.stdout.strip(),
+            )
+        )
+
+    symlink_fallback = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(run_dir / "bad-windows-symlink-fallback"),
+            "--name",
+            "bad-windows-symlink-fallback",
+            "--kind",
+            "generic",
+            "--wiring-platform",
+            "windows",
+            "--wiring-backend",
+            "symlink",
+            "--skip-verify",
+        ],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "Windows symlink fallback proof required",
+            "pass"
+            if symlink_fallback.returncode != 0
+            and "--windows-fallback-proof" in symlink_fallback.stdout
+            else "fail",
+            symlink_fallback.stdout.strip(),
+        )
+    )
+
+    junction_fallback = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(run_dir / "bad-windows-junction-fallback"),
+            "--name",
+            "bad-windows-junction-fallback",
+            "--kind",
+            "generic",
+            "--wiring-platform",
+            "windows",
+            "--wiring-backend",
+            "junction",
+            "--skip-verify",
+        ],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "Windows junction fallback proof required",
+            "pass"
+            if junction_fallback.returncode != 0
+            and "--windows-fallback-proof" in junction_fallback.stdout
+            else "fail",
+            junction_fallback.stdout.strip(),
+        )
+    )
+
+    junction_dry_run = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(run_dir / "junction-fallback-dry-run"),
+            "--name",
+            "junction-fallback-dry-run",
+            "--kind",
+            "generic",
+            "--wiring-platform",
+            "windows",
+            "--wiring-backend",
+            "junction",
+            "--windows-fallback-proof",
+            str(write_windows_fallback_proof(run_dir, "junction")),
+            "--dry-run",
+        ],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "Windows junction fallback proof dry-run passes",
+            "pass"
+            if junction_dry_run.returncode == 0
+            and "PLAN fallback-proof" in junction_dry_run.stdout
+            and "PLAN junction directory" in junction_dry_run.stdout
+            else "fail",
+            junction_dry_run.stdout.strip(),
         )
     )
 

@@ -12,11 +12,15 @@ exec "$(dirname "$self")/changerail-python" "$0" "$@"
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,10 +30,47 @@ SPECIAL_OUTPUTS = {
     Path("mcp.json.tpl"): Path(".mcp.json"),
     Path("codex-config.toml.tpl"): Path(".codex/config.toml"),
 }
+WIRING_MANIFEST_REL = Path("openspec/changerail-wiring.json")
+WIRING_MANIFEST_SCHEMA = "changerail.generated-wiring.v1"
+FALLBACK_PROOF_SCHEMA = "changerail.windows-wiring-proof.v1"
+WINDOWS_RUNTIME_WIRING_REPORT_SCHEMA = "changerail.windows-runtime-wiring-report.v1"
+SUPPORTED_HELPERS = (
+    "openspec",
+    "changerail-python",
+    "verify-project",
+    "changerail-review-verdict",
+    "changerail-evidence",
+)
+SUPPORTED_WINDOWS_HELPERS = (
+    *SUPPORTED_HELPERS,
+    "changerail-delivery-runner",
+    "changerail-delivery-metrics",
+)
+PROOF_STATUS_PASS = {"pass", "passed"}
+SYMLINK_PROOF_GROUPS = (
+    ("direct_os_symlink_directory", "directory_symlink"),
+    ("direct_os_symlink_file", "file_symlink"),
+    ("symlink_privilege_or_developer_mode", "direct_os_symlink_without_elevation"),
+)
+JUNCTION_PROOF_GROUPS = (
+    ("junction_directory",),
+    ("link_aware_cleanup",),
+    ("git_status_safe", "git_status_porcelain"),
+    ("git_add_dry_run_safe", "git_add_dry_run"),
+    ("git_index_safe", "git_index_mode", "git_index_inspection"),
+)
 
 
 class BootstrapError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class WiringArtifact:
+    source: Path
+    destination: Path
+    kind: str
+    surface: str
 
 
 def repo_root_from_bin() -> Path:
@@ -43,6 +84,55 @@ def skill_names(changerail_root: Path) -> list[str]:
         for path in skills_root.iterdir()
         if path.is_dir() and (path / "SKILL.md").is_file()
     )
+
+
+def detected_wiring_platform() -> str:
+    return "windows" if os.name == "nt" else "posix"
+
+
+def resolve_wiring_platform(value: str) -> str:
+    return detected_wiring_platform() if value == "auto" else value
+
+
+def resolve_wiring_backend(platform: str, value: str) -> str:
+    if value == "auto":
+        return "generated-copy" if platform == "windows" else "symlink"
+    return value
+
+
+def wiring_artifacts(changerail_root: Path, target: Path, *, include_windows_helpers: bool) -> list[WiringArtifact]:
+    artifacts = [
+        WiringArtifact(changerail_root / "skills", target / ".claude" / "skills", "directory", "claude-skills"),
+        WiringArtifact(
+            changerail_root / "claude" / "commands" / "changerail",
+            target / ".claude" / "commands" / "changerail",
+            "directory",
+            "claude-commands",
+        ),
+        WiringArtifact(
+            changerail_root / "claude" / "commands" / "chrl",
+            target / ".claude" / "commands" / "chrl",
+            "directory",
+            "claude-commands",
+        ),
+    ]
+    helpers = SUPPORTED_WINDOWS_HELPERS if include_windows_helpers else SUPPORTED_HELPERS
+    for helper in helpers:
+        source = changerail_root / "bin" / helper
+        artifacts.append(WiringArtifact(source, target / "bin" / helper, "file", "helper"))
+        windows_source = source.with_name(f"{source.name}.cmd")
+        if include_windows_helpers and windows_source.is_file():
+            artifacts.append(WiringArtifact(windows_source, target / "bin" / windows_source.name, "file", "helper"))
+    artifacts.extend(
+        WiringArtifact(
+            changerail_root / "skills" / skill,
+            target / ".codex" / "skills" / skill,
+            "directory",
+            "codex-skill",
+        )
+        for skill in skill_names(changerail_root)
+    )
+    return artifacts
 
 
 def render_text(
@@ -100,18 +190,10 @@ def collect_plan(template_root: Path, target: Path) -> list[tuple[str, Path, Pat
 
 
 def symlink_plan(changerail_root: Path, target: Path) -> list[tuple[Path, Path]]:
-    links = [
-        (changerail_root / "skills", target / ".claude" / "skills"),
-        (changerail_root / "claude" / "commands" / "changerail", target / ".claude" / "commands" / "changerail"),
-        (changerail_root / "claude" / "commands" / "chrl", target / ".claude" / "commands" / "chrl"),
-        (changerail_root / "bin" / "openspec", target / "bin" / "openspec"),
-        (changerail_root / "bin" / "changerail-python", target / "bin" / "changerail-python"),
-        (changerail_root / "bin" / "verify-project", target / "bin" / "verify-project"),
-        (changerail_root / "bin" / "changerail-review-verdict", target / "bin" / "changerail-review-verdict"),
-        (changerail_root / "bin" / "changerail-evidence", target / "bin" / "changerail-evidence"),
+    return [
+        (artifact.source, artifact.destination)
+        for artifact in wiring_artifacts(changerail_root, target, include_windows_helpers=False)
     ]
-    links.extend((changerail_root / "skills" / skill, target / ".codex" / "skills" / skill) for skill in skill_names(changerail_root))
-    return links
 
 
 def ensure_target(target: Path, *, backup_existing: bool, dry_run: bool) -> Path | None:
@@ -180,6 +262,628 @@ def create_symlinks(changerail_root: Path, target: Path) -> None:
         create_symlink(source, link_path)
 
 
+def create_symlinks_with_rollback(changerail_root: Path, target: Path, created: list[Path]) -> None:
+    count = 0
+    for source, link_path in symlink_plan(changerail_root, target):
+        destination_existed = link_path.exists() or link_path.is_symlink()
+        create_symlink(source, link_path)
+        if not destination_existed:
+            created.append(link_path)
+        count += 1
+        maybe_fail_after_artifact(count)
+
+
+def remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def remove_created_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def digest_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def digest_path(path: Path) -> str:
+    if path.is_file() or path.is_symlink():
+        return digest_file(path)
+    if not path.is_dir():
+        raise BootstrapError(f"cannot digest unsupported wiring source: {path}")
+    digest = hashlib.sha256()
+    for candidate in sorted(path.rglob("*")):
+        if not (candidate.is_file() or candidate.is_symlink()):
+            continue
+        rel = candidate.relative_to(path).as_posix()
+        digest.update(b"file\0")
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(digest_file(candidate).encode("ascii"))
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def rel_to_root(path: Path, root: Path) -> str:
+    return Path(os.path.abspath(path)).relative_to(Path(os.path.abspath(root))).as_posix()
+
+
+def generated_artifact_entry(
+    artifact: WiringArtifact,
+    *,
+    target: Path,
+    changerail_root: Path,
+    owner: str = "generated",
+) -> dict[str, str]:
+    return {
+        "path": rel_to_root(artifact.destination, target),
+        "kind": artifact.kind,
+        "surface": artifact.surface,
+        "source": rel_to_root(artifact.source, changerail_root),
+        "digest": digest_path(artifact.source),
+        "owner": owner,
+    }
+
+
+def fallback_artifact_entry(
+    artifact: WiringArtifact,
+    *,
+    target: Path,
+    changerail_root: Path,
+    owner: str,
+) -> dict[str, str]:
+    entry = generated_artifact_entry(
+        artifact,
+        target=target,
+        changerail_root=changerail_root,
+        owner=owner,
+    )
+    if owner != "generated":
+        entry.pop("digest", None)
+    return entry
+
+
+def write_wiring_manifest(
+    *,
+    target: Path,
+    changerail_root: Path,
+    platform: str,
+    backend: str,
+    artifacts: list[WiringArtifact],
+    fallback_reasons: list[str],
+    fallback_proof: dict[str, object] | None = None,
+    artifact_owner: str = "generated",
+) -> None:
+    manifest = {
+        "schema": WIRING_MANIFEST_SCHEMA,
+        "backend": backend,
+        "platform": platform,
+        "source_root": "the linked ChangeRail source of truth",
+        "artifacts": [
+            fallback_artifact_entry(
+                artifact,
+                target=target,
+                changerail_root=changerail_root,
+                owner=artifact_owner,
+            )
+            for artifact in artifacts
+        ],
+        "fallback_reasons": fallback_reasons,
+    }
+    if fallback_proof:
+        manifest["fallback_proof"] = fallback_proof
+    path = target / WIRING_MANIFEST_REL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def copy_generated_artifact(artifact: WiringArtifact, created: list[Path]) -> None:
+    if not artifact.source.exists():
+        raise BootstrapError(f"wiring source missing: {artifact.source}")
+    destination_existed = artifact.destination.exists() or artifact.destination.is_symlink()
+    if destination_existed:
+        remove_path(artifact.destination)
+    artifact.destination.parent.mkdir(parents=True, exist_ok=True)
+    if artifact.kind == "directory":
+        shutil.copytree(artifact.source, artifact.destination, symlinks=True)
+    else:
+        shutil.copy2(artifact.source, artifact.destination)
+    if not destination_existed:
+        created.append(artifact.destination)
+
+
+def cleanup_created_artifacts(created: list[Path]) -> None:
+    for path in reversed(created):
+        remove_created_path(path)
+
+
+def generated_fallback_reasons(platform: str, backend: str) -> list[str]:
+    if platform != "windows" or backend != "generated-copy":
+        return []
+    return [
+        "symlink fallback skipped: explicit operator opt-in and positive Developer Mode or privilege proof were not supplied",
+        "junction fallback skipped: explicit operator opt-in, link-aware cleanup proof and Git-safety proof were not supplied",
+    ]
+
+
+def maybe_fail_after_artifact(count: int) -> None:
+    raw_limit = os.environ.get("CHANGERAIL_BOOTSTRAP_FAIL_AFTER_ARTIFACTS")
+    if not raw_limit:
+        return
+    try:
+        limit = int(raw_limit)
+    except ValueError as exc:
+        raise BootstrapError("CHANGERAIL_BOOTSTRAP_FAIL_AFTER_ARTIFACTS must be an integer") from exc
+    if limit > 0 and count >= limit:
+        raise BootstrapError("simulated wiring failure after generated artifact creation")
+
+
+def create_generated_wiring(changerail_root: Path, target: Path, *, platform: str, backend: str) -> None:
+    artifacts = wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows")
+    created: list[Path] = []
+    count = 0
+    try:
+        for artifact in artifacts:
+            copy_generated_artifact(artifact, created)
+            count += 1
+            maybe_fail_after_artifact(count)
+        write_wiring_manifest(
+            target=target,
+            changerail_root=changerail_root,
+            platform=platform,
+            backend=backend,
+            artifacts=artifacts,
+            fallback_reasons=generated_fallback_reasons(platform, backend),
+        )
+    except Exception:
+        cleanup_created_artifacts(created)
+        raise
+
+
+def load_wiring_manifest(target: Path) -> dict[str, object]:
+    path = target / WIRING_MANIFEST_REL
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise BootstrapError(f"wiring manifest cannot be read: {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise BootstrapError(f"wiring manifest is invalid JSON: {path}: {exc}") from exc
+    if not isinstance(data, dict) or data.get("schema") != WIRING_MANIFEST_SCHEMA:
+        raise BootstrapError(f"wiring manifest has unsupported schema: {path}")
+    return data
+
+
+def load_fallback_proof(path: Path) -> dict[str, object]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise BootstrapError(f"Windows fallback proof cannot be read: {path}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise BootstrapError(f"Windows fallback proof is invalid JSON: {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise BootstrapError("Windows fallback proof must be a JSON object")
+    return data
+
+
+def proof_checks(proof: dict[str, object]) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {}
+    checks = proof.get("checks")
+    if not isinstance(checks, list):
+        return result
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        name = check.get("name")
+        if isinstance(name, str) and name:
+            result[name] = check
+    return result
+
+
+def proof_value_is_non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def proof_evidence_is_concrete(evidence: object) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    if any(
+        proof_value_is_non_empty_string(evidence.get(field))
+        for field in ("command", "operation", "raw_output_path")
+    ):
+        return True
+    argv = evidence.get("command_argv")
+    return isinstance(argv, list) and any(proof_value_is_non_empty_string(item) for item in argv)
+
+
+def proof_check_has_concrete_evidence(check: dict[str, object]) -> bool:
+    if check.get("status") not in PROOF_STATUS_PASS:
+        return False
+    if not proof_value_is_non_empty_string(check.get("category")):
+        return False
+    if not proof_value_is_non_empty_string(check.get("message")):
+        return False
+    details = check.get("details")
+    if not isinstance(details, dict) or not details:
+        return False
+    return proof_evidence_is_concrete(check.get("evidence"))
+
+
+def validate_proof_source(proof: dict[str, object], label: str) -> None:
+    source = proof.get("source")
+    if not isinstance(source, dict):
+        raise BootstrapError(f"{label} proof missing source metadata")
+    kind = source.get("kind")
+    tool = source.get("tool")
+    if not proof_value_is_non_empty_string(kind) or not proof_value_is_non_empty_string(tool):
+        raise BootstrapError(f"{label} proof source must include kind and tool")
+    if str(kind) in {"sample", "dry-run", "status-only"}:
+        raise BootstrapError(f"{label} proof source {kind!r} is not concrete evidence")
+
+
+def validate_proof_groups(proof: dict[str, object], groups: tuple[tuple[str, ...], ...], label: str) -> None:
+    checks = proof_checks(proof)
+    missing = [
+        aliases[0]
+        for aliases in groups
+        if not any(
+            alias in checks and proof_check_has_concrete_evidence(checks[alias])
+            for alias in aliases
+        )
+    ]
+    if missing:
+        raise BootstrapError(f"{label} proof missing concrete passed evidence: {', '.join(missing)}")
+
+
+def normalize_runtime_wiring_report(report: dict[str, object], backend: str) -> dict[str, object]:
+    if report.get("mode") != "live":
+        raise BootstrapError("Windows fallback proof runtime report must be a live probe report")
+    hosts = report.get("hosts")
+    if not isinstance(hosts, list) or not hosts:
+        raise BootstrapError("Windows fallback proof runtime report has no host results")
+    errors: list[str] = []
+    groups = SYMLINK_PROOF_GROUPS if backend == "symlink" else JUNCTION_PROOF_GROUPS
+    for host in hosts:
+        if not isinstance(host, dict):
+            continue
+        host_id = host.get("id")
+        host_evidence = host.get("evidence")
+        if host.get("status") != "passed":
+            errors.append(f"{host_id or 'unknown host'} did not pass")
+            continue
+        if not isinstance(host_evidence, dict) or not proof_value_is_non_empty_string(host_evidence.get("raw_output_path")):
+            errors.append(f"{host_id or 'unknown host'} missing raw output evidence")
+            continue
+        normalized_checks: list[dict[str, object]] = []
+        for check in host.get("checks", []):
+            if not isinstance(check, dict):
+                continue
+            name = check.get("name")
+            if not proof_value_is_non_empty_string(name):
+                continue
+            details = check.get("details")
+            normalized_checks.append(
+                {
+                    "name": name,
+                    "category": check.get("category") if proof_value_is_non_empty_string(check.get("category")) else "runtime-probe",
+                    "status": check.get("status"),
+                    "message": check.get("message") if proof_value_is_non_empty_string(check.get("message")) else "runtime probe check",
+                    "details": details if isinstance(details, dict) and details else {"host_id": host_id or "unknown"},
+                    "evidence": {
+                        "raw_output_path": host_evidence["raw_output_path"],
+                        "started_at": host_evidence.get("started_at", ""),
+                        "duration_seconds": host_evidence.get("duration_seconds", ""),
+                        "source_schema": WINDOWS_RUNTIME_WIRING_REPORT_SCHEMA,
+                    },
+                }
+            )
+        if backend == "junction" and host.get("cleanup") in PROOF_STATUS_PASS:
+            normalized_checks.append(
+                {
+                    "name": "link_aware_cleanup",
+                    "category": "cleanup",
+                    "status": "passed",
+                    "message": "runtime probe cleanup removed link paths without traversing targets",
+                    "details": {"cleanup": host.get("cleanup"), "host_id": host_id or "unknown"},
+                    "evidence": {
+                        "raw_output_path": host_evidence["raw_output_path"],
+                        "source_schema": WINDOWS_RUNTIME_WIRING_REPORT_SCHEMA,
+                    },
+                }
+            )
+        normalized = {
+            "schema": FALLBACK_PROOF_SCHEMA,
+            "mode": backend,
+            "source": {
+                "kind": "windows-runtime-wiring-report",
+                "tool": "scripts/windows-runtime-wiring-probe.py",
+                "host_id": host_id or "unknown",
+            },
+            "checks": normalized_checks,
+        }
+        try:
+            validate_proof_groups(normalized, groups, f"Windows {backend} fallback")
+        except BootstrapError as exc:
+            errors.append(f"{host_id or 'unknown host'}: {exc}")
+            continue
+        return normalized
+    raise BootstrapError("Windows fallback proof runtime report lacks a passing host: " + "; ".join(errors))
+
+
+def normalize_fallback_proof(proof: dict[str, object], backend: str) -> dict[str, object]:
+    schema = proof.get("schema")
+    if schema == WINDOWS_RUNTIME_WIRING_REPORT_SCHEMA:
+        return normalize_runtime_wiring_report(proof, backend)
+    if schema != FALLBACK_PROOF_SCHEMA:
+        raise BootstrapError(f"Windows fallback proof has unsupported schema: {schema!r}")
+    if proof.get("mode") != backend:
+        raise BootstrapError(f"Windows fallback proof mode {proof.get('mode')!r} does not match backend {backend!r}")
+    validate_proof_source(proof, f"Windows {backend} fallback")
+    if backend == "symlink":
+        validate_proof_groups(proof, SYMLINK_PROOF_GROUPS, "Windows symlink fallback")
+    elif backend == "junction":
+        validate_proof_groups(proof, JUNCTION_PROOF_GROUPS, "Windows junction fallback")
+    else:
+        raise BootstrapError(f"unsupported fallback proof backend: {backend}")
+    return proof
+
+
+def native_symlink_probe(target: Path) -> dict[str, object]:
+    del target
+    checks: list[dict[str, object]] = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="changerail-windows-symlink-proof-") as temp:
+            probe_root = Path(temp)
+            source_dir = probe_root / "source-dir"
+            source_file = probe_root / "source-file.txt"
+            directory_link = probe_root / "directory-link"
+            file_link = probe_root / "file-link.txt"
+            source_dir.mkdir()
+            source_file.write_text("probe\n", encoding="utf-8")
+            os.symlink(source_dir, directory_link, target_is_directory=True)
+            checks.append(
+                {
+                    "name": "direct_os_symlink_directory",
+                    "category": "filesystem",
+                    "status": "passed",
+                    "message": "native os.symlink created a directory link",
+                    "details": {"link_type": "directory", "os_name": os.name},
+                    "evidence": {
+                        "operation": "os.symlink",
+                        "target_is_directory": True,
+                        "result": "created-and-removed",
+                    },
+                }
+            )
+            os.symlink(source_file, file_link, target_is_directory=False)
+            checks.append(
+                {
+                    "name": "direct_os_symlink_file",
+                    "category": "filesystem",
+                    "status": "passed",
+                    "message": "native os.symlink created a file link",
+                    "details": {"link_type": "file", "os_name": os.name},
+                    "evidence": {
+                        "operation": "os.symlink",
+                        "target_is_directory": False,
+                        "result": "created-and-removed",
+                    },
+                }
+            )
+            checks.append(
+                {
+                    "name": "symlink_privilege_or_developer_mode",
+                    "category": "filesystem",
+                    "status": "passed",
+                    "message": "native host proved symlink creation capability",
+                    "details": {"directory_link": "passed", "file_link": "passed", "os_name": os.name},
+                    "evidence": {
+                        "operation": "os.symlink",
+                        "result": "directory-and-file-symlink-capability-proved",
+                    },
+                }
+            )
+    except OSError as exc:
+        raise BootstrapError(f"Windows symlink fallback proof failed: {exc}") from exc
+    return {
+        "schema": FALLBACK_PROOF_SCHEMA,
+        "mode": "symlink",
+        "source": {"kind": "native-probe", "tool": "bin/bootstrap-project"},
+        "checks": checks,
+    }
+
+
+def validate_fallback_proof_file(path: Path, backend: str) -> dict[str, object]:
+    proof = load_fallback_proof(path)
+    return normalize_fallback_proof(proof, backend)
+
+
+def refresh_generated_wiring(changerail_root: Path, target: Path) -> None:
+    manifest = load_wiring_manifest(target)
+    backend = manifest.get("backend")
+    if backend != "generated-copy":
+        raise BootstrapError(f"refresh supports generated-copy backend only, got {backend!r}")
+    platform = str(manifest.get("platform") or "windows")
+    entries = manifest.get("artifacts")
+    if not isinstance(entries, list):
+        raise BootstrapError("wiring manifest artifacts must be an array")
+    refreshed: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise BootstrapError("wiring manifest artifact entries must be objects")
+        if entry.get("owner") != "generated":
+            raise BootstrapError(f"refusing to refresh project-owned wiring path: {entry.get('path')}")
+        rel_path = entry.get("path")
+        source_rel = entry.get("source")
+        kind = entry.get("kind")
+        recorded_digest = entry.get("digest")
+        if not all(isinstance(value, str) and value for value in (rel_path, source_rel, kind, recorded_digest)):
+            raise BootstrapError("wiring manifest artifact entry is incomplete")
+        artifact = WiringArtifact(
+            changerail_root / str(source_rel),
+            target / str(rel_path),
+            str(kind),
+            str(entry.get("surface") or "unknown"),
+        )
+        if not artifact.source.exists():
+            raise BootstrapError(f"wiring source missing: {source_rel}")
+        source_digest = digest_path(artifact.source)
+        if artifact.destination.exists() or artifact.destination.is_symlink():
+            destination_digest = digest_path(artifact.destination)
+            if destination_digest != recorded_digest and destination_digest != source_digest:
+                raise BootstrapError(f"project-owned divergence at {rel_path}; refusing to overwrite")
+        copy_generated_artifact(artifact, [])
+        refreshed.append(
+            generated_artifact_entry(artifact, target=target, changerail_root=changerail_root)
+        )
+    manifest["artifacts"] = refreshed
+    manifest["platform"] = platform
+    manifest["backend"] = "generated-copy"
+    (target / WIRING_MANIFEST_REL).write_text(
+        json.dumps(manifest, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def validate_windows_fallback(
+    *,
+    target: Path,
+    platform: str,
+    backend: str,
+    proof_path: Path | None,
+) -> dict[str, object] | None:
+    if platform != "windows":
+        return None
+    if backend == "symlink":
+        if proof_path is not None:
+            return validate_fallback_proof_file(proof_path, backend)
+        if os.name == "nt":
+            return native_symlink_probe(target)
+        raise BootstrapError("Windows symlink fallback requires --windows-fallback-proof with passed symlink checks")
+    if backend == "junction":
+        if proof_path is None:
+            raise BootstrapError("Windows junction fallback requires --windows-fallback-proof with passed junction checks")
+        return validate_fallback_proof_file(proof_path, backend)
+    return None
+
+
+def create_junction(target: Path, link_path: Path) -> None:
+    if os.name != "nt":
+        raise BootstrapError("junction fallback can only create junctions on native Windows")
+    link_path.parent.mkdir(parents=True, exist_ok=True)
+    if link_path.exists() or link_path.is_symlink():
+        remove_path(link_path)
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link_path), str(target)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise BootstrapError(result.stdout.strip() or f"mklink /J failed for {link_path}")
+
+
+def create_junction_wiring(changerail_root: Path, target: Path, *, platform: str, proof: dict[str, object]) -> None:
+    artifacts = wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows")
+    created: list[Path] = []
+    manifest_artifacts: list[WiringArtifact] = []
+    count = 0
+    try:
+        for artifact in artifacts:
+            if artifact.kind == "directory":
+                destination_existed = artifact.destination.exists() or artifact.destination.is_symlink()
+                create_junction(artifact.source, artifact.destination)
+                if not destination_existed:
+                    created.append(artifact.destination)
+                manifest_artifacts.append(artifact)
+            else:
+                copy_generated_artifact(artifact, created)
+                manifest_artifacts.append(artifact)
+            count += 1
+            maybe_fail_after_artifact(count)
+        manifest_entries: list[dict[str, str]] = []
+        for artifact in manifest_artifacts:
+            owner = "junction" if artifact.kind == "directory" else "generated"
+            manifest_entries.append(
+                fallback_artifact_entry(
+                    artifact,
+                    target=target,
+                    changerail_root=changerail_root,
+                    owner=owner,
+                )
+            )
+        path = target / WIRING_MANIFEST_REL
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": WIRING_MANIFEST_SCHEMA,
+                    "backend": "junction",
+                    "platform": platform,
+                    "source_root": "the linked ChangeRail source of truth",
+                    "artifacts": manifest_entries,
+                    "fallback_reasons": [],
+                    "fallback_proof": proof,
+                },
+                ensure_ascii=True,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        cleanup_created_artifacts(created)
+        raise
+
+
+def create_wiring(
+    *,
+    changerail_root: Path,
+    target: Path,
+    platform: str,
+    backend: str,
+    fallback_proof: dict[str, object] | None,
+) -> None:
+    if backend == "generated-copy":
+        create_generated_wiring(changerail_root, target, platform=platform, backend=backend)
+        return
+    if backend == "symlink":
+        created: list[Path] = []
+        try:
+            create_symlinks_with_rollback(changerail_root, target, created)
+        except Exception:
+            cleanup_created_artifacts(created)
+            raise
+        if platform == "windows" and fallback_proof is not None:
+            write_wiring_manifest(
+                target=target,
+                changerail_root=changerail_root,
+                platform=platform,
+                backend=backend,
+                artifacts=wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows"),
+                fallback_reasons=[],
+                fallback_proof=fallback_proof,
+                artifact_owner="symlink",
+            )
+        return
+    if backend == "junction":
+        if fallback_proof is None:
+            raise BootstrapError("junction fallback proof missing")
+        create_junction_wiring(changerail_root, target, platform=platform, proof=fallback_proof)
+        return
+    raise BootstrapError(f"unsupported wiring backend: {backend}")
+
+
 def validate_codex_auth_source(source: Path) -> Path:
     expanded = source.expanduser().resolve(strict=False)
     if not expanded.is_file():
@@ -215,13 +919,37 @@ def print_plan(
     backup: Path | None,
     skip_verify: bool,
     codex_auth_source: Path | None,
+    platform: str,
+    backend: str,
+    fallback_proof: dict[str, object] | None,
+    refresh_wiring: bool,
 ) -> None:
+    print(f"PLAN wiring-platform {platform}")
+    print(f"PLAN wiring-backend {backend}")
+    for reason in generated_fallback_reasons(platform, backend):
+        print(f"PLAN fallback {reason}")
+    if fallback_proof:
+        print("PLAN fallback-proof " + json.dumps(fallback_proof, ensure_ascii=True, sort_keys=True))
+    if refresh_wiring:
+        print(f"PLAN refresh-wiring {target / WIRING_MANIFEST_REL}")
+        return
     if backup is not None:
         print(f"PLAN backup {target} -> {backup}")
     for action, destination, source in collect_plan(template_root, target):
         print(f"PLAN {action} {source} -> {destination}")
-    for source, link_path in symlink_plan(changerail_root, target):
-        print(f"PLAN symlink {link_path} -> {source}")
+    if backend == "generated-copy":
+        for artifact in wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows"):
+            rel = rel_to_root(artifact.destination, target)
+            print(f"PLAN generated {artifact.kind} {rel} <- {rel_to_root(artifact.source, changerail_root)}")
+        print(f"PLAN generated-manifest {target / WIRING_MANIFEST_REL}")
+    elif backend == "junction":
+        for artifact in wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows"):
+            rel = rel_to_root(artifact.destination, target)
+            action = "junction" if artifact.kind == "directory" else "generated"
+            print(f"PLAN {action} {artifact.kind} {rel} <- {rel_to_root(artifact.source, changerail_root)}")
+    else:
+        for source, link_path in symlink_plan(changerail_root, target):
+            print(f"PLAN symlink {link_path} -> {source}")
     if codex_auth_source is not None:
         print(f"PLAN symlink {target / '.codex' / 'auth.json'} -> {codex_auth_source}")
     if not skip_verify:
@@ -244,6 +972,32 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--backup-existing", action="store_true", help="Move an existing non-empty target aside first.")
     parser.add_argument("--skip-verify", action="store_true", help="Generate files without running verify-project.")
     parser.add_argument(
+        "--wiring-platform",
+        choices=("auto", "posix", "windows"),
+        default="auto",
+        help="Platform policy for wiring backend selection. Defaults to the current platform.",
+    )
+    parser.add_argument(
+        "--wiring-backend",
+        choices=("auto", "symlink", "generated-copy", "junction"),
+        default="auto",
+        help="Wiring backend. auto selects generated-copy on native Windows and symlink elsewhere.",
+    )
+    parser.add_argument(
+        "--refresh-wiring",
+        action="store_true",
+        help="Refresh generated-owned wiring artifacts from the ChangeRail source of truth.",
+    )
+    parser.add_argument(
+        "--windows-fallback-proof",
+        type=Path,
+        default=None,
+        help=(
+            "JSON proof report with passed checks required for explicit "
+            "Windows fallback modes when a native probe cannot prove them."
+        ),
+    )
+    parser.add_argument(
         "--link-codex-auth",
         type=Path,
         default=None,
@@ -259,12 +1013,33 @@ def main(argv: list[str]) -> int:
     template_root = changerail_root / "templates" / "project"
     target = args.path.resolve()
     project_name = args.name or target.name
+    platform = resolve_wiring_platform(args.wiring_platform)
+    backend = resolve_wiring_backend(platform, args.wiring_backend)
 
     try:
         if not template_root.is_dir():
             raise BootstrapError(f"template root missing: {template_root}")
+        if args.refresh_wiring and target.is_dir():
+            manifest = load_wiring_manifest(target)
+            platform = str(manifest.get("platform") or platform)
+            backend = str(manifest.get("backend") or backend)
+        fallback_proof = validate_windows_fallback(
+            target=target,
+            platform=platform,
+            backend=backend,
+            proof_path=args.windows_fallback_proof,
+        )
         codex_auth_source = validate_codex_auth_source(args.link_codex_auth) if args.link_codex_auth else None
-        backup = ensure_target(target, backup_existing=args.backup_existing, dry_run=args.dry_run)
+        if args.refresh_wiring:
+            if args.backup_existing:
+                raise BootstrapError("--backup-existing cannot be used with --refresh-wiring")
+            if args.link_codex_auth:
+                raise BootstrapError("--link-codex-auth cannot be used with --refresh-wiring")
+            if not target.is_dir():
+                raise BootstrapError(f"target must exist for refresh: {target}")
+            backup = None
+        else:
+            backup = ensure_target(target, backup_existing=args.backup_existing, dry_run=args.dry_run)
         if args.dry_run:
             print_plan(
                 template_root,
@@ -273,8 +1048,20 @@ def main(argv: list[str]) -> int:
                 backup=backup,
                 skip_verify=args.skip_verify,
                 codex_auth_source=codex_auth_source,
+                platform=platform,
+                backend=backend,
+                fallback_proof=fallback_proof,
+                refresh_wiring=args.refresh_wiring,
             )
             print("dry-run: no files were written")
+            return 0
+
+        if args.refresh_wiring:
+            refresh_generated_wiring(changerail_root, target)
+            if not args.skip_verify:
+                run_verify(changerail_root, target)
+            print(f"wiring refreshed: {target}")
+            print(f"wiring backend: {backend}")
             return 0
 
         write_templates(
@@ -285,12 +1072,20 @@ def main(argv: list[str]) -> int:
             changerail_root=changerail_root,
             config_mode=args.config_mode,
         )
-        create_symlinks(changerail_root, target)
+        create_wiring(
+            changerail_root=changerail_root,
+            target=target,
+            platform=platform,
+            backend=backend,
+            fallback_proof=fallback_proof,
+        )
         if codex_auth_source is not None:
             link_codex_auth(codex_auth_source, target)
         if not args.skip_verify:
             run_verify(changerail_root, target)
         print(f"bootstrapped: {target}")
+        print(f"wiring backend: {backend}")
+        print(f"wiring platform: {platform}")
         if backup is not None:
             print(f"backup: {backup}")
         if codex_auth_source is not None:

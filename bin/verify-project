@@ -12,6 +12,7 @@ exec "$(dirname "$self")/changerail-python" "$0" "$@"
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -76,6 +77,22 @@ DEFAULT_SURFACE_POLICY = {
     "legacy_artifacts": "forbidden",
 }
 BASELINE_OPEN_SPEC_COMMAND = "bin/openspec validate --all --strict"
+WIRING_MANIFEST_REL = Path("openspec/changerail-wiring.json")
+WIRING_MANIFEST_SCHEMA = "changerail.generated-wiring.v1"
+FALLBACK_PROOF_SCHEMA = "changerail.windows-wiring-proof.v1"
+PROOF_STATUS_PASS = {"pass", "passed"}
+SYMLINK_PROOF_GROUPS = (
+    ("direct_os_symlink_directory", "directory_symlink"),
+    ("direct_os_symlink_file", "file_symlink"),
+    ("symlink_privilege_or_developer_mode", "direct_os_symlink_without_elevation"),
+)
+JUNCTION_PROOF_GROUPS = (
+    ("junction_directory",),
+    ("link_aware_cleanup",),
+    ("git_status_safe", "git_status_porcelain"),
+    ("git_add_dry_run_safe", "git_add_dry_run"),
+    ("git_index_safe", "git_index_mode", "git_index_inspection"),
+)
 
 
 @dataclass
@@ -215,6 +232,298 @@ def check_symlink(project: Path, rel_path: str, expected: Path, changerail_root:
         return Check(rel_path, False, f"broken symlink: {exc}")
     ok, message = accepted_target(resolved, expected, changerail_root, aggregator_root)
     return Check(rel_path, ok, message)
+
+
+def digest_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def digest_path(path: Path) -> str:
+    if path.is_file() or path.is_symlink():
+        return digest_file(path)
+    if not path.is_dir():
+        raise OSError(f"unsupported path for digest: {path}")
+    digest = hashlib.sha256()
+    for candidate in sorted(path.rglob("*")):
+        if not (candidate.is_file() or candidate.is_symlink()):
+            continue
+        rel = candidate.relative_to(path).as_posix()
+        digest.update(b"file\0")
+        digest.update(rel.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(digest_file(candidate).encode("ascii"))
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
+
+
+def load_wiring_manifest(project: Path) -> tuple[dict[str, object] | None, Check | None]:
+    path = project / WIRING_MANIFEST_REL
+    if not path.is_file():
+        return None, None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, Check(str(WIRING_MANIFEST_REL), False, f"cannot read generated wiring manifest: {exc}")
+    if not isinstance(data, dict) or data.get("schema") != WIRING_MANIFEST_SCHEMA:
+        return None, Check(str(WIRING_MANIFEST_REL), False, "unsupported generated wiring manifest schema")
+    return data, Check(str(WIRING_MANIFEST_REL), True, "generated wiring manifest is readable")
+
+
+def manifest_artifact(manifest: dict[str, object] | None, rel_path: str) -> dict[str, object] | None:
+    if not manifest:
+        return None
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return None
+    for entry in artifacts:
+        if isinstance(entry, dict) and entry.get("path") == rel_path:
+            return entry
+    return None
+
+
+def generated_wiring_active(manifest: dict[str, object] | None) -> bool:
+    return bool(manifest and manifest.get("backend") == "generated-copy")
+
+
+def manifest_backend(manifest: dict[str, object] | None) -> str:
+    if not manifest:
+        return ""
+    value = manifest.get("backend")
+    return value if isinstance(value, str) else ""
+
+
+def check_generated_artifact(
+    project: Path,
+    rel_path: str,
+    expected: Path,
+    changerail_root: Path,
+    manifest: dict[str, object] | None,
+) -> Check:
+    entry = manifest_artifact(manifest, rel_path)
+    if entry is None:
+        return Check(rel_path, False, "missing generated ownership metadata")
+    if entry.get("owner") != "generated":
+        return Check(rel_path, False, "project-owned divergence: artifact is not generated-owned")
+    source_rel = entry.get("source")
+    recorded_digest = entry.get("digest")
+    if not isinstance(source_rel, str) or not source_rel:
+        return Check(rel_path, False, "generated ownership metadata missing source identity")
+    if not isinstance(recorded_digest, str) or not recorded_digest:
+        return Check(rel_path, False, "generated ownership metadata missing digest")
+    expected_rel = expected.resolve(strict=False).relative_to(changerail_root.resolve(strict=False)).as_posix()
+    if source_rel != expected_rel:
+        return Check(rel_path, False, f"generated source identity mismatch: expected {expected_rel}, got {source_rel}")
+    destination = project / rel_path
+    source = changerail_root / source_rel
+    if not destination.exists() and not destination.is_symlink():
+        return Check(rel_path, False, "generated artifact missing")
+    try:
+        source_digest = digest_path(source)
+        destination_digest = digest_path(destination)
+    except OSError as exc:
+        return Check(rel_path, False, f"generated digest check failed: {exc}")
+    if destination_digest != recorded_digest and destination_digest != source_digest:
+        return Check(rel_path, False, "project-owned divergence: generated artifact content differs from manifest")
+    if source_digest != recorded_digest or destination_digest != source_digest:
+        return Check(
+            rel_path,
+            False,
+            "stale generated wiring; run bin/bootstrap-project <project> --refresh-wiring",
+        )
+    return Check(rel_path, True, "generated artifact matches ChangeRail source and ownership metadata")
+
+
+def is_junction(path: Path) -> bool:
+    checker = getattr(os.path, "isjunction", None)
+    if checker is None:
+        return False
+    return bool(checker(path))
+
+
+def check_junction_artifact(
+    project: Path,
+    rel_path: str,
+    expected: Path,
+    changerail_root: Path,
+    manifest: dict[str, object] | None,
+) -> Check:
+    entry = manifest_artifact(manifest, rel_path)
+    if entry is None:
+        return Check(rel_path, False, "missing junction ownership metadata")
+    if entry.get("owner") != "junction":
+        return Check(rel_path, False, "artifact is not recorded as junction-owned")
+    source_rel = entry.get("source")
+    if not isinstance(source_rel, str) or not source_rel:
+        return Check(rel_path, False, "junction metadata missing source identity")
+    expected_rel = expected.resolve(strict=False).relative_to(changerail_root.resolve(strict=False)).as_posix()
+    if source_rel != expected_rel:
+        return Check(rel_path, False, f"junction source identity mismatch: expected {expected_rel}, got {source_rel}")
+    destination = project / rel_path
+    if not destination.exists():
+        return Check(rel_path, False, "junction artifact missing")
+    if not is_junction(destination):
+        return Check(rel_path, False, "path exists but is not a Windows junction")
+    try:
+        resolved = destination.resolve(strict=True)
+    except OSError as exc:
+        return Check(rel_path, False, f"junction target cannot be resolved: {exc}")
+    ok, message = accepted_target(resolved, expected, changerail_root, None)
+    return Check(rel_path, ok, message if ok else f"junction target invalid: {message}")
+
+
+def check_wiring_path(
+    project: Path,
+    rel_path: str,
+    expected: Path,
+    changerail_root: Path,
+    aggregator_root: Path | None,
+    manifest: dict[str, object] | None,
+) -> Check:
+    entry = manifest_artifact(manifest, rel_path)
+    if generated_wiring_active(manifest) or (entry and entry.get("owner") == "generated"):
+        return check_generated_artifact(project, rel_path, expected, changerail_root, manifest)
+    if manifest_backend(manifest) == "junction" and entry and entry.get("owner") == "junction":
+        return check_junction_artifact(project, rel_path, expected, changerail_root, manifest)
+    return check_symlink(project, rel_path, expected, changerail_root, aggregator_root)
+
+
+def proof_checks(proof: object) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {}
+    if not isinstance(proof, dict):
+        return result
+    checks = proof.get("checks")
+    if not isinstance(checks, list):
+        return result
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        name = check.get("name")
+        if isinstance(name, str) and name:
+            result[name] = check
+    return result
+
+
+def proof_value_is_non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def proof_evidence_is_concrete(evidence: object) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    if any(
+        proof_value_is_non_empty_string(evidence.get(field))
+        for field in ("command", "operation", "raw_output_path")
+    ):
+        return True
+    argv = evidence.get("command_argv")
+    return isinstance(argv, list) and any(proof_value_is_non_empty_string(item) for item in argv)
+
+
+def proof_check_has_concrete_evidence(check: dict[str, object]) -> bool:
+    if check.get("status") not in PROOF_STATUS_PASS:
+        return False
+    if not proof_value_is_non_empty_string(check.get("category")):
+        return False
+    if not proof_value_is_non_empty_string(check.get("message")):
+        return False
+    details = check.get("details")
+    if not isinstance(details, dict) or not details:
+        return False
+    return proof_evidence_is_concrete(check.get("evidence"))
+
+
+def fallback_proof_errors(proof: object, backend: str, groups: tuple[tuple[str, ...], ...]) -> list[str]:
+    if not isinstance(proof, dict):
+        return ["proof is missing or is not an object"]
+    errors: list[str] = []
+    if proof.get("schema") != FALLBACK_PROOF_SCHEMA:
+        errors.append("unsupported proof schema")
+    if proof.get("mode") != backend:
+        errors.append("proof mode mismatch")
+    source = proof.get("source")
+    if not isinstance(source, dict):
+        errors.append("missing proof source metadata")
+    else:
+        kind = source.get("kind")
+        tool = source.get("tool")
+        if not proof_value_is_non_empty_string(kind) or not proof_value_is_non_empty_string(tool):
+            errors.append("proof source must include kind and tool")
+        if str(kind) in {"sample", "dry-run", "status-only"}:
+            errors.append(f"proof source {kind!r} is not concrete evidence")
+    checks = proof_checks(proof)
+    missing = [
+        aliases[0]
+        for aliases in groups
+        if not any(
+            alias in checks and proof_check_has_concrete_evidence(checks[alias])
+            for alias in aliases
+        )
+    ]
+    if missing:
+        errors.append("missing concrete passed evidence: " + ", ".join(missing))
+    return errors
+
+
+def check_generated_wiring_manifest(project: Path, changerail_root: Path, manifest: dict[str, object] | None) -> list[Check]:
+    if not manifest:
+        return []
+    backend = manifest.get("backend")
+    platform = manifest.get("platform")
+    checks: list[Check] = []
+    if backend == "generated-copy":
+        artifacts = manifest.get("artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            return [Check(str(WIRING_MANIFEST_REL), False, "generated-copy manifest has no artifacts")]
+        for entry in artifacts:
+            if not isinstance(entry, dict):
+                checks.append(Check(str(WIRING_MANIFEST_REL), False, "generated artifact entry is not an object"))
+                continue
+            rel_path = entry.get("path")
+            source_rel = entry.get("source")
+            if not isinstance(rel_path, str) or not isinstance(source_rel, str):
+                checks.append(Check(str(WIRING_MANIFEST_REL), False, "generated artifact entry missing path or source"))
+                continue
+            checks.append(
+                check_generated_artifact(
+                    project,
+                    rel_path,
+                    changerail_root / source_rel,
+                    changerail_root,
+                    manifest,
+                )
+            )
+        return checks
+    if platform == "windows" and backend == "symlink":
+        proof = manifest.get("fallback_proof")
+        errors = fallback_proof_errors(proof, "symlink", SYMLINK_PROOF_GROUPS)
+        ok = not errors
+        return [
+            Check(
+                "Windows symlink fallback proof",
+                ok,
+                "positive symlink fallback proof recorded with concrete evidence"
+                if ok
+                else "invalid symlink fallback proof: " + "; ".join(errors),
+            )
+        ]
+    if platform == "windows" and backend == "junction":
+        proof = manifest.get("fallback_proof")
+        errors = fallback_proof_errors(proof, "junction", JUNCTION_PROOF_GROUPS)
+        ok = not errors
+        return [
+            Check(
+                "Windows junction fallback proof",
+                ok,
+                "positive cleanup and Git-safety proof recorded with concrete evidence"
+                if ok
+                else "invalid junction fallback proof: " + "; ".join(errors),
+            )
+        ]
+    return []
 
 
 def path_args_cover_root(args: Iterable[object], project: Path, base: Path) -> bool:
@@ -643,15 +952,18 @@ def check_openspec_validate(project: Path) -> Check:
     wrapper = project / "bin" / "openspec"
     if not wrapper.exists():
         return Check("bin/openspec validate --all --strict", False, "bin/openspec missing")
-    result = subprocess.run(
-        [str(wrapper), "validate", "--all", "--strict", "--no-interactive"],
-        cwd=project,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        env={**os.environ, "OPENSPEC_WORKDIR": str(project)},
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            [str(wrapper), "validate", "--all", "--strict", "--no-interactive"],
+            cwd=project,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "OPENSPEC_WORKDIR": str(project)},
+            timeout=120,
+        )
+    except OSError as exc:
+        return Check("bin/openspec validate --all --strict", False, f"cannot execute bin/openspec: {exc}")
     if result.returncode != 0:
         return Check("bin/openspec validate --all --strict", False, result.stdout.strip() or "failed")
     return Check("bin/openspec validate --all --strict", True, "OpenSpec validation passed")
@@ -677,15 +989,19 @@ def check_targeted_openspec_validate(project: Path) -> Check:
         return Check("targeted OpenSpec validation", False, "bin/openspec missing")
     failures: list[str] = []
     for change in changes:
-        result = subprocess.run(
-            [str(wrapper), "validate", change, "--strict", "--no-interactive"],
-            cwd=project,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env={**os.environ, "OPENSPEC_WORKDIR": str(project)},
-            timeout=120,
-        )
+        try:
+            result = subprocess.run(
+                [str(wrapper), "validate", change, "--strict", "--no-interactive"],
+                cwd=project,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env={**os.environ, "OPENSPEC_WORKDIR": str(project)},
+                timeout=120,
+            )
+        except OSError as exc:
+            failures.append(f"{change}: cannot execute bin/openspec: {exc}")
+            continue
         if result.returncode != 0:
             output = result.stdout.strip() or f"openspec validate {change} failed"
             failures.append(f"{change}: {output}")
@@ -713,6 +1029,36 @@ def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_ro
             changerail_root / "bin" / "changerail-evidence",
             changerail_root,
             aggregator_root,
+        ),
+    ]
+    for schema in SCHEMAS:
+        path = changerail_root / "schemas" / schema
+        checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from ChangeRail root" if path.is_file() else "missing"))
+    return checks
+
+
+def check_schemas_and_helper_with_wiring(
+    project: Path,
+    changerail_root: Path,
+    aggregator_root: Path | None,
+    manifest: dict[str, object] | None,
+) -> list[Check]:
+    checks = [
+        check_wiring_path(
+            project,
+            "bin/changerail-review-verdict",
+            changerail_root / "bin" / "changerail-review-verdict",
+            changerail_root,
+            aggregator_root,
+            manifest,
+        ),
+        check_wiring_path(
+            project,
+            "bin/changerail-evidence",
+            changerail_root / "bin" / "changerail-evidence",
+            changerail_root,
+            aggregator_root,
+            manifest,
         ),
     ]
     for schema in SCHEMAS:
@@ -865,6 +1211,7 @@ def maybe_downgrade_baseline_debt(check: Check, policy: VerificationPolicy) -> C
 def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     skills = skill_names(changerail_root)
     policy, policy_errors = load_verification_policy(project)
+    wiring_manifest, wiring_manifest_check = load_wiring_manifest(project)
     codex_state = policy.surfaces["codex"]
     claude_state = policy.surfaces["claude"]
     legacy_mcp_state = policy.surfaces["legacy_mcp"]
@@ -872,27 +1219,53 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
 
     checks: list[Check] = [
         Check("project root", project.is_dir(), str(project)),
-        check_symlink(project, "bin/openspec", changerail_root / "bin" / "openspec", changerail_root, aggregator_root),
-        check_symlink(project, "bin/changerail-python", changerail_root / "bin" / "changerail-python", changerail_root, aggregator_root),
-        check_symlink(project, "bin/verify-project", changerail_root / "bin" / "verify-project", changerail_root, aggregator_root),
+        check_wiring_path(
+            project,
+            "bin/openspec",
+            changerail_root / "bin" / "openspec",
+            changerail_root,
+            aggregator_root,
+            wiring_manifest,
+        ),
+        check_wiring_path(
+            project,
+            "bin/changerail-python",
+            changerail_root / "bin" / "changerail-python",
+            changerail_root,
+            aggregator_root,
+            wiring_manifest,
+        ),
+        check_wiring_path(
+            project,
+            "bin/verify-project",
+            changerail_root / "bin" / "verify-project",
+            changerail_root,
+            aggregator_root,
+            wiring_manifest,
+        ),
     ]
+    if wiring_manifest_check is not None:
+        checks.append(wiring_manifest_check)
+    checks.extend(check_generated_wiring_manifest(project, changerail_root, wiring_manifest))
     checks.extend(policy_errors)
 
     claude_checks = [
-        check_symlink(project, ".claude/skills", changerail_root / "skills", changerail_root, aggregator_root),
-        check_symlink(
+        check_wiring_path(project, ".claude/skills", changerail_root / "skills", changerail_root, aggregator_root, wiring_manifest),
+        check_wiring_path(
             project,
             ".claude/commands/changerail",
             changerail_root / "claude" / "commands" / "changerail",
             changerail_root,
             aggregator_root,
+            wiring_manifest,
         ),
-        check_symlink(
+        check_wiring_path(
             project,
             ".claude/commands/chrl",
             changerail_root / "claude" / "commands" / "chrl",
             changerail_root,
             aggregator_root,
+            wiring_manifest,
         ),
     ]
     claude_present = set(claude_surface_present(project))
@@ -909,12 +1282,13 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
         )
     )
     for skill in skills:
-        check = check_symlink(
+        check = check_wiring_path(
             project,
             f".codex/skills/{skill}",
             changerail_root / "skills" / skill,
             changerail_root,
             aggregator_root,
+            wiring_manifest,
         )
         checks.append(
             apply_surface_policy(
@@ -945,7 +1319,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
                 include_legacy_mcp=include_legacy_mcp_pins,
             )
         )
-    checks.extend(check_schemas_and_helper(project, changerail_root, aggregator_root))
+    checks.extend(check_schemas_and_helper_with_wiring(project, changerail_root, aggregator_root, wiring_manifest))
     targeted_openspec_validate = check_targeted_openspec_validate(project)
     openspec_validate = maybe_downgrade_baseline_debt(check_openspec_validate(project), policy)
     stale_check = check_no_stale_opsx_wiring(project)

@@ -345,7 +345,7 @@ default implementation path is:
 | --- | --- | --- | --- |
 | Command entrypoints | tracked `bin/*.cmd` wrappers | Python helper invocation for Python-backed helpers; PowerShell only for diagnostics or explicit fallback; POSIX wrapper only in POSIX/WSL environments | `.cmd`, PowerShell and Python wrapper launches passed on both hosts; extensionless direct launch and implicit Bash did not |
 | Project wiring | generated project-local command, skill and helper copies owned by a verifier-readable manifest | symlink mode only after explicit operator opt-in and verified Developer Mode/privilege; junction mode only as an explicit compatibility fallback with link-aware cleanup and Git-safety evidence | generated copy drift and refresh were deterministic; symlink success was observed only under elevated tokens; Git sees junction paths |
-| Bootstrap/verify/drift | one wiring classification shared by bootstrap, `verify-project`, drift checks and refresh | local absolute config only through explicit operator opt-in | current bootstrap is symlink-centric, so implementation work belongs to series `040` |
+| Bootstrap/verify/drift | generated-copy bootstrap, `verify-project` ownership checks and refresh share one wiring classification | local absolute config only through explicit operator opt-in | deterministic local fixtures cover generated ownership, stale copies, divergence, refresh and POSIX regression; live Windows host proof remains in later `040` cards |
 
 Prerequisites for the selected native Windows support path:
 
@@ -358,9 +358,15 @@ Prerequisites for the selected native Windows support path:
 - Developer Mode, administrator elevation and symlink privilege are not
   prerequisites for the generated-copy default.
 - Symlink fallback requires explicit operator selection and positive
-  least-privilege or privilege evidence on the target host.
+  least-privilege or privilege evidence on the target host. Bootstrap accepts a
+  native probe result or a validated `--windows-fallback-proof` report with
+  source metadata plus concrete evidence for passed directory symlink, file
+  symlink and privilege/Developer Mode checks; status-only reports fail closed.
 - Junction fallback requires explicit operator selection, link-aware cleanup and
-  fail-closed Git-safety checks before any staging recommendation.
+  fail-closed Git-safety checks before any staging recommendation. Bootstrap
+  requires a validated `--windows-fallback-proof` report with source metadata
+  plus concrete evidence for passed junction creation, link-aware cleanup, Git
+  status, dry-run add and index-safety checks; status-only reports fail closed.
 
 Tracked/generated/ignored ownership:
 

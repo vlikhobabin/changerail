@@ -86,13 +86,12 @@ bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
 `/opt/changerail/skills/changerail-*` или `/opt/changerail/skills/chrl-*` и
 проверяться drift gate; Codex runtime state под `.codex/` не коммитится.
 
-### Native Windows implementation target
+### Native Windows generated wiring
 
-`030-03` зафиксировал native Windows architecture для будущей реализации серии
-`040`: Windows default должен использовать generated project-local copies для
-command, skill и helper wiring вместо symlink или junction default. Эта
-architecture еще не меняет текущий bootstrap implementation; она задает
-обязательный target для `040`.
+Native Windows default использует generated project-local copies для command,
+skill и helper wiring вместо symlink или junction default. Bootstrap выбирает
+этот backend по platform policy, а POSIX consumers продолжают использовать
+существующий symlink wiring.
 
 Windows generated wiring rules:
 
@@ -101,10 +100,24 @@ Windows generated wiring rules:
 - Generated copies должны быть owned by manifest или tracked project policy,
   чтобы `verify-project` и drift gate могли отличать valid generated content от
   stale copy и project-owned divergence.
-- Symlink mode допустим только после explicit operator opt-in и доказанной
-  privilege/Developer Mode capability на target host.
+- Bootstrap records generated ownership in
+  `openspec/changerail-wiring.json`. Each artifact entry uses project-relative
+  `path`, `kind` (`file` or `directory`), ChangeRail-relative `source`,
+  `digest` and `owner: generated`.
+- `bin/bootstrap-project <project> --refresh-wiring` refreshes generated-owned
+  artifacts from the ChangeRail source of truth and refuses project-owned
+  divergence.
+- Symlink mode допустим только после explicit operator opt-in and positive
+  proof. On native Windows bootstrap can run a direct symlink probe; otherwise
+  `--windows-fallback-proof <json>` must provide schema-valid source metadata
+  and concrete per-check evidence for passed directory symlink, file symlink
+  and privilege/Developer Mode capability checks. Status-only check lists are
+  rejected.
 - Junction mode допустим только как explicit compatibility fallback с
-  link-aware cleanup и Git-safety evidence.
+  link-aware cleanup и Git-safety evidence. `--windows-fallback-proof <json>`
+  must provide schema-valid source metadata and concrete evidence for passed
+  junction creation, cleanup, Git status, dry-run add and index-safety checks
+  before the fallback can report success. Status-only check lists are rejected.
 - Machine-local source roots, raw Windows lab reports, credentials and runtime
   state остаются ignored.
 

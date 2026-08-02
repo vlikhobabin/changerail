@@ -197,3 +197,106 @@ card-owned validation cannot be made non-blocking.
   `pass-with-diagnostics` only for non-blocking findings
 - **AND** it states that targeted card-owned OpenSpec validation remains
   mandatory
+
+### Requirement: Native Windows generated wiring backend
+Bootstrap MUST select generated project-local wiring as the default backend on
+native Windows without requiring Developer Mode, administrator elevation,
+symlink privileges or junction traversal.
+
+#### Scenario: Native Windows bootstrap selects generated wiring
+- **WHEN** an operator runs `bin/bootstrap-project` for a generic consumer on a
+  native Windows platform without an explicit wiring override
+- **THEN** bootstrap creates generated project-local command, skill and helper
+  wiring artifacts
+- **AND** it does not create symlinks or junctions for ChangeRail wiring
+
+#### Scenario: Non-Windows bootstrap preserves existing wiring
+- **WHEN** an operator runs `bin/bootstrap-project` on a non-Windows platform
+  without an explicit wiring override
+- **THEN** bootstrap keeps the existing POSIX symlink wiring behavior
+- **AND** generated-copy Windows policy does not remove or weaken the existing
+  symlink contract
+
+### Requirement: Generated wiring ownership metadata
+Bootstrap MUST record verifier-readable generated ownership metadata for
+generated Windows wiring artifacts.
+
+#### Scenario: Generated artifact is written
+- **WHEN** bootstrap writes a generated command, skill or helper wiring artifact
+- **THEN** tracked project policy records the project-relative artifact path
+- **AND** it records whether the artifact is file wiring or directory wiring
+- **AND** it records ChangeRail source identity and digest data sufficient for
+  later stale-copy verification
+- **AND** it marks the artifact as generated-owned rather than project-owned
+
+#### Scenario: Portable bootstrap writes ownership metadata
+- **WHEN** bootstrap runs in portable config mode
+- **THEN** generated ownership metadata avoids machine-local absolute paths
+- **AND** source identity is expressed relative to the linked ChangeRail source
+  of truth
+
+### Requirement: Wiring backend dry-run reporting
+Bootstrap dry-run output MUST report the selected wiring backend, generated
+ownership plan and fallback reasons.
+
+#### Scenario: Operator previews native Windows bootstrap
+- **WHEN** bootstrap is run with `--dry-run` on native Windows
+- **THEN** the plan reports the generated-copy backend
+- **AND** it lists generated command, skill and helper wiring artifacts
+- **AND** it explains that symlink and junction modes were not selected because
+  no explicit fallback opt-in was supplied
+
+### Requirement: Generated Windows wiring refresh
+Bootstrap or its refresh surface MUST update only generated-owned Windows
+wiring artifacts and MUST NOT silently overwrite project-owned files.
+
+#### Scenario: Generated wiring is refreshed
+- **WHEN** an operator runs the generated Windows wiring refresh operation
+- **THEN** only artifacts recorded as generated-owned are updated from the
+  ChangeRail source of truth
+- **AND** refreshed artifacts receive updated digest metadata
+- **AND** ignored runtime state and credentials are left untouched
+
+#### Scenario: Project-owned file diverges
+- **WHEN** a target path contains project-owned content or lacks generated
+  ownership metadata
+- **THEN** refresh refuses to overwrite that path silently
+- **AND** the output identifies the project-owned divergence and remediation
+  path
+
+### Requirement: Partial failure rollback for Windows wiring
+Bootstrap MUST roll back only artifacts created by the current run after a
+partial Windows wiring failure.
+
+#### Scenario: Generated bootstrap fails partway through
+- **WHEN** native Windows generated wiring setup fails after creating some
+  artifacts
+- **THEN** cleanup removes only artifacts created by the current bootstrap run
+- **AND** preexisting project-owned files, ignored runtime state and
+  credentials remain untouched
+
+#### Scenario: Cleanup sees a link path
+- **WHEN** rollback encounters a symlink or junction path
+- **THEN** cleanup removes the link itself when it was created by the current
+  run
+- **AND** it does not recurse into the link target
+
+### Requirement: Explicit Windows wiring fallback controls
+Bootstrap MUST require explicit operator opt-in before creating Windows symlink
+or junction fallback wiring.
+
+#### Scenario: Symlink fallback is requested
+- **WHEN** an operator explicitly requests Windows symlink fallback
+- **THEN** bootstrap verifies symlink privilege or Developer Mode proof before
+  reporting success
+- **AND** proof reports MUST include schema-valid source metadata and concrete
+  per-check evidence, not only passed status names
+- **AND** failure to prove the required capability exits non-zero
+
+#### Scenario: Junction fallback is requested
+- **WHEN** an operator explicitly requests Windows junction fallback
+- **THEN** bootstrap verifies link-aware cleanup and Git-safety preconditions
+  before reporting success
+- **AND** proof reports MUST include schema-valid source metadata and concrete
+  per-check evidence, not only passed status names
+- **AND** failure to prove those preconditions exits non-zero
