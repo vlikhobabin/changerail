@@ -456,31 +456,33 @@ inventory through secure runner-local configuration. SSH targets, usernames,
 credentials, private disposable roots and raw host output must remain outside
 tracked repository files.
 
-Current `040-05` native Windows clean-clone end-to-end result:
+Current native Windows clean-clone end-to-end result after the follow-up
+prerequisite remediation pass:
 
 ```text
-aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T133725Z-1ed04029/report.json
-clean-clone child report: .runtime/changerail/windows-smoke/20260802T133725Z-1ed04029/primary/live/clean-clone-lifecycle/primary/report.json
-focused clean-clone report: .runtime/changerail/windows-clean-clone-lifecycle/040-05-after-openspec-handoff/report.json
-aggregate result: failed, 8/9 matrix items passed, clean-clone lifecycle blocked
+aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T151242Z-1f65f8db/report.json
+clean-clone child report: .runtime/changerail/windows-smoke/20260802T151242Z-1f65f8db/primary/live/clean-clone-lifecycle/primary/report.json
+aggregate result: passed, 9/9 matrix items passed
+clean-clone lifecycle: passed, 2/2 hosts passed, 16/16 host checks passed
 ```
 
-This run does not establish full two-host native Windows support. It proves the
-tracked implementation and deterministic matrix pieces, then records host
-prerequisite blockers for the live clean-clone lifecycle:
+This result establishes the generated-copy native Windows clean-clone lifecycle
+on both prepared operator-managed Windows hosts. The support claim is scoped to
+the documented prerequisites: Git, Python `3.11+` with
+`requirements-runtime.txt`, `cmd.exe`, Node/npm/npx and npm registry access.
+Host identities, SSH targets, private disposable roots and raw output remain
+ignored runtime state.
 
-| Host | Passed evidence | Blocker |
+| Host | Prerequisite baseline | Live clean-clone result |
 | --- | --- | --- |
-| `windows-host-a` | clean disposable clone and cleanup | Python `jsonschema` missing from the selected interpreter; Node/npm/npx unavailable, so `.cmd` entrypoint discovery and generated-copy bootstrap cannot complete |
-| `windows-host-b` | clean disposable clone, native `.cmd` helper launch, generated-copy manifest generation, native `openspec.cmd` validation handoff and cleanup | `npm` unavailable, so `verify-project.cmd` fails the MCP npm integrity gate during generated-copy bootstrap |
+| `windows-host-a` | Git, Python `3.13.1`, Node `v24.11.1`, npm `11.6.2`; selected Python can import `jsonschema` | passed clean clone, native `.cmd` helper launch, generated-copy bootstrap, `verify-project.cmd`, generated surface discovery, stale generated wiring refresh, scoped no-push staging and cleanup |
+| `windows-host-b` | Git, Python `3.13.1`, Node `v24.11.1`, npm `11.15.0`; selected Python can import `jsonschema` | passed clean clone, native `.cmd` helper launch, generated-copy bootstrap, `verify-project.cmd`, generated surface discovery, stale generated wiring refresh, scoped no-push staging and cleanup |
 
 Local deterministic matrix items passed in the same aggregate run:
 entrypoint smoke `56/56`, generated bootstrap smoke `15/15`, verifier/drift
-smoke `38/38`, Windows wiring Git safety smoke `6/6`, lab sample dry-run and
+smoke `40/40`, Windows wiring Git safety smoke `6/6`, lab sample dry-run and
 runtime/wiring sample dry-run. Live readiness and live runtime/wiring smoke
-also passed on both hosts. The missing live clean-clone prerequisites must be
-remediated and the live matrix rerun before replacing this blocker with a full
-support claim.
+also passed on both hosts.
 
 Implemented native runtime entrypoint surface:
 
@@ -500,12 +502,12 @@ native Windows command launch. Deterministic wrapper behavior coverage is part
 of the `040-01` entrypoint verification change. `bootstrap-project` selects
 `verify-project.cmd` on native Windows, and `verify-project` selects
 `openspec.cmd` for OpenSpec validation on native Windows. Live Windows
-clean-clone coverage remains blocked by the prerequisites recorded above.
+clean-clone coverage passed on both prepared hosts in the follow-up live matrix.
 
 Series `040-native-windows-implementation` owns the runtime implementation for
-this decision. The generated-copy implementation is present, but final two-host
-support requires a passing clean-clone matrix after the Windows lab hosts
-provide the documented Python runtime modules and npm/npx tooling.
+this decision. The generated-copy implementation is present and has two-host
+live clean-clone evidence after the Windows lab hosts provided the documented
+Python runtime modules and npm/npx tooling.
 
 ## Release Gate Tooling
 

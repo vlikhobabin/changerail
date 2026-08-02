@@ -324,6 +324,17 @@ def run_cmd(argv, timeout=120, cwd=None):
         }
 
 
+def resolve_command(command):
+    candidates = [command]
+    if not Path(command).suffix:
+        candidates.extend([command + ".cmd", command + ".bat", command + ".exe"])
+    for candidate in candidates:
+        resolved = shutil.which(candidate, path=env.get("PATH"))
+        if resolved:
+            return resolved
+    return None
+
+
 def command_help(path, *args, timeout=180):
     return run_cmd(["cmd", "/c", str(path), *args], timeout=timeout, cwd=source_root)
 
@@ -333,7 +344,10 @@ def file_hash(path):
 
 
 def version(command, *args):
-    result = run_cmd([command, *args], timeout=20)
+    executable = resolve_command(command)
+    if not executable:
+        return {"status": "unavailable", "command": command, "value": "unavailable"}
+    result = run_cmd([executable, *args], timeout=20)
     if result["ok"]:
         value = first_line(result["stdout"] or result["stderr"])
         return {"status": "available", "command": command, "value": value or "available"}
@@ -537,17 +551,21 @@ try:
         project_owned.parent.mkdir(parents=True, exist_ok=True)
         project_owned.write_text("project-owned content\n", encoding="utf-8")
         generated_wrapper = consumer_root / "bin" / "verify-project.cmd"
-        original_hash = file_hash(generated_wrapper)
-        generated_wrapper.write_text("@echo off\r\necho stale generated copy\r\n", encoding="utf-8")
+        source_wrapper = source_bin / "verify-project.cmd"
+        source_wrapper.write_text(
+            source_wrapper.read_text(encoding="utf-8") + "\r\nrem clean-clone refresh probe\r\n",
+            encoding="utf-8",
+        )
         stale = command_help(source_bin / "verify-project.cmd", str(consumer_root), "--json", timeout=240)
         refresh = command_help(source_bin / "bootstrap-project.cmd", str(consumer_root), "--refresh-wiring", "--skip-verify", timeout=420)
         refreshed_hash = file_hash(generated_wrapper) if generated_wrapper.exists() else ""
+        source_hash = file_hash(source_wrapper)
         post_verify = command_help(source_bin / "verify-project.cmd", str(consumer_root), "--json", timeout=420)
         refresh_ok = (
             stale["exit_code"] != 0
             and refresh["ok"]
             and post_verify["ok"]
-            and refreshed_hash == original_hash
+            and refreshed_hash == source_hash
             and project_owned.read_text(encoding="utf-8") == "project-owned content\n"
         )
         add_check(
@@ -561,6 +579,7 @@ try:
                 "stale_detected": stale["exit_code"] != 0,
                 "refresh_exit_code": refresh["exit_code"],
                 "post_verify_exit_code": post_verify["exit_code"],
+                "refreshed_matches_source": refreshed_hash == source_hash,
                 "project_owned_preserved": project_owned.read_text(encoding="utf-8") == "project-owned content\n",
             },
         )
@@ -577,20 +596,21 @@ try:
         runtime_file = consumer_root / ".runtime" / "changerail" / "smoke" / "raw.log"
         docs_file.parent.mkdir(parents=True, exist_ok=True)
         runtime_file.parent.mkdir(parents=True, exist_ok=True)
-        docs_file.write_text("scoped no-push delivery smoke\n", encoding="utf-8")
-        runtime_file.write_text("ignored runtime output\n", encoding="utf-8")
+        docs_file.write_text("scoped no-push delivery smoke\n", encoding="utf-8", newline="\n")
+        runtime_file.write_text("ignored runtime output\n", encoding="utf-8", newline="\n")
         add = run_cmd(["git", "-C", consumer_root, "add", "--", "docs/scoped-delivery-smoke.md"], timeout=60)
         cached = run_cmd(["git", "-C", consumer_root, "diff", "--cached", "--name-only"], timeout=60)
         cached_check = run_cmd(["git", "-C", consumer_root, "diff", "--cached", "--check"], timeout=60)
         ignored = run_cmd(["git", "-C", consumer_root, "check-ignore", "-q", ".runtime/changerail/smoke/raw.log"], timeout=60)
         cached_paths = [line.strip() for line in cached["stdout"].splitlines() if line.strip()]
+        cached_paths_match = cached_paths == ["docs/scoped-delivery-smoke.md"]
         staging_ok = (
             git_init["ok"]
             and add["ok"]
             and cached["ok"]
             and cached_check["ok"]
             and ignored["exit_code"] == 0
-            and cached_paths == ["docs/scoped-delivery-smoke.md"]
+            and cached_paths_match
         )
         add_check(
             "scoped_no_push_staging",
@@ -599,7 +619,16 @@ try:
             "explicit no-push staging scope excluded ignored runtime files"
             if staging_ok
             else "explicit staging scope did not match expected file set",
-            {"cached_paths": cached_paths, "runtime_ignored": ignored["exit_code"] == 0},
+            {
+                "git_init_exit_code": git_init["exit_code"],
+                "git_add_exit_code": add["exit_code"],
+                "cached_exit_code": cached["exit_code"],
+                "cached_check_exit_code": cached_check["exit_code"],
+                "ignored_exit_code": ignored["exit_code"],
+                "cached_paths": cached_paths,
+                "cached_paths_match": cached_paths_match,
+                "runtime_ignored": ignored["exit_code"] == 0,
+            },
         )
     else:
         add_check("scoped_no_push_staging", "git", "blocked", "refresh verification failed", {})

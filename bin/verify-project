@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -927,9 +928,12 @@ def npm_mcp_pin_errors(
 
 def npm_registry_integrity(package_name: str, version: str) -> tuple[str | None, str | None]:
     spec = f"{package_name}@{version}"
+    npm_executable = resolve_executable("npm")
+    if npm_executable is None:
+        return None, "npm executable is not available for MCP integrity verification"
     try:
         result = subprocess.run(
-            ["npm", "view", spec, "dist.integrity", "--json"],
+            [npm_executable, "view", spec, "dist.integrity", "--json"],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -950,6 +954,17 @@ def npm_registry_integrity(package_name: str, version: str) -> tuple[str | None,
     if not isinstance(value, str) or not value:
         return None, f"npm registry returned no dist.integrity for {spec}"
     return value, None
+
+
+def resolve_executable(command: str) -> str | None:
+    candidates = [command]
+    if not Path(command).suffix:
+        candidates.extend(f"{command}{suffix}" for suffix in (".cmd", ".bat", ".exe"))
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return None
 
 
 def npm_integrity_errors(referenced: set[tuple[str, str]], lock: dict[tuple[str, str], LockedNpmPackage]) -> list[str]:

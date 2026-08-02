@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import runpy
 import secrets
 import shutil
 import subprocess
@@ -468,6 +469,47 @@ def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
     return {"PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", "")}
 
 
+def check_npm_cmd_resolution(changerail_root: Path, run_dir: Path) -> tuple[bool, str]:
+    lock = json.loads((changerail_root / "mcp-npm-lock.json").read_text(encoding="utf-8"))
+    packages = [package for package in lock.get("packages", []) if isinstance(package, dict)]
+    if not packages:
+        return False, "mcp-npm-lock.json has no package entries"
+    package = packages[0]
+    name = package["name"]
+    version = package["version"]
+    integrity = package["integrity"]
+    fake_bin = run_dir / "fake-npm-cmd-bin"
+    fake_bin.mkdir(parents=True, exist_ok=True)
+    npm_cmd = fake_bin / "npm.cmd"
+    npm_cmd.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "if [ \"$1\" = \"view\" ] && [ \"$2\" = " + json.dumps(f"{name}@{version}") + " ] && "
+                + "[ \"$3\" = \"dist.integrity\" ] && [ \"$4\" = \"--json\" ]; then",
+                "  printf '%s\\n' " + json.dumps(json.dumps(integrity)),
+                "  exit 0",
+                "fi",
+                "printf '%s\\n' \"unsupported fake npm invocation: $*\" >&2",
+                "exit 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    npm_cmd.chmod(0o755)
+    namespace = runpy.run_path(str(changerail_root / "bin" / "verify-project"))
+    old_path = os.environ.get("PATH", "")
+    try:
+        os.environ["PATH"] = str(fake_bin)
+        value, error = namespace["npm_registry_integrity"](name, version)
+    finally:
+        os.environ["PATH"] = old_path
+    if error:
+        return False, error
+    return value == integrity, f"{name}@{version}"
+
+
 def add_json_mcp_server(project: Path, name: str, args: list[str]) -> None:
     path = project / ".mcp.json"
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -628,6 +670,14 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "valid fixture passes",
             "pass" if verify.returncode == 0 else "fail",
             verify.stdout.strip(),
+        )
+    )
+    npm_cmd_ok, npm_cmd_message = check_npm_cmd_resolution(changerail_root, run_dir)
+    checks.append(
+        Check(
+            "npm cmd executable resolution passes",
+            "pass" if npm_cmd_ok else "fail",
+            npm_cmd_message,
         )
     )
     checks.append(
@@ -794,6 +844,38 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
                 "generated wiring refresh passes",
                 "pass" if refresh.returncode == 0 and "wiring refreshed" in refresh.stdout else "fail",
                 refresh.stdout.strip(),
+            )
+        )
+        stale_refresh_project = run_dir / "generated-windows-stale-refresh"
+        shutil.copytree(generated_project, stale_refresh_project, symlinks=True)
+        set_manifest_digest(stale_refresh_project, "bin/verify-project.cmd", "sha256:" + "0" * 64)
+        stale_refresh_before, _ = verify_json(changerail_root, stale_refresh_project, fake_env)
+        stale_refresh = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(stale_refresh_project),
+                "--refresh-wiring",
+                "--skip-verify",
+            ],
+            changerail_root,
+            fake_env,
+        )
+        stale_refresh_after, _ = verify_json(changerail_root, stale_refresh_project, fake_env)
+        checks.append(
+            Check(
+                "stale generated wiring refresh passes",
+                "pass"
+                if stale_refresh_before.returncode != 0
+                and "stale generated wiring" in stale_refresh_before.stdout
+                and stale_refresh.returncode == 0
+                and "wiring refreshed" in stale_refresh.stdout
+                and stale_refresh_after.returncode == 0
+                else "fail",
+                "\n".join(
+                    part.strip()
+                    for part in (stale_refresh_before.stdout, stale_refresh.stdout, stale_refresh_after.stdout)
+                    if part.strip()
+                ),
             )
         )
 

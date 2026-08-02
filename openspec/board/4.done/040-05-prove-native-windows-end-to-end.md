@@ -119,7 +119,7 @@ Implementation delivered and OpenSpec changes archived:
 - Updated compatibility, migration, adoption, release and wiring docs with the
   retained evidence and explicit support blocker.
 
-Final live evidence:
+Final live evidence from initial delivery:
 
 ```text
 aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T133725Z-1ed04029/report.json
@@ -128,11 +128,24 @@ local matrix report: .runtime/changerail/windows-smoke/20260802T134151Z-d6ad9e0f
 release baseline: python3 scripts/run-release-baseline.py -> pass (30/30)
 ```
 
-Support claim outcome: no full two-host native Windows support claim yet.
-`windows-host-a` is blocked by missing Python `jsonschema` and missing
-Node/npm/npx. `windows-host-b` passes clean clone and `.cmd` launch, but is
-blocked by missing `npm` for MCP npm integrity verification during
-generated-copy bootstrap. Both blockers are recorded in `docs/compatibility.md`.
+Initial support claim outcome: no full two-host native Windows support claim
+yet. The initial run retained explicit host prerequisite blockers in
+`docs/compatibility.md`.
+
+Follow-up live evidence after Windows prerequisite remediation and probe fixes:
+
+```text
+aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T151242Z-1f65f8db/report.json
+clean-clone child report: .runtime/changerail/windows-smoke/20260802T151242Z-1f65f8db/primary/live/clean-clone-lifecycle/primary/report.json
+standalone clean-clone report: .runtime/changerail/manual/clean-clone-staging-lf/primary/report.json
+aggregate result: passed, 9/9 matrix items passed
+clean-clone lifecycle: passed, 2/2 hosts passed, 16/16 host checks passed
+```
+
+Follow-up support claim outcome: generated-copy native Windows clean-clone
+lifecycle passed on both prepared Windows hosts. The claim remains scoped to
+the documented host prerequisites and sanitized `windows-host-a` /
+`windows-host-b` ids.
 
 Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
@@ -154,3 +167,7 @@ Reviewed payload finalized through ChangeRail scoped publish; exact payload and 
   Windows host prerequisite blockers; local matrix, release baseline, OpenSpec
   validation and diff checks passed; OpenSpec changes archived.
 - 2026-08-02T14:18:38Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
+- 2026-08-02T15:16:44Z follow-up remediation pass completed: host prerequisites
+  were brought to baseline, Windows `.cmd` executable resolution and lifecycle
+  probe fixtures were fixed, and live matrix passed `9/9` with clean-clone
+  lifecycle `2/2` hosts and `16/16` checks.
