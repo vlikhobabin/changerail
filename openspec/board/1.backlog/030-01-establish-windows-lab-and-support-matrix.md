@@ -62,10 +62,13 @@ Windows probes.
 - `docs/compatibility.md`
 
 ## Result
-not started
+not deliver-ready; waiting for ignored Windows host mapping
 
 ## Next
-- После подготовки lab выполнить `030-02` на обоих hosts.
+- После появления ignored `internal/windows-lab-inventory.json` перевести в
+  `2.todo` и запускать первой карточкой серии `030`.
 
 ## Log
 - 2026-08-01T15:07:29Z карточка создана для controlled Windows research.
+- 2026-08-02T00:58:19Z readiness pass после `020` нашел clean Linux baseline,
+  но не нашел локальный Windows host inventory; карточка остается в backlog.

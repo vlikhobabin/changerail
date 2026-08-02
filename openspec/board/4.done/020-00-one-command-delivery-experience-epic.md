@@ -1,7 +1,7 @@
 # Серия 020: Надежный one-command delivery
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 ChangeRail core
@@ -76,13 +76,19 @@ phase-команды остаются repair/debug/manual-resume surface. Transi
 - `bin/changerail-delivery-runner`
 
 ## Result
-ready for tracked runner plan
+done; series `020` delivered by tracked runner plan
 
 ## Next
-- Создать и проверить tracked runner plan `020-one-command-delivery-experience`.
+- Использовать one-command runner surface как основной delivery path для
+  последующих серий; перед `030` подготовить ignored Windows lab inventory.
 
 ## Log
 - 2026-08-01T15:07:29Z epic создана из объединенного consumer delivery feedback.
 - 2026-08-01T21:24:05Z readiness pass после exit audit серии `010`: серия
   остается единой, story cards `020-01`..`020-05` готовятся к `2.todo` и
   package runner plan.
+- 2026-08-02T00:51:40Z tracked runner plan
+  `020-one-command-delivery-experience` завершил `020-01`..`020-05` с
+  результатом `DELIVERED`; workspace clean, `HEAD == origin/main`.
+- 2026-08-02T00:58:19Z exit audit после серии `020` прошел: OpenSpec 14/14,
+  public-surface scan clean, release baseline 27/27.

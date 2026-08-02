@@ -1,7 +1,7 @@
 # Серия 010: Базовые release-контракты
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 ChangeRail core
@@ -69,10 +69,12 @@ metadata, неявный Python runtime, self-invalidating publish metadata,
 - `docs/changerail-contracts.md`
 
 ## Result
-not started
+done; series `010` delivered and published
 
 ## Next
-- Выполнять series cards строго по `Series Index`, начиная с `010-01`.
+- Использовать завершенные contracts как entry gate для серий `020`-`040`.
 
 ## Log
 - 2026-08-01T15:07:29Z epic создана при пересборке backlog.
+- 2026-08-01T21:24:05Z все story cards `010-01`..`010-05` опубликованы,
+  post-push release baseline прошел; серия закрыта как coordination epic.

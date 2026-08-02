@@ -88,9 +88,15 @@ Windows hosts.
 not started
 
 ## Next
-- Провести fresh read-only review board baseline и опубликовать его scoped commit.
+- Подготовить ignored Windows lab inventory для `030`; после этого выполнить
+  readiness pass, tracked plan и runner по `030-01`..`030-03`.
 
 ## Log
 - 2026-08-01T15:34:23Z program epic создана для orchestration серий `010`-`040`.
 - 2026-08-01T21:24:05Z series `010` завершена post-push baseline 26/26;
   series `020` прошла readiness pass и получила tracked runner plan.
+- 2026-08-02T00:51:40Z series `020` завершена tracked runner plan:
+  `020-01`..`020-05` delivered, workspace clean, `HEAD == origin/main`.
+- 2026-08-02T00:58:19Z exit audit после `020` прошел release baseline 27/27.
+  Readiness для `030` заблокирован до появления ignored mapping для двух
+  Windows hosts.

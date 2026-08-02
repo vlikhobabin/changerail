@@ -35,6 +35,7 @@ symlink, shell, Git или Python behavior.
 
 ## Entry Gate
 - Серия `010-core-release-contracts` завершена.
+- Серия `020-one-command-delivery-experience` завершена.
 - Runtime/bootstrap и verification profile contracts повторно прочитаны.
 - Доступ к двум Windows hosts проверен оператором; hostnames, usernames,
   credentials и private paths записаны только в ignored operator inventory.
@@ -75,10 +76,15 @@ symlink, shell, Git или Python behavior.
 - `bin/verify-project`
 
 ## Result
-not started
+not deliver-ready; waiting for ignored Windows lab inventory
 
 ## Next
-- После exit gate серии `010` начать с `030-01`.
+- Создать или заполнить ignored `internal/windows-lab-inventory.json` с двумя
+  SSH targets для `windows-host-a` и `windows-host-b`; затем перевести
+  `030-01`..`030-03` в `2.todo` и создать tracked runner plan.
 
 ## Log
 - 2026-08-01T15:07:29Z native Windows support выделен в research-first series.
+- 2026-08-02T00:58:19Z exit audit после `020` прошел, но local SSH config и
+  ignored inventory не содержат готового mapping для двух Windows hosts; серию
+  нельзя запускать non-interactive runner-ом до operator inventory.
