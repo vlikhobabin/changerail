@@ -282,9 +282,14 @@ git status или publish metadata. Отсутствующее optional timing �
 - `file_change_count`;
 - `timeline` с bounded runner-observed событиями;
 - `review.cycle_count`, `review.first_review_latency_seconds`,
-  `review.time_to_final_go_seconds` и per-cycle timing;
+  `review.time_to_final_go_seconds`, optional `review.rescue_budget` и
+  per-cycle timing;
 - `publish.latency_seconds` и `publish.pushed_at`, когда publish metadata
   доступна.
+
+`performance.review.rescue_budget` является best-effort summary copy. Если для
+той же карточки доступна review-cycle history, metrics использует history как
+canonical source, а run summary только как fallback без history.
 
 `usage` всегда содержит `available`. Когда provider output позволяет, runner
 может дополнительно писать `input_tokens`, `cached_input_tokens`,
@@ -507,6 +512,23 @@ verdict. Publish продолжает проверять только latest can
 `changerail.review-verdict.v1`; metrics могут читать history, чтобы не терять
 предыдущий `no-go`.
 
+Known rescue-budget history добавляет optional top-level object:
+
+```json
+"rescue_budget": {
+  "limit": 5,
+  "used": 1,
+  "remaining": 4,
+  "exhausted": false
+}
+```
+
+Per-cycle optional `same_card_rescue_attempt` отделяет review number от
+post-review rescue attempt counter: initial review is `review_cycle: 1` and
+`same_card_rescue_attempt: 0`; re-review after one scoped same-card rescue uses
+`review_cycle: 2` and `same_card_rescue_attempt: 1`. Legacy history без этих
+optional fields остается valid и отображается как `unknown`.
+
 Metrics helper:
 
 ```bash
@@ -515,7 +537,9 @@ bin/changerail-delivery-metrics --csv
 ```
 
 Он читает structured run records и review-cycle history, печатает per-run и
-aggregate metrics, а отсутствующие optional fields выводит как `unknown`.
+aggregate metrics, including `first_pass_go` and rescue budget
+`limit`/`used`/`remaining`/`exhausted`; отсутствующие optional fields выводит
+как `unknown`.
 
 ## Public Safety
 

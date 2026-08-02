@@ -197,6 +197,15 @@ request a fresh re-review. Default `--max-review-cycles` is `5`, allowing five
 bounded same-card rescue attempts after the first `no-go`; each rescue attempt
 still requires a fresh independent re-review before publish.
 
+Treat review cycles and same-card rescue attempts as distinct counters. The
+initial independent review is `review_cycle: 1` and does not consume a rescue
+attempt (`same_card_rescue_attempt: 0` when recorded). A same-card rescue attempt
+is consumed only after an independent `no-go` when the implementing session
+fixes scoped blocker findings in the same card; the following fresh review is a
+re-review cycle. When review history supports `rescue_budget`, record or
+preserve `limit`, `used`, `remaining` and `exhausted`; legacy history without
+those optional fields is `unknown`, not inferred from prose.
+
 When the default same-card rescue budget is exhausted and the latest review
 still returns `no-go`, autonomous delivery MUST NOT ask for manual exceptional
 authorization as its default path, self-authorize another same-card rescue, or

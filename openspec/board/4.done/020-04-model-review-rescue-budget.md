@@ -1,13 +1,13 @@
 # Формализовать review rescue budget в runtime state
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `020-one-command-delivery-experience`
@@ -47,7 +47,8 @@ status, history, metrics и docs, не меняя bounded fail-closed policy.
   одном owner path; не хранить несколько расходящихся источников истины.
 
 ## Change Set
-- `model-review-rescue-budget` (planned)
+- `model-review-rescue-budget`
+  (`openspec/changes/archive/2026-08-01-model-review-rescue-budget/`)
 
 ## Change 1: `model-review-rescue-budget`
 
@@ -75,12 +76,21 @@ canonical runtime/history/metrics contract without weakening fail-closed policy.
 - `add-remote-preflight-diagnostics-and-resume`
 
 ### Related
-- `openspec/changes/model-review-rescue-budget/`
+- `openspec/changes/archive/2026-08-01-model-review-rescue-budget/`
 
 ## Verify
-- Review cycle history schema/metrics smoke.
-- Exhaustion и legacy-record fixtures.
-- Skill/docs drift checks и release baseline.
+- `openspec validate model-review-rescue-budget --strict` -> passed before
+  archive.
+- `python3 scripts/smoke-contract-schemas.py` -> passed.
+- `python3 scripts/smoke-delivery-metrics.py` -> passed.
+- `python3 scripts/smoke-wiring-discovery.py` -> passed.
+- `python3 scripts/public-surface-scan.py` -> passed, 0 findings.
+- `python3 scripts/run-release-baseline.py` -> passed, 27/27 steps.
+- `openspec validate --all --strict` -> passed after archive, 14 specs.
+- `git diff --check` -> passed.
+
+## Archive
+- `openspec/changes/archive/2026-08-01-model-review-rescue-budget/`
 
 ## Related
 - `openspec/board/1.backlog/020-00-one-command-delivery-experience-epic.md`
@@ -89,12 +99,22 @@ canonical runtime/history/metrics contract without weakening fail-closed policy.
 - `skills/changerail-deliver/SKILL.md`
 
 ## Result
-deliver-ready after series `010` exit audit
+Implementation, spec sync and archive complete; fresh independent review
+pending before publish.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$chrl-deliver openspec/board/2.todo/020-04-model-review-rescue-budget.md`
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z lower-priority counter work выделено из E1 epic.
 - 2026-08-01T21:24:05Z readiness pass после серии `010`: карточка переведена
   в `2.todo`, добавлен ordered Change 1 для package runner.
+- 2026-08-01T23:40:01Z `$changerail-deliver` internal ff: создан
+  `openspec/changes/model-review-rescue-budget/`, artifacts validated, карточка
+  переведена в `3.inprogress`.
+- 2026-08-01T23:52:05Z implementation complete: runtime schemas, metrics,
+  docs, skills and specs updated; release baseline passed; change archived as
+  `openspec/changes/archive/2026-08-01-model-review-rescue-budget/`.
+- 2026-08-02T00:07:56Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

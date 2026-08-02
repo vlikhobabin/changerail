@@ -347,6 +347,31 @@
           "items": {
             "$ref": "#/$defs/reviewCycleTiming"
           }
+        },
+        "rescue_budget": {
+          "$ref": "#/$defs/rescueBudget"
+        }
+      }
+    },
+    "rescueBudget": {
+      "type": "object",
+      "required": ["limit", "used", "remaining", "exhausted"],
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exhausted": {
+          "type": "boolean"
         }
       }
     },

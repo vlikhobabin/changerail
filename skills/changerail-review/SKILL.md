@@ -80,6 +80,11 @@ Store cycle history separately, for example:
 
 History must not replace the canonical verdict used by publish freshness
 validation.
+When the history contract supports rescue budget fields, retain
+`rescue_budget.limit`, `rescue_budget.used`, `rescue_budget.remaining` and
+`rescue_budget.exhausted`. The first independent review is `review_cycle: 1` and
+`same_card_rescue_attempt: 0` when known; re-reviews after scoped same-card fixes
+increment `review_cycle` and record the consumed same-card rescue attempt.
 
 ## Inputs
 

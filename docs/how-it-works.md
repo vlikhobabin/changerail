@@ -230,6 +230,14 @@ verification target. Оркестратор классифицирует про�
 over-claim -> no-go -> scoped rescue -> re-review -> go -> pub
 ```
 
+Initial review записывается как `review_cycle: 1` и не расходует same-card
+rescue budget: known history state использует `same_card_rescue_attempt: 0`.
+Same-card rescue attempt появляется только после independent `no-go`, когда
+worker исправляет scoped blocker в рамках той же карточки. Следующий fresh
+review - это re-review cycle: `review_cycle` увеличивается, а
+`same_card_rescue_attempt` показывает, сколько post-review same-card rescue
+attempts уже использовано перед этим review.
+
 Если review находит over-claim, missing evidence или out-of-scope файл,
 reviewer пишет `no-go` с blocker finding. Implementing session исправляет
 только scoped blocker, обновляет evidence и снова передает карточку на свежий
@@ -253,7 +261,8 @@ evidence.
 
 `bin/changerail-delivery-metrics` читает `.runtime/changerail/delivery-runs/*/status.json`
 и `.runtime/changerail/reviews/*.history.json`, чтобы показать first-pass go rate,
-findings по severity, acceptance outcomes, wall-time и доступный token usage.
+same-card rescue budget (`limit`, `used`, `remaining`, `exhausted`), findings
+по severity, acceptance outcomes, wall-time и доступный token usage.
 CSV mode предназначен для внешней аналитики; отсутствующие optional поля
 отображаются как `unknown`.
 

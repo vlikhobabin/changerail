@@ -116,3 +116,15 @@ must fail closed if the current tree or fingerprint differs from the verdict.
 - Review-cycle history retains prior cycle finding details or immutable verdict
   snapshot paths for metrics and audit after a later cycle writes the latest
   canonical `go` verdict.
+
+When available, review-cycle history also records same-card rescue budget state:
+
+- `rescue_budget.limit`: configured same-card rescue attempt limit.
+- `rescue_budget.used`: consumed post-review same-card rescue attempts.
+- `rescue_budget.remaining`: attempts still available before linked rescue or
+  investigation policy takes over.
+- `rescue_budget.exhausted`: whether autonomous same-card rescue is exhausted.
+- `cycles[].same_card_rescue_attempt`: consumed same-card rescue attempts before
+  that review; the first independent review is `0`.
+
+Legacy history without these optional fields remains readable as `unknown`.

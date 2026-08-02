@@ -49,9 +49,34 @@
       "items": {
         "$ref": "#/$defs/cycle"
       }
+    },
+    "rescue_budget": {
+      "$ref": "#/$defs/rescueBudget"
     }
   },
   "$defs": {
+    "rescueBudget": {
+      "type": "object",
+      "required": ["limit", "used", "remaining", "exhausted"],
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exhausted": {
+          "type": "boolean"
+        }
+      }
+    },
     "cycle": {
       "type": "object",
       "required": [
@@ -75,6 +100,10 @@
         "review_cycle": {
           "type": "integer",
           "minimum": 1
+        },
+        "same_card_rescue_attempt": {
+          "type": "integer",
+          "minimum": 0
         },
         "result": {
           "enum": ["go", "no-go"]

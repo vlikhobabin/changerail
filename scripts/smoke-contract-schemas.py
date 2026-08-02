@@ -216,6 +216,7 @@ def delivery_run() -> dict[str, Any]:
             "first_review_latency_seconds": 10.0,
             "time_to_final_go_seconds": 10.0,
             "cycles": [{"review_cycle": 1, "result": "go", "reviewed_at": DATE, "latency_seconds": 10.0}],
+            "rescue_budget": {"limit": 5, "used": 0, "remaining": 5, "exhausted": False},
         },
         "publish": {"latency_seconds": 2.0, "pushed_at": DATE},
     }
@@ -314,9 +315,11 @@ def review_cycle_history() -> dict[str, Any]:
         "updated_at": DATE,
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
+        "rescue_budget": {"limit": 5, "used": 0, "remaining": 5, "exhausted": False},
         "cycles": [
             {
                 "review_cycle": 1,
+                "same_card_rescue_attempt": 0,
                 "result": "go",
                 "reviewed_at": DATE,
                 "verdict_path": ".runtime/changerail/reviews/example-card.json",
@@ -532,6 +535,14 @@ def main() -> int:
             invalid_alias["status"] = "BLOCKED"
             if not validator(invalid_alias):
                 failures.append(f"{name}: duplicate top-level status alias unexpectedly passed")
+        if name == "changerail-review-cycle-history.schema.json":
+            legacy_history = review_cycle_history()
+            legacy_history.pop("rescue_budget")
+            for cycle in legacy_history["cycles"]:
+                cycle.pop("same_card_rescue_attempt", None)
+            legacy_errors = validator(legacy_history)
+            if legacy_errors:
+                failures.append(f"{name}: legacy fixture without rescue budget failed: {legacy_errors}")
         negative = mutate_invalid(positive)
         negative_errors = validator(negative)
         if not negative_errors:

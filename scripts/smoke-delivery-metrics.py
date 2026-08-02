@@ -136,6 +136,7 @@ def main() -> int:
                         "cycle_count": 2,
                         "first_review_latency_seconds": 11.0,
                         "time_to_final_go_seconds": 19.0,
+                        "rescue_budget": {"limit": 5, "used": 4, "remaining": 1, "exhausted": False},
                     },
                 },
             ),
@@ -145,12 +146,28 @@ def main() -> int:
             run_record("run-2", "card-b", "DELIVERED", {"available": False, "reason": "usage not observed"}),
         )
         write_json(
+            runs / "run-3" / "status.json",
+            run_record(
+                "run-3",
+                "card-c",
+                "DELIVERED",
+                {"available": False, "reason": "usage not observed"},
+                {
+                    "review": {
+                        "cycle_count": 3,
+                        "rescue_budget": {"limit": 3, "used": 2, "remaining": 1, "exhausted": False},
+                    }
+                },
+            ),
+        )
+        write_json(
             reviews / "card-a.history.json",
             history(
                 "card-a",
                 [
                     {
                         "review_cycle": 1,
+                        "same_card_rescue_attempt": 0,
                         "result": "no-go",
                         "reviewed_at": "2026-07-11T00:00:11Z",
                         "verdict_path": ".runtime/changerail/reviews/card-a.json",
@@ -174,6 +191,7 @@ def main() -> int:
                     },
                     {
                         "review_cycle": 2,
+                        "same_card_rescue_attempt": 1,
                         "result": "go",
                         "reviewed_at": "2026-07-11T00:00:19Z",
                         "verdict_path": ".runtime/changerail/reviews/card-a.json",
@@ -190,6 +208,9 @@ def main() -> int:
                 ],
             ),
         )
+        card_a_history = json.loads((reviews / "card-a.history.json").read_text(encoding="utf-8"))
+        card_a_history["rescue_budget"] = {"limit": 5, "used": 1, "remaining": 4, "exhausted": False}
+        write_json(reviews / "card-a.history.json", card_a_history)
         write_json(
             reviews / "card-b.history.json",
             history(
@@ -226,6 +247,9 @@ def main() -> int:
             "reasoning_tokens=2",
             "slowest_commands=/bin/echo one:1.5s;/bin/echo two:0.25s",
             "review_timeline=1:no-go@2026-07-11T00:00:11Z;2:go@2026-07-11T00:00:19Z",
+            "card=card-a result=DELIVERED first_review=no-go latest_review=go review_cycles=2 wall_time_seconds=10.5 rescue_budget_limit=5 rescue_budget_used=1 rescue_budget_remaining=4 rescue_budget_exhausted=no",
+            "card=card-b result=DELIVERED first_review=go latest_review=go review_cycles=1 wall_time_seconds=10 rescue_budget_limit=unknown rescue_budget_used=unknown rescue_budget_remaining=unknown rescue_budget_exhausted=unknown",
+            "card=card-c result=DELIVERED first_review=unknown latest_review=unknown review_cycles=3 wall_time_seconds=10 rescue_budget_limit=3 rescue_budget_used=2 rescue_budget_remaining=1 rescue_budget_exhausted=no",
         ):
             if expected not in text.stdout:
                 raise AssertionError(f"metrics text missing {expected}: {text.stdout}")
@@ -235,11 +259,27 @@ def main() -> int:
         json_payload = json.loads(json_result.stdout)
         if json_payload["queue_aggregate"]["queues_delivered"] != 1:
             raise AssertionError(f"queue aggregate missing from JSON metrics: {json_result.stdout}")
+        rows_by_card = {row["card_id"]: row for row in json_payload["rows"]}
+        if rows_by_card["card-a"]["rescue_budget_used"] != "1":
+            raise AssertionError(f"history rescue budget did not win in JSON metrics: {json_result.stdout}")
+        if rows_by_card["card-c"]["rescue_budget_remaining"] != "1":
+            raise AssertionError(f"run fallback rescue budget missing in JSON metrics: {json_result.stdout}")
+        if rows_by_card["card-b"]["rescue_budget_limit"] != "unknown":
+            raise AssertionError(f"legacy rescue budget should be unknown: {json_result.stdout}")
 
         csv_result = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews), "--plans-dir", str(plans), "--csv"])
         require_ok(csv_result, "metrics csv")
         lines = csv_result.stdout.splitlines()
-        for header in ("total_tokens", "cached_input_tokens", "slowest_commands", "review_timeline"):
+        for header in (
+            "total_tokens",
+            "cached_input_tokens",
+            "slowest_commands",
+            "review_timeline",
+            "rescue_budget_limit",
+            "rescue_budget_used",
+            "rescue_budget_remaining",
+            "rescue_budget_exhausted",
+        ):
             if not lines or header not in lines[0]:
                 raise AssertionError(f"CSV header missing {header}: {csv_result.stdout}")
         if "run-1,card-a,DELIVERED,10.5,10,4,6,5,2,15" not in csv_result.stdout:

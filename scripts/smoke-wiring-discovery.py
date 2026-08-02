@@ -63,6 +63,8 @@ DELIVER_REVIEW_CYCLE_CONTRACT = (
     "$changerail-deliver <path> --max-review-cycles 5",
     "Default `--max-review-cycles` is `5`",
     "rescue/replacement card",
+    "same_card_rescue_attempt: 0",
+    "rescue_budget",
 )
 DO_FIX_BUDGET_CONTRACT = (
     "Default `--max-fix-cycles` is `2`",

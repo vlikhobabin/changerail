@@ -246,6 +246,13 @@ prior cycles и ставит ее перед downstream work. Если linked ca
 investigation/design. Старый `go` нельзя использовать после содержательных
 изменений code/docs/specs/scripts/tests.
 
+Счетчики разделены: first independent review - это `review_cycle: 1` и
+`same_card_rescue_attempt: 0`, а `changerail-deliver --max-review-cycles`
+лимитирует только post-review same-card rescue attempts после `no-go`.
+Review-cycle history может хранить `rescue_budget.limit`,
+`rescue_budget.used`, `rescue_budget.remaining` и `rescue_budget.exhausted`;
+legacy history без этих fields в метриках отображается как `unknown`.
+
 До independent review действует отдельный budget: `changerail-do`
 `--max-fix-cycles` ограничивает implement/verify attempts, а
 `changerail-deliver --max-review-cycles` считает только post-review rescue

@@ -29,6 +29,7 @@ PLAN_STATUS_SCHEMA = "changerail.delivery-plan-status.v1"
 SEVERITIES = ("blocker", "major", "minor")
 ACCEPTANCE = ("pass", "fail", "unverifiable", "not_applicable")
 UNKNOWN = "unknown"
+RESCUE_BUDGET_FIELDS = ("limit", "used", "remaining", "exhausted")
 
 
 def repo_root_from_script() -> Path:
@@ -67,6 +68,12 @@ def display_number(value: object) -> str:
         return str(value)
     if isinstance(value, float):
         return f"{value:g}"
+    return UNKNOWN
+
+
+def display_bool(value: object) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
     return UNKNOWN
 
 
@@ -184,6 +191,20 @@ def summarize_history(history: dict[str, Any] | None) -> dict[str, Any]:
     return summary
 
 
+def summarize_rescue_budget(history: dict[str, Any] | None, run: dict[str, Any]) -> dict[str, str]:
+    summary = {f"rescue_budget_{field}": UNKNOWN for field in RESCUE_BUDGET_FIELDS}
+    if isinstance(history, dict):
+        budget = history.get("rescue_budget")
+    else:
+        budget = review_performance(run).get("rescue_budget")
+    if not isinstance(budget, dict):
+        return summary
+    for field in ("limit", "used", "remaining"):
+        summary[f"rescue_budget_{field}"] = display_number(budget.get(field))
+    summary["rescue_budget_exhausted"] = display_bool(budget.get("exhausted"))
+    return summary
+
+
 def usage_value(run: dict[str, Any], key: str) -> str:
     usage = run.get("usage")
     if not isinstance(usage, dict) or not usage.get("available"):
@@ -280,6 +301,7 @@ def row_for_run(run: dict[str, Any], history: dict[str, Any] | None) -> dict[str
         "time_to_final_go_seconds": review_performance_value(run, "time_to_final_go_seconds"),
     }
     row.update(summarize_history(history))
+    row.update(summarize_rescue_budget(history, run))
     if row["review_cycles"] == UNKNOWN:
         review_cycle_count = review_performance(run).get("cycle_count")
         if isinstance(review_cycle_count, int):
@@ -318,6 +340,10 @@ def print_text(rows: list[dict[str, Any]], aggregate: dict[str, Any], queue_rows
             f"- {row['run_id']} card={row['card_id']} result={row['result']} "
             f"first_review={row['first_review_result']} latest_review={row['latest_review_result']} "
             f"review_cycles={row['review_cycles']} wall_time_seconds={row['wall_time_seconds']} "
+            f"rescue_budget_limit={row['rescue_budget_limit']} "
+            f"rescue_budget_used={row['rescue_budget_used']} "
+            f"rescue_budget_remaining={row['rescue_budget_remaining']} "
+            f"rescue_budget_exhausted={row['rescue_budget_exhausted']} "
             f"input_tokens={row['input_tokens']} cached_input_tokens={row['cached_input_tokens']} "
             f"uncached_input_tokens={row['uncached_input_tokens']} output_tokens={row['output_tokens']} "
             f"reasoning_tokens={row['reasoning_tokens']} total_tokens={row['total_tokens']} "
@@ -368,6 +394,10 @@ def print_csv(rows: list[dict[str, Any]]) -> None:
         "first_review_result",
         "latest_review_result",
         "first_pass_go",
+        "rescue_budget_limit",
+        "rescue_budget_used",
+        "rescue_budget_remaining",
+        "rescue_budget_exhausted",
         "findings_blocker",
         "findings_major",
         "findings_minor",

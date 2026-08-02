@@ -269,6 +269,13 @@ findings, а не молчаливым pass.
 Review-cycle history сохраняется как ignored runtime evidence отдельно от
 latest canonical verdict. Это позволяет видеть цепочку `no-go -> fix ->
 re-review -> go` в метриках, не меняя fail-closed publish gate.
+Initial review - это `review_cycle: 1` и `same_card_rescue_attempt: 0`, если
+history writer знает счетчик. Same-card rescue attempt расходуется только после
+independent `no-go`, когда implementing session исправляет scoped blocker в той
+же карточке; последующий fresh review является re-review cycle и увеличивает
+`review_cycle`. Runtime history хранит structured `rescue_budget` с
+`limit`, `used`, `remaining` и `exhausted`; legacy history без этих optional
+полей читается как `unknown`, а не как вычисленный из prose budget.
 Дефолтный autonomous `deliver` допускает пять bounded same-card
 rescue-подходов после первого `no-go`; каждый подход требует fresh independent
 re-review перед publish. Если budget исчерпан и latest review всё ещё
