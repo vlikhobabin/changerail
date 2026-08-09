@@ -16,9 +16,9 @@ epic
 `00`
 
 ## Planning State
-series delivery in progress; `060-01`..`060-04` are published in `4.done`, the
-MVP and operational gates passed, `060-05` is admitted to `2.todo`, and `060-06`
-remains in `1.backlog` until its evidence gate is evaluated
+program exit reached; `060-01`..`060-05` are published in `4.done`, and the
+optional `060-06` fix-mode entry gate was evaluated negative so it remains in
+`1.backlog` without weakening the delivered read-only workflow
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -157,13 +157,16 @@ delivery runner или consumer-owned repository policy.
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
 
 ## Result
-The series MVP and operational skill/scheduler/bootstrap unit are published and
-independently audited; feedback/quality/dogfood is admitted to implementation.
+Program exit passed. Repository knowledge, deterministic scan, lifecycle,
+audit/triage runners, consumer opt-in, feedback adapters, quality rollup and
+full ChangeRail dogfood are published and independently reviewed. Write-capable
+fix mode is intentionally deferred because operational proposal evidence and
+operator approval are absent.
 
 ## Next
-- Выполнить `060-05` через supervised single-card `$chrl-deliver`, затем
-  оценить `060-06` по фактическим quality/proposal evidence без автоматического
-  допуска fix mode.
+- Current series delivery is complete. Keep `060-06` in backlog and re-evaluate
+  only when real accepted/rejected proposal decisions, retained parity evidence
+  and explicit operator allowlist approval satisfy its recorded resume gate.
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
@@ -188,3 +191,12 @@ independently audited; feedback/quality/dogfood is admitted to implementation.
   review `go` с нулем findings и release baseline 31/31; `060-05` обновлена по
   delivered runner/bootstrap contracts, получила frozen feedback/quality
   semantics и допущена в `2.todo`.
+- `2026-08-09T20:54:38Z` — `060-05` опубликована commit `9af145a` после двух
+  review cycles; первый `no-go` выявил identity collapse и missing retained
+  baseline evidence, bounded rescue исправил оба blocker, второй review вернул
+  `go`, retained release baseline прошел 31/31.
+- `2026-08-09T20:56:04Z` — program exit audit подтвердил публикацию
+  `060-01`..`060-05`, clean dogfood run с пятью detectors и schema-valid quality
+  rollup. `060-06` не допущена: accepted/rejected proposal, triage-time,
+  resolution trend и operator allowlist evidence отсутствуют; optional fix mode
+  остается backlog story по заранее определенной ветке exit gate.

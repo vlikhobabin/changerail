@@ -16,8 +16,8 @@ story
 `06`
 
 ## Planning State
-deferred; `060-05` is admitted to delivery, but this card still requires an
-explicit readiness decision from its resulting quality/proposal evidence
+deferred after explicit negative entry-gate decision; audit/triage value is
+delivered, but fix authority is not supported by real proposal evidence
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -34,6 +34,25 @@ ChangeRail review/publish flow. Карточка намеренно не вхо�
   назвать конкретные safe transformation classes.
 - Operator принимает allowlist, required parity contract и deletion policy.
 - Если эти условия не выполнены, story остается в `1.backlog`.
+
+## Entry Gate Decision
+- Dependency gate: passed. Cards `060-01`..`060-05` are published in `4.done`;
+  `060-05` was published as commit `9af145a` after review cycle 2 returned `go`.
+- Operational gate: passed. Read-only run `060-06-entry-gate` completed as
+  `changerail.maintenance-run.v1` with result `SUCCEEDED`; its lifecycle report
+  contains five deterministic detectors, zero findings and no diagnostics.
+- Quality gate: not passed. The schema-valid rollup reports 14 catalog records,
+  zero open findings and zero board conflicts, but `findings.resolved`,
+  `triage.time_to_triage_seconds`, `proposals.accepted` and
+  `proposals.rejected` are `unknown`.
+- Proposal gate: not passed. No real records exist below
+  `.runtime/changerail/maintenance/proposals/`; tracked accepted/rejected
+  fixtures prove the contract only and do not count as operational evidence.
+- Operator gate: not passed. No allowlist, parity contract or deletion policy
+  has been accepted for write-capable maintenance operation.
+- Decision: do not admit this card to `2.todo` and do not run `$chrl-deliver`
+  for it. The current read-only audit/triage/feedback/quality surface remains the
+  supported product boundary.
 
 ## Acceptance
 - `fix` никогда не является default skill или scheduled mode и требует explicit
@@ -77,7 +96,7 @@ ChangeRail review/publish flow. Карточка намеренно не вхо�
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/2.todo/060-05-connect-feedback-and-quality-rollup.md`
+- `openspec/board/4.done/060-05-connect-feedback-and-quality-rollup.md`
 - `skills/changerail-review/SKILL.md`
 - `skills/changerail-pub/SKILL.md`
 
@@ -103,10 +122,17 @@ and standard ChangeRail review/publish handoff.
 - `openspec/changes/add-scoped-maintenance-fix-mode/`
 
 ## Result
-Not started; readiness gate not evaluated.
+Not started by design. The 2026-08-09 readiness gate was evaluated and returned
+negative because real accepted/rejected proposal and operator-approval evidence
+does not exist.
 
 ## Next
-- Keep in backlog until `060-05` produces enough evidence for an allowlist.
+- Keep in backlog. Re-evaluate only after real maintenance findings produce
+  schema-valid accepted and rejected decisions for a named candidate
+  transformation class, retained scope/parity evidence exists, and the operator
+  explicitly accepts the allowlist, parity contract and deletion policy.
+- Do not count test fixtures, a clean zero-finding scan or a single agent verdict
+  as fix-mode authority.
 
 ## Log
 - `2026-08-09T12:35:25Z` — fix mode separated from MVP and given an explicit
@@ -114,3 +140,8 @@ Not started; readiness gate not evaluated.
 - `2026-08-09T19:40:00Z` — dependency link refreshed after `060-05` admission;
   no fix-mode readiness is inferred before actual accepted/rejected proposal
   evidence exists.
+- `2026-08-09T20:56:04Z` — entry gate evaluated after published `060-05`.
+  Fresh read-only scan succeeded with five detectors and zero findings, while
+  the quality rollup returned proposal, triage-time and resolution metrics as
+  `unknown`; no real proposal decisions or operator allowlist approval exist,
+  so the story remains in `1.backlog` and was not sent to `$chrl-deliver`.
