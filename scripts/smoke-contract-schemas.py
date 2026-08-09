@@ -366,6 +366,42 @@ def evidence_index() -> dict[str, Any]:
     }
 
 
+def repository_knowledge_catalog() -> dict[str, Any]:
+    return {
+        "schema": "changerail.repository-knowledge.v1",
+        "records": [
+            {
+                "path": "docs/changerail-contracts.md",
+                "status": "active",
+                "type": "reference",
+                "owner": "ChangeRail core",
+                "source_globs": ["schemas/changerail-*.schema.json"],
+                "verify": ["python3 scripts/smoke-contract-schemas.py"],
+                "review_after": None,
+                "supersedes": [],
+            },
+            {
+                "path": ".changerail/KNOWLEDGE.md",
+                "status": "generated",
+                "type": "generated",
+                "owner": "ChangeRail core",
+                "source_globs": [".changerail/knowledge.yaml"],
+                "verify": ["bin/changerail-maintenance render-index --check"],
+                "review_after": "2026-12-31",
+                "supersedes": [],
+            },
+        ],
+    }
+
+
+def maintenance_policy() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-policy.v1",
+        "catalog_path": ".changerail/knowledge.yaml",
+        "generated_index_path": ".changerail/KNOWLEDGE.md",
+    }
+
+
 def schema_validator(schema_file: str) -> Validator:
     return lambda payload: validate_with_schema(payload, schema_file)
 
@@ -466,6 +502,14 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         schema_validator("changerail-review-cycle-history.schema.json"),
     ),
     "changerail-evidence-index.schema.json": (evidence_index, schema_validator("changerail-evidence-index.schema.json")),
+    "changerail-repository-knowledge.schema.json": (
+        repository_knowledge_catalog,
+        schema_validator("changerail-repository-knowledge.schema.json"),
+    ),
+    "changerail-maintenance-policy.schema.json": (
+        maintenance_policy,
+        schema_validator("changerail-maintenance-policy.schema.json"),
+    ),
 }
 
 

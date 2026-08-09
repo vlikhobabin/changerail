@@ -1,13 +1,13 @@
 # Определить repository knowledge contract
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `060-repository-knowledge-maintenance`
@@ -16,8 +16,8 @@ story
 `01`
 
 ## Planning State
-deliver-ready; OpenSpec artifacts are delegated to the internal `ff` phase of
-`$chrl-deliver`
+published; archived OpenSpec changes, retained verification evidence and fresh
+review gate are complete
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -58,16 +58,38 @@ Consumer выбирает собственную структуру repository �
 - none
 
 ## Change Set
-- none yet
+- `establish-repository-knowledge-contract`
+- `add-knowledge-catalog-cli-and-index`
 
 ## Verify
-- Schema fixtures for valid/invalid catalog and policy documents.
-- Catalog path traversal and unknown-field negative fixtures.
-- `render-index` idempotence and `--check` no-mutation smoke.
-- POSIX/native Windows entrypoint smoke.
-- `./bin/openspec validate --all --strict`.
-- `python3 scripts/public-surface-scan.py`.
-- `git diff --check`.
+- Fast-forward artifacts validated:
+  `./bin/openspec validate establish-repository-knowledge-contract --strict`;
+  `./bin/openspec validate add-knowledge-catalog-cli-and-index --strict`;
+  `git diff --check`.
+- Delivery verification passed. Retained evidence index:
+  `.runtime/changerail/evidence/060-01-establish-repository-knowledge-contract/index.json`.
+- `python3 scripts/smoke-repository-knowledge.py` -> passed.
+- `python3 scripts/smoke-contract-schemas.py` -> passed.
+- `bin/changerail-maintenance validate-catalog` -> passed.
+- `bin/changerail-maintenance render-index --check` -> passed.
+- `python3 scripts/smoke-windows-entrypoints.py` -> passed.
+- `./bin/openspec validate establish-repository-knowledge-contract --strict` -> passed.
+- `./bin/openspec validate add-knowledge-catalog-cli-and-index --strict` -> passed.
+- `./bin/openspec validate --all --strict` -> passed.
+- `python3 scripts/public-surface-scan.py` -> passed.
+- `git diff --check` -> passed.
+- Post-review rescue attempt 1 fixed `R1` from review cycle 1:
+  invalid `bin/changerail-maintenance validate-catalog --json` failure output
+  now emits exactly one parseable JSON object with `ok: false` and diagnostics.
+  Retained evidence ids:
+  `rescue-invalid-json-diagnostic`, `rescue-repository-knowledge-smoke`,
+  `rescue-contract-schemas-smoke`, `rescue-windows-entrypoints-smoke`,
+  `rescue-openspec-all-strict`, `rescue-public-surface-scan`,
+  `rescue-render-index-check`, `rescue-diff-check`.
+
+## Archive
+- `openspec/changes/archive/2026-08-09-establish-repository-knowledge-contract/`
+- `openspec/changes/archive/2026-08-09-add-knowledge-catalog-cli-and-index/`
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
@@ -95,7 +117,7 @@ forcing a repository directory structure.
 - none
 
 ### Related
-- `openspec/changes/establish-repository-knowledge-contract/`
+- `openspec/changes/archive/2026-08-09-establish-repository-knowledge-contract/`
 
 ## Change 2: `add-knowledge-catalog-cli-and-index`
 
@@ -115,15 +137,33 @@ Add shared-runtime CLI entrypoints and idempotent index check/write behavior.
 - `establish-repository-knowledge-contract`
 
 ### Related
-- `openspec/changes/add-knowledge-catalog-cli-and-index/`
+- `openspec/changes/archive/2026-08-09-add-knowledge-catalog-cli-and-index/`
 
 ## Result
-Not started.
+Delivered: repository knowledge and maintenance policy schemas, YAML loader,
+public-safe fixtures, dogfood catalog/index, CLI wrappers, deterministic
+`render-index`, docs and smoke coverage are implemented and published through
+the review-gated ChangeRail flow.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and
+published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Run `$chrl-deliver openspec/board/2.todo/060-01-establish-repository-knowledge-contract.md`.
+- done
 
 ## Log
 - `2026-08-09T12:35:25Z` — story extracted from broad maintenance harness card.
 - `2026-08-09T13:16:00Z` — readiness review accepted; moved to `2.todo` for
   supervised single-card delivery.
+- `2026-08-09T13:21:08Z` — internal `ff` phase created apply-ready OpenSpec
+  artifacts for both card-owned changes; moving to `3.inprogress` for delivery.
+- `2026-08-09T13:33:05Z` — implemented both changes, synced main specs,
+  archived OpenSpec changes and captured delivery verification evidence; ready
+  for independent review.
+- `2026-08-09T13:39:11Z` — independent review cycle 1 returned `no-go` with
+  blocker `R1`: invalid `validate-catalog --json` failure output emitted two
+  JSON objects.
+- `2026-08-09T13:43:04Z` — same-card rescue attempt 1 fixed `R1`, added smoke
+  assertion for invalid JSON-mode diagnostics and recaptured verification
+  evidence; fresh re-review required.
+- 2026-08-09T13:51:15Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

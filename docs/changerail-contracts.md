@@ -13,6 +13,8 @@
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
 - `changerail.review-cycle-history.v1`
+- `changerail.repository-knowledge.v1`
+- `changerail.maintenance-policy.v1`
 
 Schemas находятся в `schemas/`:
 
@@ -24,6 +26,8 @@ schemas/changerail-delivery-run.schema.json
 schemas/changerail-delivery-plan.schema.json
 schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-review-cycle-history.schema.json
+schemas/changerail-repository-knowledge.schema.json
+schemas/changerail-maintenance-policy.schema.json
 ```
 
 Review verdict-файлы и public schemas должны использовать только
@@ -251,6 +255,75 @@ bin/changerail-evidence validate \
 Evidence может быть committable, runtime или external, но committed artifact не
 должен содержать secrets, credentials, customer data, local traces или большие
 сырые логи.
+
+## Repository Knowledge
+
+Repository knowledge catalog и maintenance policy являются tracked opt-in
+contracts для future deterministic maintenance harness. Default paths:
+
+```text
+.changerail/knowledge.yaml
+.changerail/maintenance.yaml
+```
+
+Schema ids:
+
+```text
+changerail.repository-knowledge.v1
+changerail.maintenance-policy.v1
+```
+
+Catalog record содержит:
+
+- `path`: repository-relative knowledge artifact path.
+- `status`: `active`, `historical`, `superseded` или `generated`.
+- `type`: `tutorial`, `how-to`, `reference`, `explanation`, `architecture`,
+  `adr`, `runbook`, `historical` или `generated`.
+- `owner`: строка owner-а или `null`, если owner не назначен.
+- `source_globs`: array source paths/globs; empty array означает, что source
+  связь не объявлена.
+- `verify`: array команд или checks; empty array означает, что отдельный check
+  не объявлен.
+- `review_after`: date `YYYY-MM-DD` или `null`, если freshness deadline не
+  задан.
+- `supersedes`: array repository-relative paths; empty array означает, что
+  predecessor/replacement связь не объявлена.
+
+Catalog и policy YAML читаются через PyYAML, затем валидируются JSON Schema
+Draft 2020-12. Contract-owned objects используют `additionalProperties: false`.
+Semantic validation дополнительно нормализует repository-relative paths и
+fail-closed отклоняет absolute paths, traversal (`..`) и root escape.
+`active` catalog record не может ссылаться на отсутствующий path. `historical`,
+`superseded` и `generated` records не задают directory layout и не требуют
+автоматического удаления.
+
+Отсутствующая `.changerail/maintenance.yaml` означает, что maintenance policy не
+configured; existing consumers без opt-in policy остаются unaffected. Runtime
+reports, scan history и raw evidence для будущего maintenance harness должны
+оставаться под ignored `.runtime/changerail/maintenance/`.
+
+Helper surface:
+
+```bash
+bin/changerail-maintenance validate-catalog
+bin/changerail-maintenance validate-catalog \
+  --catalog .changerail/knowledge.yaml --policy .changerail/maintenance.yaml
+bin/changerail-maintenance render-index --check
+bin/changerail-maintenance render-index --write
+```
+
+`validate-catalog` поддерживает explicit `--catalog` и `--policy` overrides,
+но paths остаются repository-relative и проходят ту же fail-closed safe-path
+validation. POSIX wrapper `bin/changerail-maintenance` и native Windows wrapper
+`bin/changerail-maintenance.cmd` запускают один и тот же Python helper через
+shared runtime selector.
+
+`render-index` строит deterministic Markdown index из validated catalog records.
+Ordering stable: normalized `path`, затем `type`, затем `status`; YAML order не
+влияет на output. Default render mode и `--check` read-only. `--check`
+сравнивает ожидаемый content с configured generated index path и возвращает
+non-zero при drift, не меняя файл. Только `--write` обновляет generated index
+path, заданный policy `generated_index_path` или explicit `--index`.
 
 ## Delivery Run Record
 

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-maintenance-policy.schema.json",
+  "title": "ChangeRail maintenance policy",
+  "type": "object",
+  "required": ["schema", "catalog_path", "generated_index_path"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "changerail.maintenance-policy.v1"
+    },
+    "catalog_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_index_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

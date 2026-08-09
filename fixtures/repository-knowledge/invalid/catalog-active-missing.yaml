@@ -1,0 +1,10 @@
+schema: changerail.repository-knowledge.v1
+records:
+  - path: docs/does-not-exist.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs: []
+    verify: []
+    review_after: null
+    supersedes: []

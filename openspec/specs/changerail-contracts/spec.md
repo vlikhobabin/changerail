@@ -14,6 +14,18 @@ and evidence index contracts using canonical `changerail.*` schema ids.
 - **THEN** schemas exist for `changerail.review-verdict.v1`,
   `changerail.delivery-manifest.v1` and `changerail.evidence-index.v1`
 
+### Requirement: Repository knowledge contract schemas
+ChangeRail MUST provide tracked JSON schemas for repository knowledge catalog and
+maintenance policy contracts using canonical `changerail.*` schema ids.
+
+#### Scenario: Maintainer inspects repository knowledge schemas
+- **WHEN** the `schemas/` directory is listed
+- **THEN** schemas exist for `changerail.repository-knowledge.v1` and `changerail.maintenance-policy.v1`
+
+#### Scenario: Contract schema smoke covers repository knowledge schemas
+- **WHEN** `python3 scripts/smoke-contract-schemas.py` runs
+- **THEN** the smoke validates representative valid and invalid documents for both schema ids
+
 ### Requirement: Review verdict helper validation
 ChangeRail MUST provide a review-verdict helper that validates verdict shape,
 cross-field consistency and optional HEAD, reviewed-tree and working-tree

@@ -1,0 +1,56 @@
+schema: changerail.repository-knowledge.v1
+records:
+  - path: .changerail/KNOWLEDGE.md
+    status: generated
+    type: generated
+    owner: ChangeRail core
+    source_globs:
+      - .changerail/knowledge.yaml
+      - .changerail/maintenance.yaml
+    verify:
+      - bin/changerail-maintenance render-index --check
+    review_after: null
+    supersedes: []
+  - path: README.md
+    status: active
+    type: explanation
+    owner: ChangeRail core
+    source_globs: []
+    verify:
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
+  - path: AGENTS.shared.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs:
+      - skills/**/SKILL.md
+      - claude/commands/changerail/*.md
+    verify:
+      - ./bin/openspec validate --all --strict
+      - git diff --check
+    review_after: null
+    supersedes: []
+  - path: docs/changerail-contracts.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs:
+      - schemas/changerail-*.schema.json
+      - scripts/changerail_*schema*.py
+    verify:
+      - python3 scripts/smoke-contract-schemas.py
+    review_after: null
+    supersedes: []
+  - path: docs/changerail-source-of-truth-architecture.md
+    status: active
+    type: architecture
+    owner: ChangeRail core
+    source_globs:
+      - AGENTS.shared.md
+      - openspec/specs/changerail-*/spec.md
+    verify:
+      - ./bin/openspec validate --all --strict
+    review_after: null
+    supersedes: []

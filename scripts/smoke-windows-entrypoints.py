@@ -25,6 +25,7 @@ SUPPORTED = (
     "changerail-evidence",
     "changerail-delivery-runner",
     "changerail-delivery-metrics",
+    "changerail-maintenance",
 )
 PYTHON_BACKED = (
     "bootstrap-project",
@@ -33,6 +34,7 @@ PYTHON_BACKED = (
     "changerail-evidence",
     "changerail-delivery-runner",
     "changerail-delivery-metrics",
+    "changerail-maintenance",
 )
 FORBIDDEN_CMD_SNIPPETS = ("bash", "powershell", "pwsh", "cmd /c")
 
