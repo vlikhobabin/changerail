@@ -17,6 +17,10 @@
 - `changerail.maintenance-policy.v1`
 - `changerail.maintenance-scan-report.v1`
 - `changerail.maintenance-detector-result.v1`
+- `changerail.maintenance-report.v1`
+- `changerail.maintenance-state.v1`
+- `changerail.maintenance-baseline.v1`
+- `changerail.maintenance-triage.v1`
 
 Schemas находятся в `schemas/`:
 
@@ -32,6 +36,10 @@ schemas/changerail-repository-knowledge.schema.json
 schemas/changerail-maintenance-policy.schema.json
 schemas/changerail-maintenance-scan-report.schema.json
 schemas/changerail-maintenance-detector-result.schema.json
+schemas/changerail-maintenance-report.schema.json
+schemas/changerail-maintenance-state.schema.json
+schemas/changerail-maintenance-baseline.schema.json
+schemas/changerail-maintenance-triage.schema.json
 ```
 
 Review verdict-файлы и public schemas должны использовать только
@@ -416,6 +424,121 @@ Adapter failures cannot become false green results:
   `invalid_adapter_json` or `invalid_adapter_output`;
 - absolute paths, traversal or root escapes in adapter evidence -> detector
   error `unsafe_adapter_path`.
+
+## Maintenance Lifecycle Findings
+
+Maintenance lifecycle report является normalized layer поверх raw scan output.
+`scan` продолжает публиковать неизмененный
+`changerail.maintenance-scan-report.v1`; lifecycle consumers используют:
+
+```bash
+bin/changerail-maintenance report --json
+bin/changerail-maintenance report --json --write-state
+```
+
+Report schema id: `changerail.maintenance-report.v1`. Runtime state schema id:
+`changerail.maintenance-state.v1`. State path по умолчанию:
+
+```text
+.runtime/changerail/maintenance/state.json
+```
+
+`report` строится только из complete schema-valid scan report. Если source scan
+incomplete, schema-invalid, содержит unsafe evidence или runtime state corrupt /
+unsupported, lifecycle report fail-closed: `complete: false`, blocker
+diagnostic и non-zero exit. Corrupt state не заменяется implicit write-ом.
+
+Каждый normalized finding содержит:
+
+- `fingerprint`: stable `sha256:<hex>` identity;
+- `evidence_fingerprint`: separate evidence hash;
+- `detector`, `rule`, `severity`, `confidence`, `path`;
+- `evidence_refs`, `remediation`, `first_seen`, `last_seen`, `owner`,
+  `risk_class` и lifecycle `status`.
+
+Identity material является canonical JSON over `identity_version`, detector
+result id, finding rule/code и normalized repository-relative subject.
+`message`, `severity`, `evidence`, timestamps и absolute workspace root не
+участвуют в identity. Evidence fingerprint считается отдельно от sanitized
+material evidence, поэтому новое evidence меняет `evidence_fingerprint`, но не
+меняет `fingerprint`.
+
+Lifecycle normalization read-only by default. Без restored state `first_seen`
+является текущим observation timestamp, и report явно пишет
+`state.continuity: not_restored`. Сохранение continuity требует explicit
+`--write-state`; state и previews остаются ignored runtime artifacts under
+`.runtime/changerail/maintenance/`. Если operator задает custom `--state`,
+path всё равно должен находиться ниже `.runtime/changerail/maintenance/`; state
+write в tracked path fail-closed.
+
+Unknown absolute paths, traversal paths, URL-like external references,
+backslash paths и secret-like raw values in detector evidence rejected before
+lifecycle output. Unsafe values не копируются в report.
+
+## Maintenance Baseline And Cards
+
+Tracked baseline path по умолчанию:
+
+```text
+.changerail/maintenance-baseline.yaml
+```
+
+Schema id: `changerail.maintenance-baseline.v1`. Baseline содержит отдельные
+collections:
+
+- `accepted`: reviewed finding identities keyed by `fingerprint`;
+- `waivers`: temporary suppressions keyed by `fingerprint`.
+
+Waiver требует `owner`, `reason` и ISO-8601 `expires_at` или `review_after`.
+Expired waiver не suppress-ит current finding: lifecycle report оставляет
+finding `status: open` и добавляет diagnostic. Accepted или active waived
+finding не участвует в open-finding threshold calculation. Date-only waiver
+boundary нормализуется в lifecycle report как UTC midnight date-time для
+`suppressed_until`.
+
+Baseline preview/write surface:
+
+```bash
+bin/changerail-maintenance accept-baseline --json
+bin/changerail-maintenance accept-baseline --write --json
+```
+
+Default mode пишет schema-valid baseline preview under ignored
+`.runtime/changerail/maintenance/previews/` и не меняет tracked files.
+`--write` может менять только `.changerail/maintenance-baseline.yaml`.
+
+Triage annotations are schema-bound JSON with schema id
+`changerail.maintenance-triage.v1`:
+
+```bash
+bin/changerail-maintenance triage --annotations <path> --json
+```
+
+`triage` only validates and normalizes supplied annotations. It does not invoke
+an LLM or external model process.
+
+Board-card bridge:
+
+```bash
+bin/changerail-maintenance cards --json
+bin/changerail-maintenance cards --write --json
+```
+
+Default mode writes card previews under ignored
+`.runtime/changerail/maintenance/previews/cards/`. `--write` creates or updates
+tracked board cards. Before write, the bridge scans
+`openspec/board/1.backlog` through `openspec/board/5.canceled` for the exact
+line:
+
+```text
+Maintenance Origin: <sha256 fingerprint>
+```
+
+The same identity updates the existing card evidence summary and never creates
+another card. Written card titles, summaries and evidence references use only
+sanitized repository-relative metadata; raw detector output, absolute consumer
+paths, secret-like `finding.path` values, credentials and unredacted snippets
+remain indirect runtime evidence.
 
 ## Delivery Run Record
 

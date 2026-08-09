@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-maintenance-state.schema.json",
+  "title": "ChangeRail maintenance lifecycle state",
+  "type": "object",
+  "required": ["schema", "updated_at", "identity_version", "findings"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "changerail.maintenance-state.v1"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "identity_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "findings": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/stateFinding"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "stateFinding": {
+      "type": "object",
+      "required": ["first_seen", "last_seen", "evidence_fingerprint", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "first_seen": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_seen": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence_fingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "status": {
+          "enum": ["open", "accepted", "waived"]
+        }
+      }
+    }
+  }
+}

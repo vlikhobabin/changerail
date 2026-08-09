@@ -18,7 +18,14 @@ sys.path.insert(0, str(SCRIPTS))
 
 from changerail_contract_schema import validate_with_schema  # noqa: E402
 from changerail_delivery_manifest import validate_manifest  # noqa: E402
-from changerail_repository_knowledge import validate_detector_result, validate_scan_report  # noqa: E402
+from changerail_repository_knowledge import (  # noqa: E402
+    validate_detector_result,
+    validate_lifecycle_report,
+    validate_maintenance_baseline,
+    validate_maintenance_state,
+    validate_maintenance_triage,
+    validate_scan_report,
+)
 from changerail_review_verdict import _validate_verdict  # noqa: E402
 
 
@@ -487,6 +494,115 @@ def maintenance_scan_report() -> dict[str, Any]:
     }
 
 
+def maintenance_report() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-report.v1",
+        "generated_at": DATE,
+        "workspace": {"root": "/opt/changerail"},
+        "source_scan": {
+            "schema": "changerail.maintenance-scan-report.v1",
+            "generated_at": DATE,
+            "catalog_path": ".changerail/knowledge.yaml",
+            "policy_path": ".changerail/maintenance.yaml",
+            "complete": True,
+        },
+        "state": {
+            "path": ".runtime/changerail/maintenance/state.json",
+            "restored": True,
+            "written": False,
+            "continuity": "restored",
+        },
+        "complete": True,
+        "fail_on": "major",
+        "detectors": [{"id": "catalog-coverage", "status": "fail", "findings": 1, "errors": 0}],
+        "findings": [
+            {
+                "fingerprint": SHA,
+                "evidence_fingerprint": "sha256:" + ("1" * 64),
+                "detector": "catalog-coverage",
+                "rule": "uncovered_knowledge_file",
+                "severity": "major",
+                "confidence": 1.0,
+                "path": "docs/example.md",
+                "subject": {"path": "docs/example.md"},
+                "evidence_refs": [{"kind": "detector-evidence", "key": "line", "value": 1}],
+                "remediation": None,
+                "first_seen": DATE,
+                "last_seen": DATE,
+                "owner": None,
+                "risk_class": "maintenance",
+                "status": "open",
+            }
+        ],
+        "diagnostics": [],
+        "summary": {
+            "detectors": 1,
+            "findings": 1,
+            "open": 1,
+            "accepted": 0,
+            "waived": 0,
+            "diagnostics": 0,
+            "max_severity": "major",
+            "threshold_reached": True,
+        },
+    }
+
+
+def maintenance_state() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-state.v1",
+        "updated_at": DATE,
+        "identity_version": 1,
+        "findings": {
+            SHA: {
+                "first_seen": DATE,
+                "last_seen": DATE,
+                "evidence_fingerprint": "sha256:" + ("1" * 64),
+                "status": "open",
+            }
+        },
+    }
+
+
+def maintenance_baseline() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-baseline.v1",
+        "accepted": [
+            {
+                "fingerprint": SHA,
+                "owner": "ChangeRail core",
+                "reason": "schema smoke accepted finding",
+                "accepted_at": DATE,
+            }
+        ],
+        "waivers": [
+            {
+                "fingerprint": "sha256:" + ("2" * 64),
+                "owner": "ChangeRail core",
+                "reason": "schema smoke waiver",
+                "expires_at": "2026-12-31",
+            }
+        ],
+    }
+
+
+def maintenance_triage() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-triage.v1",
+        "generated_at": DATE,
+        "annotations": [
+            {
+                "fingerprint": SHA,
+                "owner": "ChangeRail core",
+                "risk_class": "maintenance",
+                "remediation": "update tracked knowledge artifact",
+                "status": "open",
+                "reason": "schema smoke annotation",
+            }
+        ],
+    }
+
+
 def schema_validator(schema_file: str) -> Validator:
     return lambda payload: validate_with_schema(payload, schema_file)
 
@@ -603,6 +719,22 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         maintenance_scan_report,
         validate_scan_report,
     ),
+    "changerail-maintenance-report.schema.json": (
+        maintenance_report,
+        validate_lifecycle_report,
+    ),
+    "changerail-maintenance-state.schema.json": (
+        maintenance_state,
+        validate_maintenance_state,
+    ),
+    "changerail-maintenance-baseline.schema.json": (
+        maintenance_baseline,
+        validate_maintenance_baseline,
+    ),
+    "changerail-maintenance-triage.schema.json": (
+        maintenance_triage,
+        validate_maintenance_triage,
+    ),
 }
 
 
@@ -680,6 +812,11 @@ def main() -> int:
             legacy_errors = validator(legacy_history)
             if legacy_errors:
                 failures.append(f"{name}: legacy fixture without rescue budget failed: {legacy_errors}")
+        if name == "changerail-maintenance-report.schema.json":
+            missing_detectors = copy.deepcopy(positive)
+            missing_detectors.pop("detectors")
+            if not validator(missing_detectors):
+                failures.append(f"{name}: missing detector summary unexpectedly passed")
         negative = mutate_invalid(positive)
         negative_errors = validator(negative)
         if not negative_errors:

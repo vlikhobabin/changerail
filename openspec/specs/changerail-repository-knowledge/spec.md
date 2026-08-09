@@ -336,3 +336,184 @@ errors rather than successful detector results.
   repository root escape
 - **THEN** scan records a detector-error result for unsafe adapter output
 - **AND** does not include the unsafe path as trusted finding evidence
+
+### Requirement: Maintenance lifecycle report contract
+ChangeRail MUST publish a JSON Schema Draft 2020-12 lifecycle report contract
+with schema id `changerail.maintenance-report.v1`. The report MUST be
+normalized from a complete schema-valid `changerail.maintenance-scan-report.v1`
+source and MUST contain run metadata, source scan metadata, detector summary
+and normalized lifecycle findings.
+
+#### Scenario: Complete scan normalizes to lifecycle report
+- **WHEN** `bin/changerail-maintenance report --json` runs against valid
+  repository knowledge maintenance configuration
+- **THEN** stdout contains exactly one `changerail.maintenance-report.v1` JSON
+  document
+- **AND** every normalized finding contains `fingerprint`,
+  `evidence_fingerprint`, `detector`, `rule`, `severity`, `confidence`, `path`,
+  `evidence_refs`, `remediation`, `first_seen`, `owner`, `risk_class` and
+  lifecycle `status`
+
+#### Scenario: Invalid source scan is rejected
+- **WHEN** lifecycle normalization receives an incomplete or schema-invalid
+  `changerail.maintenance-scan-report.v1` source
+- **THEN** the command exits non-zero
+- **AND** the emitted lifecycle report is marked incomplete with a blocker
+  diagnostic instead of silently accepting partial detector output
+
+### Requirement: Maintenance finding identity
+ChangeRail MUST compute each lifecycle finding identity from canonical JSON over
+`identity_version`, detector result id, finding rule/code and normalized
+repository-relative subject. The public fingerprint form MUST be
+`sha256:<lowercase-hex>`.
+
+#### Scenario: Volatile finding fields do not change identity
+- **WHEN** a repeated scan observes the same detector, rule and normalized
+  subject with a different message, severity, timestamp or workspace root
+- **THEN** the lifecycle finding keeps the same `fingerprint`
+- **AND** identity material does not include the volatile field values
+
+#### Scenario: Subject change changes identity
+- **WHEN** a repeated scan observes the same detector and rule for a different
+  normalized repository-relative subject
+- **THEN** the lifecycle finding has a different `fingerprint`
+
+### Requirement: Maintenance evidence fingerprint
+ChangeRail MUST compute `evidence_fingerprint` separately from finding identity
+using canonical JSON over sanitized material evidence. Evidence, raw message
+text and timestamps MUST NOT be copied into identity material.
+
+#### Scenario: Evidence change preserves identity
+- **WHEN** a repeated scan observes the same finding identity with changed
+  material evidence
+- **THEN** the lifecycle finding keeps the same `fingerprint`
+- **AND** `evidence_fingerprint` changes
+
+#### Scenario: Unsafe evidence fails closed
+- **WHEN** detector evidence contains an absolute path, traversal path, unknown
+  local path shape or secret-like raw value
+- **THEN** lifecycle normalization rejects that evidence with a blocker
+  diagnostic
+- **AND** the unsafe value is not copied into lifecycle output
+
+### Requirement: Maintenance runtime state continuity
+ChangeRail MUST keep maintenance lifecycle runtime state atomically below
+`.runtime/changerail/maintenance/state.json`. Lifecycle normalization MUST be
+read-only by default, and durable state updates MUST require explicit
+`--write-state`.
+
+#### Scenario: State write is explicit and atomic
+- **WHEN** `bin/changerail-maintenance report --json --write-state` completes
+  successfully
+- **THEN** `.runtime/changerail/maintenance/state.json` is written atomically
+- **AND** repeated runs with the restored state preserve `first_seen` for the
+  same finding identity
+
+#### Scenario: Custom state path stays in runtime root
+- **WHEN** `bin/changerail-maintenance report --json --write-state --state <path>`
+  receives a custom state path outside `.runtime/changerail/maintenance/`
+- **THEN** lifecycle normalization exits non-zero
+- **AND** the custom path is not written
+
+#### Scenario: Default report does not claim continuity
+- **WHEN** `bin/changerail-maintenance report --json` runs without restored
+  state and without `--write-state`
+- **THEN** repository tracked files are not modified
+- **AND** each finding `first_seen` is the current observation
+- **AND** the report metadata states that cross-run continuity was not restored
+
+#### Scenario: Corrupt state fails closed
+- **WHEN** `.runtime/changerail/maintenance/state.json` is corrupt or has an
+  unsupported schema version
+- **THEN** lifecycle normalization exits non-zero
+- **AND** the existing state file is not replaced implicitly
+
+### Requirement: Maintenance baseline and waiver contract
+ChangeRail MUST publish a JSON Schema Draft 2020-12 baseline contract for
+`.changerail/maintenance-baseline.yaml` with separate `accepted` and `waivers`
+collections. Acceptance MUST be keyed by lifecycle finding identity
+fingerprint. Each waiver MUST include `owner`, `reason` and either an
+ISO-8601 `expires_at` or `review_after` boundary.
+
+#### Scenario: Baseline acceptance is schema backed
+- **WHEN** `.changerail/maintenance-baseline.yaml` contains accepted finding
+  identities
+- **THEN** `bin/changerail-maintenance accept-baseline --write` writes only the
+  baseline file
+- **AND** the resulting file validates against the maintenance baseline schema
+
+#### Scenario: Expired waiver does not suppress finding
+- **WHEN** a lifecycle finding matches a waiver whose `expires_at` or
+  `review_after` boundary is in the past
+- **THEN** the lifecycle output keeps the finding open
+- **AND** the expired waiver is reported as not suppressing the finding
+
+#### Scenario: Active date-only waiver remains report-valid
+- **WHEN** a lifecycle finding matches a waiver with a future date-only
+  `expires_at` or `review_after` boundary
+- **THEN** the lifecycle output marks the finding waived
+- **AND** `suppressed_until` is normalized to a report-valid UTC date-time
+
+### Requirement: Maintenance baseline preview defaults
+ChangeRail maintenance baseline operations MUST be read-only by default and
+MUST mutate tracked baseline content only when explicit `--write` is supplied.
+
+#### Scenario: Accept baseline preview does not mutate files
+- **WHEN** `bin/changerail-maintenance accept-baseline --json` runs without
+  `--write`
+- **THEN** it emits a schema-valid preview artifact or JSON summary
+- **AND** the repository working tree content is not modified
+
+#### Scenario: Accept baseline write is scoped
+- **WHEN** `bin/changerail-maintenance accept-baseline --write` runs
+- **THEN** the only tracked file it creates or updates is
+  `.changerail/maintenance-baseline.yaml`
+
+### Requirement: Maintenance triage annotations
+ChangeRail MUST accept schema-bound maintenance triage annotations and MUST NOT
+invoke an LLM as part of `triage` command execution.
+
+#### Scenario: Triage validates supplied annotations
+- **WHEN** `bin/changerail-maintenance triage --annotations <path> --json`
+  receives valid annotation JSON
+- **THEN** the command emits normalized schema-valid annotations
+- **AND** no LLM or external model process is invoked
+
+#### Scenario: Invalid triage fails closed
+- **WHEN** supplied triage annotations violate the schema
+- **THEN** the command exits non-zero
+- **AND** it emits one machine-readable diagnostic document
+
+### Requirement: Maintenance board card bridge
+ChangeRail MUST provide a preview-first board-card bridge from lifecycle
+findings to ChangeRail board cards. Written cards MUST carry exactly one
+machine-readable line `Maintenance Origin: <sha256 fingerprint>`.
+
+#### Scenario: Card bridge preview does not mutate board
+- **WHEN** `bin/changerail-maintenance cards --json` runs without `--write`
+- **THEN** preview artifacts are retained under ignored
+  `.runtime/changerail/maintenance/`
+- **AND** no tracked board card is created or updated
+
+#### Scenario: Card bridge writes exact origin marker
+- **WHEN** `bin/changerail-maintenance cards --write` creates a board card for
+  a lifecycle finding
+- **THEN** the tracked card contains exactly one line
+  `Maintenance Origin: <sha256 fingerprint>`
+- **AND** the card title, summary and evidence references contain only
+  sanitized repository-relative metadata
+
+#### Scenario: Card bridge rejects unsafe report material
+- **WHEN** `bin/changerail-maintenance cards --write` receives a lifecycle
+  report whose open finding contains an absolute path, unsafe local path shape,
+  secret-like `finding.path` or other secret-like card material
+- **THEN** the command exits non-zero
+- **AND** no tracked board card is created or updated for that finding
+
+#### Scenario: Card bridge deduplicates across board lanes
+- **WHEN** a lifecycle finding has the same fingerprint as a card already
+  present under `openspec/board/1.backlog`, `2.todo`, `3.inprogress`, `4.done`
+  or `5.canceled`
+- **THEN** `bin/changerail-maintenance cards --write` updates that existing
+  card evidence summary
+- **AND** it does not create another card for the same identity

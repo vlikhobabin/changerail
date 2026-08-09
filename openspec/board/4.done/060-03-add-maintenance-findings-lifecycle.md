@@ -1,13 +1,13 @@
 # Добавить lifecycle maintenance findings
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `060-repository-knowledge-maintenance`
@@ -114,20 +114,48 @@ preview/upsert bridge в ChangeRail board.
 - `060-02-add-deterministic-knowledge-integrity-gate`
 
 ## Change Set
-- none yet
+- `add-maintenance-report-and-finding-state`
+- `add-maintenance-baseline-and-card-dedup`
 
 ## Verify
-- Valid/invalid report and baseline/waiver schema fixtures.
-- Fingerprint identity stability and evidence-change tests.
-- Atomic state write and corrupt-state fail-closed tests.
-- Same-state and ephemeral-state semantics tests.
-- Board dedup across all lanes and evidence update smoke.
-- Preview/default no-mutation and explicit-write scope tests.
-- Public-safety redaction and path-neutrality fixtures.
+- `python3 -m py_compile scripts/changerail_repository_knowledge.py scripts/changerail_maintenance.py scripts/smoke-repository-knowledge.py scripts/smoke-contract-schemas.py` — passed.
+- `python3 scripts/smoke-contract-schemas.py` — passed,
+  `SMOKE_CONTRACT_SCHEMAS_OK (15 schemas)`; covers missing required
+  `detectors` rejection for lifecycle reports.
+- `python3 scripts/smoke-repository-knowledge.py` — passed,
+  `SMOKE_REPOSITORY_KNOWLEDGE_OK`; covers review-fix regressions for blocked
+  state writes outside `.runtime/changerail/maintenance/`, active date-only
+  waiver normalization, and card bridge rejection for absolute/secret
+  report-sourced material, including secret-like `finding.path` values.
+- `openspec validate add-maintenance-report-and-finding-state --strict` —
+  passed before archive.
+- `openspec validate add-maintenance-baseline-and-card-dedup --strict` —
+  passed before archive.
+- `openspec validate changerail-repository-knowledge --strict` — passed after
+  spec sync.
+- `openspec validate --all --strict` — passed after spec sync.
+- `python3 scripts/public-surface-scan.py` — passed,
+  `summary: pass (822 files scanned, 0 findings)`.
+- `python3 scripts/public-surface-scan.py --history` — passed,
+  `summary: pass (822 files scanned, 0 findings)`.
+- `python3 scripts/run-release-baseline.py` — passed all 30 release baseline
+  steps.
+- `git diff --check` — passed.
+- RED evidence is not applicable as a separate first-failing test run because
+  this card extends CLI/schema/docs smoke coverage in the existing smoke-test
+  harness; the added assertions would fail if lifecycle identity,
+  evidence-fingerprint, corrupt-state, baseline preview/write, triage or card
+  dedup behavior regressed.
+
+## Archive
+- `openspec/changes/archive/2026-08-09-add-maintenance-report-and-finding-state/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-baseline-and-card-dedup/`
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
 - `openspec/board/4.done/060-02-add-deterministic-knowledge-integrity-gate.md`
+- `openspec/changes/archive/2026-08-09-add-maintenance-report-and-finding-state/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-baseline-and-card-dedup/`
 - `schemas/changerail-review-verdict.schema.json`
 - `schemas/changerail-review-cycle-history.schema.json`
 - `schemas/changerail-evidence-index.schema.json`
@@ -151,7 +179,7 @@ explicit continuity limits.
 - `060-02-add-deterministic-knowledge-integrity-gate`
 
 ### Related
-- `openspec/changes/add-maintenance-report-and-finding-state/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-report-and-finding-state/`
 
 ## Change 2: `add-maintenance-baseline-and-card-dedup`
 
@@ -171,17 +199,64 @@ Add tracked baseline/waiver semantics and explicit preview/write card bridge.
 - `add-maintenance-report-and-finding-state`
 
 ### Related
-- `openspec/changes/add-maintenance-baseline-and-card-dedup/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-baseline-and-card-dedup/`
 
 ## Result
-Dependency contract refreshed; accepted for implementation.
+Implemented, archived, independently reviewed with `go` in review cycle 4 and
+finalized through ChangeRail scoped publish; exact payload and published commit
+ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Run this single card through supervised `$chrl-deliver`; after publication,
-  execute the series MVP exit audit before admitting `060-04`.
+- done
 
 ## Log
 - `2026-08-09T12:35:25Z` — story extracted with durable board dedup boundary.
 - `2026-08-09T15:40:00Z` — refreshed against delivered `060-02` scan and adapter
   contracts; lifecycle schemas, identity material, explicit writes and durable
   board marker were frozen, and the story moved to `2.todo`.
+- `2026-08-09T15:44:16Z` — `$changerail-ff` created apply-ready artifacts for
+  `add-maintenance-report-and-finding-state` and
+  `add-maintenance-baseline-and-card-dedup`; both changes passed strict
+  OpenSpec validation and the story moved to `3.inprogress`.
+- `2026-08-09T16:00:33Z` — implemented lifecycle report/state, baseline,
+  triage and board-card bridge contracts; schema/repository-knowledge smokes,
+  OpenSpec validation and whitespace checks passed; both card-owned changes
+  were archived.
+- `2026-08-09T16:11:38Z` — public-surface scans and full release baseline
+  passed; card is ready for fresh independent review.
+- `2026-08-09T16:18:20Z` — fresh independent review cycle 1 returned
+  `no-go` with blockers R1/R2/R3 for custom state path scope, unsafe
+  report-sourced card material and active date-only waiver normalization.
+- `2026-08-09T16:25:48Z` — same-card rescue attempt 1 fixed R1/R2/R3 and added
+  focused `smoke-repository-knowledge.py` regression coverage; py_compile,
+  schema smoke, repository-knowledge smoke, OpenSpec validation and
+  `git diff --check` passed.
+- `2026-08-09T16:42:53Z` — post-rescue public-surface scans passed with
+  822 files and 0 findings; `scripts/run-release-baseline.py` passed all 30
+  steps.
+- `2026-08-09T16:55:40Z` — fresh independent review cycle 2 returned
+  `no-go` with blocker R1 for secret-like report-sourced `finding.path`
+  material reaching generated tracked board cards.
+- `2026-08-09T16:58:58Z` — same-card rescue attempt 2 fixed R1 by rejecting
+  secret-like `finding.path` before card rendering and added focused smoke
+  coverage for the path-only report fixture; py_compile,
+  repository-knowledge smoke, public-surface scan and `git diff --check`
+  passed.
+- `2026-08-09T17:09:51Z` — post-rescue attempt 2 public-surface scans passed
+  with 822 files and 0 findings; `scripts/run-release-baseline.py` passed all
+  30 steps.
+- `2026-08-09T17:25:34Z` — fresh independent review cycle 3 returned
+  `no-go` with blocker R1 because `changerail.maintenance-report.v1` defined
+  top-level `detectors` but did not require it, despite the card/spec detector
+  summary contract.
+- `2026-08-09T17:28:11Z` — same-card rescue attempt 3 fixed R1 by requiring
+  top-level `detectors` in `schemas/changerail-maintenance-report.schema.json`
+  and adding negative schema smoke coverage; py_compile, schema smoke,
+  repository-knowledge smoke, focused missing-detectors probe, OpenSpec
+  validation, public-surface scan and `git diff --check` passed.
+- `2026-08-09T17:38:15Z` — post-rescue attempt 3 public-surface scans passed
+  with 822 files and 0 findings; `scripts/run-release-baseline.py` passed all
+  30 steps.
+- `2026-08-09T17:47:46Z` — fresh independent review cycle 4 returned `go`;
+  prior blockers are fixed, including required top-level lifecycle `detectors`.
+- 2026-08-09T17:52:11Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
