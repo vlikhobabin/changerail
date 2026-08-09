@@ -1,7 +1,7 @@
 # Добавить lifecycle maintenance findings
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -16,7 +16,7 @@ story
 `03`
 
 ## Planning State
-blocked on stable scan output from `060-02`
+deliver-ready; dependency `060-02` published as commit `dd9fb3e`
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -27,6 +27,55 @@ blocked on stable scan output from `060-02`
 Опубликовать maintenance report contract, разделить finding identity и evidence,
 сохранить bounded runtime history, добавить tracked baseline/waivers и безопасный
 preview/upsert bridge в ChangeRail board.
+
+## Delivered Dependency Contract
+- `bin/changerail-maintenance scan --json` emits validated
+  `changerail.maintenance-scan-report.v1`; invalid detector output is rejected
+  before core normalization.
+- Each detector result is `changerail.maintenance-detector-result.v1`; a raw
+  finding has stable producer fields `id`, `severity`, `code`, `message` and
+  optional repository-relative subject/evidence fields.
+- Scan exit codes are `0` below threshold, `1` at or above threshold and `2` for
+  invalid configuration or an incomplete/invalid report.
+- Adapter execution is shell-free, repository-root scoped and timeout bounded.
+  Lifecycle processing consumes this public output instead of importing scan
+  internals.
+
+## Frozen Implementation Contract
+- `changerail.maintenance-report.v1` is a normalized lifecycle report distinct
+  from `changerail.maintenance-scan-report.v1`; normalization MUST reject an
+  incomplete or schema-invalid source scan.
+- Public supporting schemas are versioned independently for lifecycle state,
+  baseline/waivers and triage annotations. Existing scan schema ids stay
+  unchanged.
+- Identity material is canonical JSON over `identity_version`, detector result
+  id, finding code/rule and a normalized repository-relative subject. Message,
+  evidence, severity, timestamps and absolute workspace root do not participate
+  in identity. The public fingerprint form is `sha256:<lowercase-hex>`.
+- Evidence fingerprint is canonical JSON over sanitized material evidence and
+  changes without changing identity. Unknown absolute paths or secret-like raw
+  values fail closed instead of being copied into lifecycle output.
+- Runtime state is stored atomically below
+  `.runtime/changerail/maintenance/state.json`; reports, previews and retained
+  evidence remain below the same ignored root. A corrupt or unsupported state
+  version is an error and is not replaced implicitly.
+- Lifecycle normalization is read-only by default. Updating durable runtime
+  state requires explicit `--write-state`; without restored state, `first_seen`
+  is the current observation and no cross-run continuity is claimed.
+- `.changerail/maintenance-baseline.yaml` has separate `accepted` and `waivers`
+  collections. Acceptance is keyed by identity fingerprint. A waiver also
+  requires `owner`, `reason` and an ISO-8601 `expires_at` or `review_after`
+  boundary; expired entries do not suppress an open finding.
+- `accept-baseline` and `cards` emit schema-valid preview artifacts by default.
+  Only explicit `--write` may change their declared tracked target; `triage`
+  only validates/normalizes supplied annotations and never invokes an LLM.
+- Written cards carry exactly one machine-readable line
+  `Maintenance Origin: <sha256 fingerprint>`. Before create/update, the bridge
+  scans `1.backlog` through `5.canceled`; the same identity updates the existing
+  card evidence summary and never creates another card.
+- Card paths, titles and summaries contain only sanitized repository-relative
+  metadata. Raw detector output, source snippets and absolute consumer paths
+  remain indirect runtime references.
 
 ## Acceptance
 - Опубликована schema `changerail.maintenance-report.v1` с run metadata,
@@ -53,7 +102,8 @@ preview/upsert bridge в ChangeRail board.
   file при explicit `--write`.
 - `triage` принимает schema-bound agent annotations, но не вызывает LLM.
 - Card bridge делает preview в runtime state по умолчанию; explicit write
-  создает или обновляет card с `Maintenance Origin` fingerprint marker.
+  создает или обновляет card с exact `Maintenance Origin: <sha256 fingerprint>`
+  marker.
 - Перед card write bridge сканирует все board lanes по identity fingerprint и
   не создает duplicate card; новое evidence обновляет origin/evidence summary.
 - Tracked card не содержит raw output, absolute consumer paths, credentials или
@@ -77,7 +127,7 @@ preview/upsert bridge в ChangeRail board.
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/1.backlog/060-02-add-deterministic-knowledge-integrity-gate.md`
+- `openspec/board/4.done/060-02-add-deterministic-knowledge-integrity-gate.md`
 - `schemas/changerail-review-verdict.schema.json`
 - `schemas/changerail-review-cycle-history.schema.json`
 - `schemas/changerail-evidence-index.schema.json`
@@ -124,10 +174,14 @@ Add tracked baseline/waiver semantics and explicit preview/write card bridge.
 - `openspec/changes/add-maintenance-baseline-and-card-dedup/`
 
 ## Result
-Not started.
+Dependency contract refreshed; accepted for implementation.
 
 ## Next
-- Refresh after `060-02`; completion of this story closes the series MVP gate.
+- Run this single card through supervised `$chrl-deliver`; after publication,
+  execute the series MVP exit audit before admitting `060-04`.
 
 ## Log
 - `2026-08-09T12:35:25Z` — story extracted with durable board dedup boundary.
+- `2026-08-09T15:40:00Z` — refreshed against delivered `060-02` scan and adapter
+  contracts; lifecycle schemas, identity material, explicit writes and durable
+  board marker were frozen, and the story moved to `2.todo`.

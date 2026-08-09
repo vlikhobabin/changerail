@@ -72,7 +72,7 @@ Fix mode остается отдельной карточкой `060-06`.
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/1.backlog/060-03-add-maintenance-findings-lifecycle.md`
+- `openspec/board/2.todo/060-03-add-maintenance-findings-lifecycle.md`
 - `skills/changerail-deliver/SKILL.md`
 - `bin/changerail-delivery-runner`
 - `templates/project/`

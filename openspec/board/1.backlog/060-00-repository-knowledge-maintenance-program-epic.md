@@ -16,9 +16,9 @@ epic
 `00`
 
 ## Planning State
-series delivery in progress; `060-01` is published in `4.done`, `060-02` passed
-its dependency/readiness gate and is in `2.todo`, and later cards remain in
-`1.backlog` until their gates pass
+series delivery in progress; `060-01` and `060-02` are published in `4.done`,
+`060-03` passed its dependency/readiness gate and is in `2.todo`, and later
+cards remain in `1.backlog` until their gates pass
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -157,12 +157,12 @@ delivery runner или consumer-owned repository policy.
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
 
 ## Result
-Planning baseline and `060-01` repository knowledge contract are published;
-the deterministic scan delivery unit is admitted to implementation.
+Planning baseline, repository knowledge contract and deterministic scan are
+published; the lifecycle/dedup delivery unit is admitted to implementation.
 
 ## Next
-- Выполнить `060-02` через supervised single-card `$chrl-deliver`, затем
-  провести MVP dependency/readiness audit для `060-03`.
+- Выполнить `060-03` через supervised single-card `$chrl-deliver`, затем
+  провести MVP exit audit и dependency/readiness audit для `060-04`.
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
@@ -173,3 +173,7 @@ the deterministic scan delivery unit is admitted to implementation.
   `2.todo`; запущен последовательный delivery cycle серии.
 - `2026-08-09T14:03:03Z` — `060-01` опубликована в `4.done` после двух review
   cycles; `060-02` актуализирована по delivered contract и допущена в `2.todo`.
+- `2026-08-09T15:36:00Z` — `060-02` опубликована в `4.done` после двух review
+  cycles; scan report, detector adapter и fail-closed exit semantics проверены.
+- `2026-08-09T15:40:00Z` — `060-03` актуализирована по фактическому scan
+  contract, получила frozen lifecycle/dedup boundary и допущена в `2.todo`.
