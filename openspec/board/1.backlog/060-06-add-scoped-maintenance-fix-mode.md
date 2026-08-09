@@ -16,7 +16,8 @@ story
 `06`
 
 ## Planning State
-deferred; requires explicit readiness decision after `060-05` quality evidence
+deferred; `060-05` is admitted to delivery, but this card still requires an
+explicit readiness decision from its resulting quality/proposal evidence
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -76,7 +77,7 @@ ChangeRail review/publish flow. Карточка намеренно не вхо�
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/1.backlog/060-05-connect-feedback-and-quality-rollup.md`
+- `openspec/board/2.todo/060-05-connect-feedback-and-quality-rollup.md`
 - `skills/changerail-review/SKILL.md`
 - `skills/changerail-pub/SKILL.md`
 
@@ -110,3 +111,6 @@ Not started; readiness gate not evaluated.
 ## Log
 - `2026-08-09T12:35:25Z` — fix mode separated from MVP and given an explicit
   evidence-based entry gate.
+- `2026-08-09T19:40:00Z` — dependency link refreshed after `060-05` admission;
+  no fix-mode readiness is inferred before actual accepted/rejected proposal
+  evidence exists.

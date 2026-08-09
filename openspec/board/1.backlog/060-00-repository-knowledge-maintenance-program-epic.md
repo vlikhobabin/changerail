@@ -16,9 +16,9 @@ epic
 `00`
 
 ## Planning State
-series delivery in progress; `060-01`..`060-03` are published in `4.done`, the
-MVP exit gate passed, `060-04` is admitted to `2.todo`, and later cards remain
-in `1.backlog` until their gates pass
+series delivery in progress; `060-01`..`060-04` are published in `4.done`, the
+MVP and operational gates passed, `060-05` is admitted to `2.todo`, and `060-06`
+remains in `1.backlog` until its evidence gate is evaluated
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -157,12 +157,13 @@ delivery runner или consumer-owned repository policy.
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
 
 ## Result
-The series MVP is published and independently audited; the operational
-skill/scheduler/bootstrap delivery unit is admitted to implementation.
+The series MVP and operational skill/scheduler/bootstrap unit are published and
+independently audited; feedback/quality/dogfood is admitted to implementation.
 
 ## Next
-- Выполнить `060-04` через supervised single-card `$chrl-deliver`, затем
-  актуализировать feedback/quality semantics карточки `060-05`.
+- Выполнить `060-05` через supervised single-card `$chrl-deliver`, затем
+  оценить `060-06` по фактическим quality/proposal evidence без автоматического
+  допуска fix mode.
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
@@ -183,3 +184,7 @@ skill/scheduler/bootstrap delivery unit is admitted to implementation.
 - `2026-08-09T17:56:40Z` — MVP exit audit подтвердил schema-backed broken
   fixtures, identity/evidence continuity, durable dedup и default no-mutation;
   `060-04` получила additive bootstrap boundary и допущена в `2.todo`.
+- `2026-08-09T19:40:00Z` — `060-04` опубликована commit `1726eb6` после fresh
+  review `go` с нулем findings и release baseline 31/31; `060-05` обновлена по
+  delivered runner/bootstrap contracts, получила frozen feedback/quality
+  semantics и допущена в `2.todo`.
