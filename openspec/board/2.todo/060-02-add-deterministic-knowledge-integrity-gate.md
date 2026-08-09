@@ -1,7 +1,7 @@
 # Добавить deterministic knowledge integrity gate
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -16,11 +16,12 @@ story
 `02`
 
 ## Planning State
-blocked on `060-01`; detector semantics captured for refresh after contract delivery
+deliver-ready against the published `060-01` catalog, policy and CLI contract;
+OpenSpec artifacts are delegated to the internal `ff` phase of `$chrl-deliver`
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
-- `060-01-establish-repository-knowledge-contract.md`
+- `openspec/board/4.done/060-01-establish-repository-knowledge-contract.md`
 - ArchUnit and other native architecture checker adapter patterns.
 
 ## Summary
@@ -31,6 +32,12 @@ consumer-owned architecture/instruction checks.
 ## Acceptance
 - `bin/changerail-maintenance scan` работает без LLM, не меняет repository и
   выводит schema-bound report либо fail-closed configuration diagnostic.
+- Public schemas используют ids `changerail.maintenance-scan-report.v1` и
+  `changerail.maintenance-detector-result.v1`; report отделяет raw findings,
+  detector errors и configuration diagnostics.
+- Существующий `changerail.maintenance-policy.v1` расширяется только optional
+  scan/adapters полями; минимальный policy, опубликованный в `060-01`, остается
+  валидным и сохраняет `additionalProperties: false` на contract-owned objects.
 - Policy определяет include/exclude globs, enabled detectors, severity threshold,
   timeout и per-detector options; пустой inventory не превращается в silent pass.
 - Catalog coverage проверяет явно настроенный documentation universe, а не все
@@ -53,6 +60,10 @@ consumer-owned architecture/instruction checks.
   появления стабильного output contract; thresholds не дублируются в серии `060`.
 - Scan exit behavior разделяет successful report generation и configured
   `--fail-on` threshold для CI gate.
+- Exit `0` означает созданный complete report ниже threshold, exit `1` —
+  созданный report, достигший `--fail-on`, exit `2` — invalid configuration
+  или невозможность создать schema-valid report; JSON stdout остается одним
+  machine-readable document во всех режимах.
 - Focused fixtures доказывают link drift, stale index, orphan record, forbidden
   active reference, adapter timeout и invalid adapter output.
 
@@ -60,6 +71,18 @@ consumer-owned architecture/instruction checks.
 - `060-01-establish-repository-knowledge-contract`
 - Instruction-budget integration optionally depends on the relevant delivered
   change from `050-harden-greenfield-consumer-bootstrap`.
+
+## Delivered Dependency Contract
+- Loader и safe-path semantics: `scripts/changerail_repository_knowledge.py`.
+- CLI extension point: `scripts/changerail_maintenance.py` и wrappers
+  `bin/changerail-maintenance{,.cmd}`.
+- Published policy currently requires only `schema`, `catalog_path` and
+  `generated_index_path`; scan configuration must be an additive opt-in.
+- Published catalog records and deterministic index behavior are specified in
+  `openspec/specs/changerail-repository-knowledge/spec.md`.
+- Instruction-budget adapter не входит в эту delivery: card `050` еще не
+  опубликовала stable producer output contract. Generic adapter protocol must
+  allow it to be connected later without schema changes.
 
 ## Change Set
 - none yet
@@ -74,8 +97,9 @@ consumer-owned architecture/instruction checks.
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/1.backlog/060-01-establish-repository-knowledge-contract.md`
+- `openspec/board/4.done/060-01-establish-repository-knowledge-contract.md`
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
+- `openspec/specs/changerail-repository-knowledge/spec.md`
 - `openspec/specs/changerail-drift-gate/spec.md`
 
 ## Change 1: `add-deterministic-knowledge-integrity-scan`
@@ -121,10 +145,14 @@ Define and implement the bounded native adapter execution and output protocol.
 - `openspec/changes/add-maintenance-detector-adapter-protocol/`
 
 ## Result
-Not started.
+Readiness accepted against the published `060-01` contract; implementation not
+started.
 
 ## Next
-- Refresh after `060-01` delivery, then run readiness review.
+- Run `$chrl-deliver openspec/board/2.todo/060-02-add-deterministic-knowledge-integrity-gate.md`.
 
 ## Log
 - `2026-08-09T12:35:25Z` — story extracted with deterministic/adapter boundary.
+- `2026-08-09T14:04:07Z` — refreshed against delivered `060-01`; fixed report
+  schema ids, additive policy and exit contracts, deferred `050` integration,
+  and moved the card to `2.todo`.

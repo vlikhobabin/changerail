@@ -16,8 +16,9 @@ epic
 `00`
 
 ## Planning State
-series delivery started; `060-01` passed readiness review and is in `2.todo`,
-later cards remain in `1.backlog` until their dependency and readiness gates pass
+series delivery in progress; `060-01` is published in `4.done`, `060-02` passed
+its dependency/readiness gate and is in `2.todo`, and later cards remain in
+`1.backlog` until their gates pass
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -156,11 +157,12 @@ delivery runner или consumer-owned repository policy.
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
 
 ## Result
-Planning baseline published; first delivery unit admitted to implementation.
+Planning baseline and `060-01` repository knowledge contract are published;
+the deterministic scan delivery unit is admitted to implementation.
 
 ## Next
-- Выполнить `060-01` через supervised single-card `$chrl-deliver`, затем
-  актуализировать `060-02` по опубликованному contract.
+- Выполнить `060-02` через supervised single-card `$chrl-deliver`, затем
+  провести MVP dependency/readiness audit для `060-03`.
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
@@ -169,3 +171,5 @@ Planning baseline published; first delivery unit admitted to implementation.
   зафиксированы architecture decisions, MVP boundary и шесть executable stories.
 - `2026-08-09T13:16:00Z` — `060-01` прошла readiness review и перемещена в
   `2.todo`; запущен последовательный delivery cycle серии.
+- `2026-08-09T14:03:03Z` — `060-01` опубликована в `4.done` после двух review
+  cycles; `060-02` актуализирована по delivered contract и допущена в `2.todo`.
