@@ -1,0 +1,33 @@
+{
+  "schema": "changerail.delivery-run.v1",
+  "run_id": "example-delivered",
+  "updated_at": "2026-08-09T00:00:00Z",
+  "workspace": {
+    "root": "/opt/changerail"
+  },
+  "card": {
+    "id": "example-card",
+    "path": "openspec/board/4.done/example-card.md"
+  },
+  "phase": "terminal",
+  "result": "DELIVERED",
+  "timestamps": {
+    "started_at": "2026-08-09T00:00:00Z",
+    "ended_at": "2026-08-09T00:01:00Z"
+  },
+  "command": {
+    "argv": [
+      "bin/changerail-delivery-runner",
+      "run",
+      "openspec/board/2.todo/example-card.md"
+    ],
+    "launcher": "bin/changerail-delivery-runner",
+    "stdin": "closed",
+    "json": true
+  },
+  "terminal_outcome": "DELIVERED",
+  "usage": {
+    "available": false,
+    "reason": "fixture"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "schema": "changerail.maintenance-report.v1",
+  "generated_at": "2026-08-09T00:00:00Z",
+  "workspace": {
+    "root": "/opt/changerail"
+  },
+  "source_scan": {
+    "schema": "changerail.maintenance-scan-report.v1",
+    "generated_at": "2026-08-09T00:00:00Z",
+    "catalog_path": ".changerail/knowledge.yaml",
+    "policy_path": ".changerail/maintenance.yaml",
+    "complete": true
+  },
+  "state": {
+    "path": ".runtime/changerail/maintenance/state.json",
+    "restored": true,
+    "written": false,
+    "continuity": "restored"
+  },
+  "complete": true,
+  "fail_on": "major",
+  "summary": {
+    "detectors": 1,
+    "findings": 2,
+    "open": 2,
+    "accepted": 0,
+    "waived": 0,
+    "diagnostics": 0,
+    "max_severity": "major",
+    "threshold_reached": true
+  },
+  "detectors": [
+    {
+      "id": "catalog-coverage",
+      "status": "fail",
+      "findings": 2,
+      "errors": 0
+    }
+  ],
+  "findings": [
+    {
+      "fingerprint": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "evidence_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "detector": "catalog-coverage",
+      "rule": "uncovered_knowledge_file",
+      "severity": "major",
+      "confidence": 1.0,
+      "path": "docs/example-a.md",
+      "subject": {
+        "path": "docs/example-a.md"
+      },
+      "evidence_refs": [],
+      "remediation": null,
+      "first_seen": "2026-08-09T00:00:00Z",
+      "last_seen": "2026-08-09T00:00:00Z",
+      "owner": null,
+      "risk_class": "maintenance",
+      "status": "open"
+    },
+    {
+      "fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "evidence_fingerprint": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "detector": "generated-freshness",
+      "rule": "stale_generated_output",
+      "severity": "major",
+      "confidence": 1.0,
+      "path": ".changerail/KNOWLEDGE.md",
+      "subject": {
+        "path": ".changerail/KNOWLEDGE.md"
+      },
+      "evidence_refs": [],
+      "remediation": null,
+      "first_seen": "2026-08-09T00:00:00Z",
+      "last_seen": "2026-08-09T00:00:00Z",
+      "owner": null,
+      "risk_class": "maintenance",
+      "status": "open"
+    }
+  ],
+  "diagnostics": []
+}

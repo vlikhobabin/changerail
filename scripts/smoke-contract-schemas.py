@@ -25,6 +25,8 @@ from changerail_repository_knowledge import (  # noqa: E402
     validate_maintenance_run,
     validate_maintenance_state,
     validate_maintenance_triage,
+    validate_proposal_decision,
+    validate_quality_rollup,
     validate_scan_report,
 )
 from changerail_review_verdict import _validate_verdict  # noqa: E402
@@ -604,6 +606,43 @@ def maintenance_triage() -> dict[str, Any]:
     }
 
 
+def maintenance_quality_rollup() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-quality-rollup.v1",
+        "generated_at": DATE,
+        "workspace": {"root": "/opt/changerail"},
+        "inputs": {
+            "reports": [".runtime/changerail/maintenance/report-latest.json"],
+            "histories": [".runtime/changerail/maintenance/report-earlier.json"],
+            "triage": [".runtime/changerail/maintenance/triage.json"],
+            "proposals": [".runtime/changerail/maintenance/proposals/proposal-accepted.json"],
+        },
+        "metrics": [
+            {"id": "findings.open", "value": 1, "unit": "count", "status": "known"},
+            {"id": "instruction.bytes", "value": "unknown", "unit": "bytes", "status": "unknown"},
+        ],
+        "diagnostics": [],
+    }
+
+
+def maintenance_proposal_decision() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-proposal-decision.v1",
+        "proposal_id": "schema-smoke-proposal",
+        "finding_fingerprint": SHA,
+        "transformation_class": "docs-update",
+        "decision": "accepted",
+        "decided_at": DATE,
+        "evidence_refs": [
+            {
+                "kind": "proposal",
+                "key": "path",
+                "value": ".runtime/changerail/maintenance/proposals/schema-smoke-proposal.json",
+            }
+        ],
+    }
+
+
 def maintenance_run() -> dict[str, Any]:
     return {
         "schema": "changerail.maintenance-run.v1",
@@ -766,6 +805,14 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
     "changerail-maintenance-triage.schema.json": (
         maintenance_triage,
         validate_maintenance_triage,
+    ),
+    "changerail-maintenance-quality-rollup.schema.json": (
+        maintenance_quality_rollup,
+        validate_quality_rollup,
+    ),
+    "changerail-maintenance-proposal-decision.schema.json": (
+        maintenance_proposal_decision,
+        validate_proposal_decision,
     ),
     "changerail-maintenance-run.schema.json": (
         maintenance_run,

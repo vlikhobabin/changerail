@@ -1,0 +1,9 @@
+{
+  "schema": "changerail.maintenance-proposal-decision.v1",
+  "proposal_id": "proposal-rejected",
+  "finding_fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "transformation_class": "automation",
+  "decision": "rejected",
+  "decided_at": "2026-08-09T00:45:00Z",
+  "evidence_refs": []
+}

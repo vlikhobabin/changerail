@@ -1,0 +1,84 @@
+{
+  "schema": "changerail.maintenance-report.v1",
+  "generated_at": "2026-08-09T01:00:00Z",
+  "workspace": {
+    "root": "/opt/changerail"
+  },
+  "source_scan": {
+    "schema": "changerail.maintenance-scan-report.v1",
+    "generated_at": "2026-08-09T01:00:00Z",
+    "catalog_path": ".changerail/knowledge.yaml",
+    "policy_path": ".changerail/maintenance.yaml",
+    "complete": true
+  },
+  "state": {
+    "path": ".runtime/changerail/maintenance/state.json",
+    "restored": true,
+    "written": false,
+    "continuity": "restored"
+  },
+  "complete": true,
+  "fail_on": "major",
+  "summary": {
+    "detectors": 1,
+    "findings": 2,
+    "open": 0,
+    "accepted": 1,
+    "waived": 1,
+    "diagnostics": 0,
+    "max_severity": "none",
+    "threshold_reached": false
+  },
+  "detectors": [
+    {
+      "id": "generated-freshness",
+      "status": "fail",
+      "findings": 1,
+      "errors": 0
+    }
+  ],
+  "findings": [
+    {
+      "fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "evidence_fingerprint": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "detector": "generated-freshness",
+      "rule": "stale_generated_output",
+      "severity": "major",
+      "confidence": 1.0,
+      "path": ".changerail/KNOWLEDGE.md",
+      "subject": {
+        "path": ".changerail/KNOWLEDGE.md"
+      },
+      "evidence_refs": [],
+      "remediation": null,
+      "first_seen": "2026-08-09T00:00:00Z",
+      "last_seen": "2026-08-09T01:00:00Z",
+      "owner": "ChangeRail core",
+      "risk_class": "maintenance",
+      "status": "accepted",
+      "status_reason": "accepted fixture"
+    },
+    {
+      "fingerprint": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "evidence_fingerprint": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "detector": "catalog-coverage",
+      "rule": "waived_fixture",
+      "severity": "minor",
+      "confidence": 1.0,
+      "path": "docs/example-b.md",
+      "subject": {
+        "path": "docs/example-b.md"
+      },
+      "evidence_refs": [],
+      "remediation": null,
+      "first_seen": "2026-08-09T01:00:00Z",
+      "last_seen": "2026-08-09T01:00:00Z",
+      "owner": "ChangeRail core",
+      "risk_class": "maintenance",
+      "status": "waived",
+      "status_reason": "waived fixture",
+      "suppressed_until": "2026-12-31T00:00:00Z"
+    }
+  ],
+  "diagnostics": []
+}

@@ -1,0 +1,40 @@
+{
+  "schema": "changerail.review-cycle-history.v1",
+  "updated_at": "2026-08-09T00:00:00Z",
+  "card": {
+    "id": "example-card",
+    "path": "openspec/board/3.inprogress/example-card.md"
+  },
+  "workspace": {
+    "root": "/opt/changerail"
+  },
+  "cycles": [
+    {
+      "review_cycle": 1,
+      "result": "no-go",
+      "reviewed_at": "2026-08-09T00:00:00Z",
+      "verdict_path": ".runtime/changerail/reviews/example-card.json",
+      "findings": {
+        "blocker": 1,
+        "major": 0,
+        "minor": 0
+      },
+      "finding_details": [
+        {
+          "id": "R1",
+          "severity": "blocker",
+          "summary": "Unsafe path fixture.",
+          "paths": [
+            "/home/example/private.md"
+          ]
+        }
+      ],
+      "acceptance": {
+        "pass": 0,
+        "fail": 1,
+        "unverifiable": 0,
+        "not_applicable": 0
+      }
+    }
+  ]
+}

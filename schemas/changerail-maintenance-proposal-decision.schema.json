@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-maintenance-proposal-decision.schema.json",
+  "title": "ChangeRail maintenance proposal decision",
+  "type": "object",
+  "required": [
+    "schema",
+    "proposal_id",
+    "finding_fingerprint",
+    "transformation_class",
+    "decision",
+    "decided_at",
+    "evidence_refs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "changerail.maintenance-proposal-decision.v1"
+    },
+    "proposal_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "finding_fingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "transformation_class": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "decision": {
+      "enum": ["accepted", "rejected"]
+    },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidenceRef"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "evidenceRef": {
+      "type": "object",
+      "required": ["kind", "key", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": ["string", "number", "integer", "boolean", "null"]
+        }
+      }
+    }
+  }
+}

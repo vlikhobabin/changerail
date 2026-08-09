@@ -15,6 +15,18 @@ records:
     status: active
     type: explanation
     owner: ChangeRail core
+    source_globs:
+      - docs/how-it-works.md
+      - docs/openspec-lifecycle.md
+      - docs/board-and-two-agent-feature-flow.md
+    verify:
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
+  - path: SECURITY.md
+    status: active
+    type: reference
+    owner: ChangeRail core
     source_globs: []
     verify:
       - python3 scripts/public-surface-scan.py
@@ -30,6 +42,18 @@ records:
     verify:
       - ./bin/openspec validate --all --strict
       - git diff --check
+    review_after: null
+    supersedes: []
+  - path: docs/board-and-two-agent-feature-flow.md
+    status: active
+    type: how-to
+    owner: ChangeRail core
+    source_globs:
+      - openspec/board/README.md
+      - skills/changerail-*/SKILL.md
+    verify:
+      - ./bin/openspec validate --all --strict
+      - python3 scripts/public-surface-scan.py
     review_after: null
     supersedes: []
   - path: docs/changerail-contracts.md
@@ -52,5 +76,90 @@ records:
       - openspec/specs/changerail-*/spec.md
     verify:
       - ./bin/openspec validate --all --strict
+    review_after: null
+    supersedes: []
+  - path: docs/compatibility.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs:
+      - bin/*
+      - requirements-runtime.txt
+      - requirements-dev.txt
+    verify:
+      - python3 scripts/run-release-baseline.py
+    review_after: null
+    supersedes: []
+  - path: docs/consumer-adoption-runbook.md
+    status: active
+    type: runbook
+    owner: ChangeRail core
+    source_globs:
+      - templates/project/**
+      - bin/bootstrap-project
+      - bin/verify-project
+    verify:
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
+  - path: docs/how-it-works.md
+    status: active
+    type: explanation
+    owner: ChangeRail core
+    source_globs:
+      - docs/openspec-lifecycle.md
+      - docs/board-and-two-agent-feature-flow.md
+      - AGENTS.shared.md
+    verify:
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
+  - path: docs/migration-guide.md
+    status: active
+    type: how-to
+    owner: ChangeRail core
+    source_globs:
+      - templates/project/**
+      - docs/consumer-adoption-runbook.md
+    verify:
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
+  - path: docs/openspec-lifecycle.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs:
+      - openspec/config.yaml
+      - openspec/specs/**/*.md
+      - skills/openspec-*/SKILL.md
+    verify:
+      - ./bin/openspec validate --all --strict
+    review_after: null
+    supersedes: []
+  - path: docs/release-discipline.md
+    status: active
+    type: runbook
+    owner: ChangeRail core
+    source_globs:
+      - scripts/run-release-baseline.py
+      - scripts/public-surface-scan.py
+      - scripts/smoke-*.py
+    verify:
+      - python3 scripts/run-release-baseline.py
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
+  - path: docs/wiring-discovery.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs:
+      - .mcp.json
+      - .codex/config.toml
+      - claude/commands/changerail/*.md
+    verify:
+      - python3 -m json.tool .mcp.json
+      - python3 scripts/public-surface-scan.py
     review_after: null
     supersedes: []

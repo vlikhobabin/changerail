@@ -1,0 +1,13 @@
+{
+  "schema": "changerail.maintenance-triage.v1",
+  "generated_at": "2026-08-09T00:30:00Z",
+  "annotations": [
+    {
+      "fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "owner": "ChangeRail core",
+      "risk_class": "maintenance",
+      "status": "accepted",
+      "reason": "quality fixture triage"
+    }
+  ]
+}

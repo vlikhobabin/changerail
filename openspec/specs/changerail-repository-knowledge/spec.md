@@ -621,3 +621,225 @@ behavior.
 - **WHEN** a maintainer reads the CI maintenance example
 - **THEN** read-only analysis is separate from any job that would need write
   permissions, API credentials, comments, pull requests or publication
+
+### Requirement: Maintenance feedback command
+ChangeRail MUST provide a read-only `bin/changerail-maintenance feedback`
+command that validates explicit feedback input records and emits exactly one
+`changerail.maintenance-detector-result.v1` JSON document for a declared
+adapter id.
+
+#### Scenario: Feedback emits adapter detector result
+- **WHEN** `bin/changerail-maintenance feedback --adapter-id lifecycle --review-history <path> --json` receives a schema-valid review-cycle history record
+- **THEN** stdout contains exactly one `changerail.maintenance-detector-result.v1` document
+- **AND** the detector result id is `adapter-lifecycle`
+- **AND** the command does not modify tracked files, ignored runtime files or external systems
+
+#### Scenario: Mixed invalid input fails closed
+- **WHEN** feedback receives one valid record and one malformed, unsafe or schema-invalid record
+- **THEN** the output detector result contains detector errors describing the invalid record
+- **AND** the result status is `error`
+- **AND** the command does not silently discard the invalid record while claiming a complete pass
+
+### Requirement: Review history feedback normalization
+Maintenance feedback MUST normalize schema-valid `changerail.review-cycle-history.v1`
+review finding details into maintenance detector findings without copying review
+detail prose or raw file content.
+
+#### Scenario: Review finding preserves identity metadata
+- **WHEN** feedback normalizes a review-cycle history finding detail
+- **THEN** the resulting detector finding preserves the source record reference, review cycle, original finding id and severity
+- **AND** safe affected repository-relative paths are preserved as finding subjects
+- **AND** stable subject identity includes the original finding id so unrelated review findings do not collapse onto one fingerprint
+
+#### Scenario: Review prose is not copied
+- **WHEN** a review finding detail contains summary or detail prose
+- **THEN** feedback emits only a generic detector finding message and scalar source metadata
+- **AND** it does not copy the review summary, detail prose or raw file content into normalized evidence
+
+#### Scenario: Unsafe review path fails closed
+- **WHEN** a review finding detail contains an absolute path, traversal path or repository root escape
+- **THEN** feedback emits an `unsupported_review_history` detector error
+- **AND** the unsafe path is not copied into the detector finding output
+
+### Requirement: Blocked delivery-run feedback normalization
+Maintenance feedback MUST normalize only schema-valid delivery-run records that
+represent structured blocked terminal outcomes.
+
+#### Scenario: Structured blocked run creates finding
+- **WHEN** feedback receives a `changerail.delivery-run.v1` record whose `result` and `terminal_outcome` are `BLOCKED` and whose `terminal_reason` is present
+- **THEN** feedback emits a detector finding with the source record reference, card id, terminal reason and retained evidence path metadata when present
+- **AND** it does not parse logs, stderr, stdout or human diagnostics for finding text
+
+#### Scenario: Legacy prose-only blocker is unsupported
+- **WHEN** feedback receives a blocked delivery-run record with no structured `terminal_reason`
+- **THEN** feedback emits an `unsupported_delivery_run` detector error
+- **AND** it does not infer a maintenance finding from prose logs or diagnostics
+
+#### Scenario: Non-blocked run does not create finding
+- **WHEN** feedback receives a schema-valid delivery-run record that is not a blocked terminal outcome
+- **THEN** feedback does not create a blocked-run finding for that record
+
+### Requirement: External feedback producer boundary
+Maintenance feedback MUST accept external feedback only through schema-valid
+`changerail.maintenance-detector-result.v1` producer records and MUST apply the
+same safe-path validation used by scan adapters.
+
+#### Scenario: External producer result is merged
+- **WHEN** feedback receives a schema-valid detector-result input path
+- **THEN** its findings and detector errors are merged into the command output
+- **AND** repository-relative evidence paths remain normalized
+
+#### Scenario: Unsafe external producer output fails closed
+- **WHEN** an external detector-result input contains unsafe finding paths
+- **THEN** feedback emits an `unsafe_feedback_path` detector error
+- **AND** it does not include the unsafe path as trusted finding evidence
+
+### Requirement: Maintenance quality rollup command
+ChangeRail MUST provide a read-only `bin/changerail-maintenance quality`
+command that reads explicit schema-valid maintenance lifecycle evidence and
+emits human-readable, JSON and stable CSV quality views without changing
+delivery metrics output.
+
+#### Scenario: Quality rollup emits JSON
+- **WHEN** `bin/changerail-maintenance quality --report <path> --json` receives a complete schema-valid lifecycle report
+- **THEN** stdout contains exactly one `changerail.maintenance-quality-rollup.v1` JSON document
+- **AND** the command does not modify tracked files, ignored runtime files or external systems
+
+#### Scenario: Quality rollup emits stable CSV
+- **WHEN** the operator requests CSV output
+- **THEN** stdout is a sorted long-form table with columns `metric,value,unit,status`
+- **AND** the command does not append fields to the existing delivery metrics CSV
+
+#### Scenario: Text and JSON expose same metrics
+- **WHEN** the operator requests text output instead of JSON
+- **THEN** text output includes the same metric ids represented in JSON
+- **AND** missing optional values are rendered as `unknown`
+
+### Requirement: Maintenance quality rollup schema
+ChangeRail MUST publish a JSON Schema Draft 2020-12 quality rollup contract with
+schema id `changerail.maintenance-quality-rollup.v1`.
+
+#### Scenario: Quality JSON validates
+- **WHEN** quality rollup JSON is emitted
+- **THEN** it validates against the tracked quality rollup schema
+- **AND** schema validation rejects contract-owned unknown fields
+
+#### Scenario: Metric status is explicit
+- **WHEN** a quality metric cannot be calculated from supplied inputs
+- **THEN** the metric contains `status: unknown`
+- **AND** it does not report an inferred zero value
+
+### Requirement: Maintenance proposal decision records
+ChangeRail MUST publish a JSON Schema Draft 2020-12 proposal-decision contract
+with schema id `changerail.maintenance-proposal-decision.v1` for ignored
+runtime quality observations.
+
+#### Scenario: Proposal decision record validates
+- **WHEN** a proposal-decision record is supplied to quality rollup
+- **THEN** it identifies proposal id, finding fingerprint, transformation class, accepted or rejected decision, decision timestamp and safe evidence references
+- **AND** it validates against the tracked proposal-decision schema
+
+#### Scenario: Proposal decision does not authorize fixes
+- **WHEN** quality rollup reads accepted or rejected proposal decisions
+- **THEN** it reports proposal decision counts only as quality observations
+- **AND** it does not write cards, apply fixes, commit, push, comment, open PRs or mutate external systems
+
+### Requirement: Maintenance quality metric semantics
+Maintenance quality rollup MUST compute metrics only from complete schema-valid
+inputs and MUST render insufficient optional evidence as `unknown`.
+
+#### Scenario: Latest report supplies lifecycle counts
+- **WHEN** the latest complete lifecycle report is available
+- **THEN** quality rollup reports open, accepted and waived finding counts from that report
+
+#### Scenario: Resolution requires complete ordered snapshots
+- **WHEN** a finding exists in an earlier complete ordered snapshot and is absent from a later complete snapshot
+- **THEN** quality rollup counts that finding as resolved
+
+#### Scenario: Incomplete history renders resolution unknown
+- **WHEN** report history is missing, unordered or includes incomplete snapshots
+- **THEN** resolved finding count is `unknown`
+- **AND** the rollup does not infer zero resolved findings
+
+#### Scenario: Optional metrics remain unknown
+- **WHEN** triage annotations, proposal decisions or instruction-budget producer records are not supplied
+- **THEN** time-to-triage, proposal decision counts and instruction bytes are `unknown`
+
+### Requirement: Maintenance quality catalog and board metrics
+Maintenance quality rollup MUST calculate catalog and board metrics from
+validated tracked repository state without mutating cards or catalog files.
+
+#### Scenario: Catalog coverage uses validated catalog
+- **WHEN** quality rollup reports catalog coverage
+- **THEN** it uses the validated tracked catalog and configured knowledge scope
+- **AND** invalid catalog or policy input fails closed instead of producing coverage metrics
+
+#### Scenario: Board dedup metrics inspect origin markers
+- **WHEN** lifecycle findings and board cards are available
+- **THEN** quality rollup reports represented, missing and conflicting maintenance identities by inspecting exact `Maintenance Origin: <sha256 fingerprint>` markers
+- **AND** it does not create or update board cards
+
+#### Scenario: Stale generated findings use stable ids
+- **WHEN** stale generated index or generated knowledge findings exist
+- **THEN** quality rollup reports them from stable detector and rule ids
+
+### Requirement: ChangeRail maintenance dogfood scope
+ChangeRail MUST configure an explicit public-safe dogfood maintenance scope for
+canonical ChangeRail knowledge files and MUST enable applicable deterministic
+built-in detectors for that scope.
+
+#### Scenario: Dogfood scan has detector coverage
+- **WHEN** `bin/changerail-maintenance scan --json` runs in the ChangeRail repository
+- **THEN** the scan report is complete and schema-valid
+- **AND** it includes non-zero deterministic detector coverage for the configured dogfood scope
+- **AND** tracked repository files are not modified
+
+#### Scenario: Dogfood catalog and index stay current
+- **WHEN** `bin/changerail-maintenance validate-catalog` and `bin/changerail-maintenance render-index --check` run in the ChangeRail repository
+- **THEN** the dogfood catalog and generated index validate successfully
+
+### Requirement: Repository knowledge deterministic fixtures
+ChangeRail MUST include public-safe fixtures for deterministic maintenance
+detector boundaries and stable failure codes.
+
+#### Scenario: Broken link fixture fails with stable codes
+- **WHEN** the repository knowledge smoke test runs the broken link and anchor fixture
+- **THEN** missing-target and stale-anchor findings are reported with stable detector and rule ids
+
+#### Scenario: Stale generated index fixture fails with stable code
+- **WHEN** the repository knowledge smoke test runs the stale generated index fixture
+- **THEN** a stale-generated-output finding is reported with a stable detector and rule id
+- **AND** the fixture generated file is not rewritten by check mode
+
+#### Scenario: Optional instruction producer fixture remains unknown
+- **WHEN** quality rollup runs without a published card `050` instruction-budget producer record
+- **THEN** instruction byte metrics are reported as `unknown`
+- **AND** ChangeRail does not invent a temporary threshold or producer schema
+
+### Requirement: Maintenance contradiction annotation boundary
+ChangeRail MUST keep semantic contradiction evidence as agent annotation or
+proposal evidence and MUST NOT treat a single model verdict as a deterministic
+maintenance scan failure.
+
+#### Scenario: Contradiction annotation is retained as evidence
+- **WHEN** an agent supplies schema-valid contradiction annotation evidence to maintenance quality inputs
+- **THEN** ChangeRail can report the annotation as quality evidence
+- **AND** deterministic scan does not fail solely because of one model verdict
+
+#### Scenario: Deterministic scan ignores model-only contradiction
+- **WHEN** the repository contains only model-authored contradiction annotation evidence without a deterministic detector finding
+- **THEN** `bin/changerail-maintenance scan --json` does not classify that annotation as a deterministic gate failure
+
+### Requirement: Maintenance dogfood public safety
+ChangeRail dogfood maintenance fixtures and configuration MUST remain
+public-safe and default to read-only operation.
+
+#### Scenario: Dogfood runtime output is ignored
+- **WHEN** dogfood scan, report or quality commands retain runtime output
+- **THEN** the output remains below ignored `.runtime/changerail/maintenance/`
+- **AND** tracked files contain only public-safe configuration, fixtures, schemas and docs
+
+#### Scenario: Feedback adapters are not default CI dependency
+- **WHEN** default repository knowledge smoke tests run in a clean repository
+- **THEN** feedback and runtime-dependent adapters are exercised by fixtures only
+- **AND** the tests do not require pre-existing ignored local review or delivery history

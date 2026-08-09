@@ -29,6 +29,10 @@ MAINTENANCE_STATE_SCHEMA_ID = "changerail.maintenance-state.v1"
 MAINTENANCE_BASELINE_SCHEMA_ID = "changerail.maintenance-baseline.v1"
 MAINTENANCE_TRIAGE_SCHEMA_ID = "changerail.maintenance-triage.v1"
 MAINTENANCE_RUN_SCHEMA_ID = "changerail.maintenance-run.v1"
+QUALITY_ROLLUP_SCHEMA_ID = "changerail.maintenance-quality-rollup.v1"
+PROPOSAL_DECISION_SCHEMA_ID = "changerail.maintenance-proposal-decision.v1"
+REVIEW_HISTORY_SCHEMA_FILE = "changerail-review-cycle-history.schema.json"
+DELIVERY_RUN_SCHEMA_FILE = "changerail-delivery-run.schema.json"
 SCAN_REPORT_SCHEMA_FILE = "changerail-maintenance-scan-report.schema.json"
 DETECTOR_RESULT_SCHEMA_FILE = "changerail-maintenance-detector-result.schema.json"
 LIFECYCLE_REPORT_SCHEMA_FILE = "changerail-maintenance-report.schema.json"
@@ -36,6 +40,8 @@ MAINTENANCE_STATE_SCHEMA_FILE = "changerail-maintenance-state.schema.json"
 MAINTENANCE_BASELINE_SCHEMA_FILE = "changerail-maintenance-baseline.schema.json"
 MAINTENANCE_TRIAGE_SCHEMA_FILE = "changerail-maintenance-triage.schema.json"
 MAINTENANCE_RUN_SCHEMA_FILE = "changerail-maintenance-run.schema.json"
+QUALITY_ROLLUP_SCHEMA_FILE = "changerail-maintenance-quality-rollup.schema.json"
+PROPOSAL_DECISION_SCHEMA_FILE = "changerail-maintenance-proposal-decision.schema.json"
 DEFAULT_CATALOG_PATH = Path(".changerail/knowledge.yaml")
 DEFAULT_POLICY_PATH = Path(".changerail/maintenance.yaml")
 DEFAULT_INDEX_PATH = Path(".changerail/KNOWLEDGE.md")
@@ -45,6 +51,7 @@ WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 SECRET_LIKE_RE = re.compile(
     r"(?i)(?:secret|token|password|passwd|api[_-]?key|credential|private[_-]?key)\s*[:=]\s*\S+|\bAKIA[0-9A-Z]{16}\b"
 )
+FEEDBACK_ADAPTER_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SEVERITY_ORDER = {"none": -1, "info": 0, "minor": 1, "major": 2, "blocker": 3}
 DEFAULT_FAIL_ON = "major"
 IDENTITY_VERSION = 1
@@ -472,7 +479,7 @@ def _discover_files(root: Path, include_globs: list[str], exclude_globs: list[st
 def _active_catalog_paths(catalog: dict[str, Any], *, root: Path) -> set[str]:
     paths: set[str] = set()
     for record in catalog.get("records", []):
-        if not isinstance(record, dict) or record.get("status") != "active":
+        if not isinstance(record, dict) or record.get("status") not in {"active", "generated"}:
             continue
         raw = record.get("path")
         if not isinstance(raw, str):
@@ -615,8 +622,13 @@ def _local_markdown_links(root: Path, rel_path: str) -> list[dict[str, Any]]:
 def _resolve_link_target(root: Path, source_rel: str, target_path: str) -> tuple[str | None, Diagnostic | None]:
     if not target_path:
         return source_rel, None
-    combined = PurePosixPath(source_rel).parent / target_path
-    return normalize_repo_path(combined.as_posix(), field=f"{source_rel}.link", root=root)
+    if "\\" in target_path or Path(target_path).is_absolute() or PurePosixPath(target_path).is_absolute() or WINDOWS_DRIVE_RE.match(target_path):
+        return None, Diagnostic("path_not_relative", f"{source_rel}.link", f"path must be repository-relative: {target_path}")
+    target = (root / PurePosixPath(source_rel).parent / target_path).resolve(strict=False)
+    try:
+        return target.relative_to(root.resolve(strict=False)).as_posix(), None
+    except ValueError:
+        return None, Diagnostic("path_traversal", f"{source_rel}.link", f"path must stay inside repository root: {target_path}")
 
 
 def _detector_markdown_local_links(config: dict[str, Any], *, root: Path) -> dict[str, Any]:
@@ -890,6 +902,368 @@ def _detector_adapters(config: dict[str, Any], *, root: Path) -> list[dict[str, 
     return results
 
 
+def _feedback_result_id(adapter_id: str) -> str:
+    if not FEEDBACK_ADAPTER_ID_RE.fullmatch(adapter_id):
+        raise RepositoryKnowledgeError(f"feedback adapter id is invalid: {adapter_id}")
+    return f"adapter-{adapter_id}"
+
+
+def _safe_finding_id(*parts: object) -> str:
+    raw = ":".join(str(part) for part in parts if str(part))
+    safe = re.sub(r"[^a-z0-9._:-]+", "-", raw.lower()).strip("._:-")
+    if not safe or not safe[0].isalnum():
+        safe = f"finding:{safe}" if safe else "finding"
+    return safe
+
+
+def _read_feedback_json(root: Path, raw_path: str) -> tuple[dict[str, Any] | None, str, dict[str, Any] | None]:
+    try:
+        path = resolve_input_path(root, raw_path)
+    except RepositoryKnowledgeError as exc:
+        return None, raw_path, _detector_error("feedback_input_invalid", str(exc), path=raw_path)
+    try:
+        rel_path = path.resolve(strict=False).relative_to(root.resolve(strict=False)).as_posix()
+    except ValueError:
+        rel_path = raw_path
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return None, rel_path, _detector_error("feedback_input_invalid", f"feedback input cannot be read: {exc}", path=rel_path)
+    except json.JSONDecodeError as exc:
+        return None, rel_path, _detector_error("feedback_input_invalid", f"feedback input is not valid JSON: {exc.msg}", path=rel_path)
+    if not isinstance(payload, dict):
+        return None, rel_path, _detector_error("feedback_input_invalid", "feedback input must be one JSON object", path=rel_path)
+    return payload, rel_path, None
+
+
+def _normalize_feedback_path(
+    value: str,
+    *,
+    root: Path,
+    field: str,
+    allow_workspace_absolute: bool = False,
+) -> tuple[str | None, Diagnostic | None]:
+    if allow_workspace_absolute and isinstance(value, str) and Path(value).is_absolute():
+        candidate = Path(value).resolve(strict=False)
+        try:
+            rel = candidate.relative_to(root.resolve(strict=False)).as_posix()
+        except ValueError:
+            pass
+        else:
+            return normalize_repo_path(rel, field=field, root=root)
+    return normalize_repo_path(value, field=field, root=root)
+
+
+def _add_feedback_finding(findings: list[dict[str, Any]], finding: dict[str, Any]) -> None:
+    existing = {str(item.get("id")) for item in findings if isinstance(item, dict)}
+    base_id = str(finding["id"])
+    candidate = base_id
+    suffix = 2
+    while candidate in existing:
+        candidate = f"{base_id}:{suffix}"
+        suffix += 1
+    finding["id"] = candidate
+    findings.append(finding)
+
+
+def _normalize_review_history_feedback(
+    payload: dict[str, Any],
+    *,
+    source_record: str,
+    root: Path,
+    findings: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+) -> None:
+    schema_errors = validate_review_cycle_history(payload)
+    if schema_errors:
+        errors.append(
+            _detector_error(
+                "unsupported_review_history",
+                "; ".join(schema_errors),
+                path=source_record,
+            )
+        )
+        return
+    cycles = payload.get("cycles", [])
+    for cycle in cycles if isinstance(cycles, list) else []:
+        if not isinstance(cycle, dict):
+            continue
+        review_cycle = cycle.get("review_cycle")
+        details = cycle.get("finding_details", [])
+        if not isinstance(details, list):
+            continue
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            original_id = str(detail.get("id") or "finding")
+            severity = str(detail.get("severity") or "major")
+            paths = detail.get("paths")
+            path_values = paths if isinstance(paths, list) and paths else [None]
+            for path_index, raw_path in enumerate(path_values):
+                normalized_path: str | None = None
+                if raw_path is not None:
+                    if not isinstance(raw_path, str):
+                        errors.append(
+                            _detector_error(
+                                "unsupported_review_history",
+                                "review finding path must be a string",
+                                path=source_record,
+                            )
+                        )
+                        continue
+                    normalized_path, diagnostic = _normalize_feedback_path(
+                        raw_path,
+                        root=root,
+                        field=f"{source_record}.cycles.finding_details.paths[{path_index}]",
+                    )
+                    if diagnostic or not normalized_path:
+                        errors.append(
+                            _detector_error(
+                                "unsupported_review_history",
+                                diagnostic.message if diagnostic else f"review finding path is invalid: {raw_path}",
+                                path=source_record,
+                            )
+                        )
+                        continue
+                evidence: dict[str, Any] = {
+                    "source_record": source_record,
+                    "review_cycle": int(review_cycle) if isinstance(review_cycle, int) else 0,
+                    "original_finding_id": original_id,
+                }
+                if raw_path is not None:
+                    evidence["path_index"] = path_index
+                finding: dict[str, Any] = {
+                    "id": _safe_finding_id("review", source_record, review_cycle, original_id, path_index),
+                    "severity": severity if severity in {"minor", "major", "blocker"} else "major",
+                    "code": "review_cycle_finding",
+                    "message": f"review cycle {review_cycle} finding {original_id}",
+                    "evidence": evidence,
+                }
+                if normalized_path:
+                    finding["path"] = normalized_path
+                _add_feedback_finding(findings, finding)
+
+
+def _normalize_delivery_run_feedback(
+    payload: dict[str, Any],
+    *,
+    source_record: str,
+    root: Path,
+    findings: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+) -> None:
+    schema_errors = validate_delivery_run(payload)
+    if schema_errors:
+        errors.append(
+            _detector_error(
+                "unsupported_delivery_run",
+                "; ".join(schema_errors),
+                path=source_record,
+            )
+        )
+        return
+    if payload.get("result") != "BLOCKED" or payload.get("terminal_outcome") != "BLOCKED":
+        return
+    terminal_reason = payload.get("terminal_reason")
+    if not isinstance(terminal_reason, str) or not terminal_reason:
+        errors.append(
+            _detector_error(
+                "unsupported_delivery_run",
+                "blocked delivery run is missing structured terminal_reason",
+                path=source_record,
+            )
+        )
+        return
+    card = payload.get("card") if isinstance(payload.get("card"), dict) else {}
+    card_path = card.get("path") if isinstance(card, dict) else None
+    normalized_card_path: str | None = None
+    if isinstance(card_path, str):
+        normalized_card_path, diagnostic = _normalize_feedback_path(
+            card_path,
+            root=root,
+            field=f"{source_record}.card.path",
+        )
+        if diagnostic:
+            errors.append(
+                _detector_error(
+                    "unsupported_delivery_run",
+                    diagnostic.message,
+                    path=source_record,
+                )
+            )
+            return
+    evidence: dict[str, Any] = {
+        "source_record": source_record,
+        "run_id": str(payload.get("run_id") or "unknown"),
+        "card_id": str(card.get("id") or "unknown") if isinstance(card, dict) else "unknown",
+        "terminal_reason": terminal_reason,
+    }
+    logs = payload.get("logs")
+    if isinstance(logs, dict):
+        for key in ("stdout", "stderr"):
+            value = logs.get(key)
+            if not isinstance(value, str):
+                continue
+            normalized_log, diagnostic = _normalize_feedback_path(
+                value,
+                root=root,
+                field=f"{source_record}.logs.{key}",
+                allow_workspace_absolute=True,
+            )
+            if diagnostic or not normalized_log:
+                errors.append(
+                    _detector_error(
+                        "unsupported_delivery_run",
+                        diagnostic.message if diagnostic else f"delivery-run log path is invalid: {value}",
+                        path=source_record,
+                    )
+                )
+                return
+            evidence[f"{key}_path"] = normalized_log
+    finding: dict[str, Any] = {
+        "id": _safe_finding_id("delivery", source_record, payload.get("run_id"), terminal_reason),
+        "severity": "major",
+        "code": "blocked_delivery_run",
+        "message": f"delivery run blocked with terminal reason {terminal_reason}",
+        "evidence": evidence,
+    }
+    if normalized_card_path:
+        finding["path"] = normalized_card_path
+    _add_feedback_finding(findings, finding)
+
+
+def _normalize_external_feedback(
+    payload: dict[str, Any],
+    *,
+    source_record: str,
+    root: Path,
+    findings: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+) -> None:
+    schema_errors = validate_detector_result(payload)
+    if schema_errors:
+        errors.append(
+            _detector_error(
+                "unsupported_feedback_result",
+                "; ".join(schema_errors),
+                path=source_record,
+            )
+        )
+        return
+    for finding in payload.get("findings", []) if isinstance(payload.get("findings"), list) else []:
+        if not isinstance(finding, dict):
+            continue
+        copied = dict(finding)
+        for field in ("path", "source_path", "target_path"):
+            value = copied.get(field)
+            if not isinstance(value, str):
+                continue
+            normalized, diagnostic = _normalize_feedback_path(
+                value,
+                root=root,
+                field=f"{source_record}.{field}",
+            )
+            if diagnostic or not normalized:
+                errors.append(
+                    _detector_error(
+                        "unsafe_feedback_path",
+                        diagnostic.message if diagnostic else f"feedback path is invalid: {value}",
+                        path=source_record,
+                    )
+                )
+                copied = {}
+                break
+            copied[field] = normalized
+        if not copied:
+            continue
+        evidence = copied.get("evidence")
+        copied["evidence"] = dict(evidence) if isinstance(evidence, dict) else {}
+        copied["evidence"]["source_record"] = source_record
+        _add_feedback_finding(findings, copied)
+    for error in payload.get("errors", []) if isinstance(payload.get("errors"), list) else []:
+        if not isinstance(error, dict):
+            continue
+        copied_error = {
+            "code": str(error.get("code") or "external_feedback_error"),
+            "message": str(error.get("message") or "external feedback error"),
+            "severity": str(error.get("severity") or "blocker"),
+        }
+        path = error.get("path")
+        if isinstance(path, str):
+            normalized, diagnostic = _normalize_feedback_path(path, root=root, field=f"{source_record}.errors.path")
+            if diagnostic or not normalized:
+                errors.append(
+                    _detector_error(
+                        "unsafe_feedback_path",
+                        diagnostic.message if diagnostic else f"feedback error path is invalid: {path}",
+                        path=source_record,
+                    )
+                )
+                continue
+            copied_error["path"] = normalized
+        errors.append(copied_error)
+
+
+def build_feedback_detector_result(
+    *,
+    root: Path | None = None,
+    adapter_id: str,
+    review_history_paths: list[str] | None = None,
+    delivery_run_paths: list[str] | None = None,
+    detector_result_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    repo_root = repo_root_from_path(root)
+    result_id = _feedback_result_id(adapter_id)
+    findings: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for raw_path in review_history_paths or []:
+        payload, source_record, error = _read_feedback_json(repo_root, raw_path)
+        if error:
+            errors.append(error)
+            continue
+        assert payload is not None
+        _normalize_review_history_feedback(
+            payload,
+            source_record=source_record,
+            root=repo_root,
+            findings=findings,
+            errors=errors,
+        )
+    for raw_path in delivery_run_paths or []:
+        payload, source_record, error = _read_feedback_json(repo_root, raw_path)
+        if error:
+            errors.append(error)
+            continue
+        assert payload is not None
+        _normalize_delivery_run_feedback(
+            payload,
+            source_record=source_record,
+            root=repo_root,
+            findings=findings,
+            errors=errors,
+        )
+    for raw_path in detector_result_paths or []:
+        payload, source_record, error = _read_feedback_json(repo_root, raw_path)
+        if error:
+            errors.append(error)
+            continue
+        assert payload is not None
+        _normalize_external_feedback(
+            payload,
+            source_record=source_record,
+            root=repo_root,
+            findings=findings,
+            errors=errors,
+        )
+    return {
+        "schema": DETECTOR_RESULT_SCHEMA_ID,
+        "id": result_id,
+        "status": "error" if errors else "fail" if findings else "pass",
+        "findings": findings,
+        "errors": errors,
+    }
+
+
 def _max_report_severity(detectors: list[dict[str, Any]]) -> str:
     maximum = "none"
     for detector in detectors:
@@ -944,6 +1318,14 @@ def validate_detector_result(result: Any) -> list[str]:
     return validate_with_schema(result, DETECTOR_RESULT_SCHEMA_FILE)
 
 
+def validate_review_cycle_history(history: Any) -> list[str]:
+    return validate_with_schema(history, REVIEW_HISTORY_SCHEMA_FILE)
+
+
+def validate_delivery_run(run: Any) -> list[str]:
+    return validate_with_schema(run, DELIVERY_RUN_SCHEMA_FILE)
+
+
 def validate_lifecycle_report(report: Any) -> list[str]:
     return validate_with_schema(report, LIFECYCLE_REPORT_SCHEMA_FILE)
 
@@ -987,6 +1369,14 @@ def validate_maintenance_triage(triage: Any) -> list[str]:
 
 def validate_maintenance_run(run: Any) -> list[str]:
     return validate_with_schema(run, MAINTENANCE_RUN_SCHEMA_FILE)
+
+
+def validate_quality_rollup(rollup: Any) -> list[str]:
+    return validate_with_schema(rollup, QUALITY_ROLLUP_SCHEMA_FILE)
+
+
+def validate_proposal_decision(decision: Any) -> list[str]:
+    return validate_with_schema(decision, PROPOSAL_DECISION_SCHEMA_FILE)
 
 
 def _repo_relative(path: Path, root: Path) -> str:
@@ -1136,6 +1526,11 @@ def _normalized_subject(finding: dict[str, Any], *, root: Path, base_path: str) 
     fragment = finding.get("fragment")
     if isinstance(fragment, str):
         subject["fragment"] = fragment.lstrip("#")
+    evidence = finding.get("evidence")
+    if finding.get("code") == "review_cycle_finding" and isinstance(evidence, dict):
+        original_finding_id = evidence.get("original_finding_id")
+        if isinstance(original_finding_id, str) and original_finding_id:
+            subject["original_finding_id"] = original_finding_id
     if not subject:
         subject["id"] = str(finding.get("id", "finding"))
     return subject, diagnostics
@@ -1644,6 +2039,322 @@ def normalize_triage_annotations(path: Path) -> dict[str, Any]:
         "generated_at": payload.get("generated_at"),
         "annotations": sorted(annotations, key=lambda item: item.get("fingerprint", "") if isinstance(item, dict) else ""),
     }
+
+
+def _quality_diagnostic(
+    code: str,
+    path: str,
+    message: str,
+    *,
+    severity: str = "blocker",
+) -> dict[str, Any]:
+    return {"code": code, "path": path, "message": message, "severity": severity}
+
+
+def _quality_metric(metric_id: str, value: Any, unit: str = "count", status: str = "known") -> dict[str, Any]:
+    return {"id": metric_id, "value": value, "unit": unit, "status": status}
+
+
+def _unknown_metric(metric_id: str, unit: str = "count") -> dict[str, Any]:
+    return _quality_metric(metric_id, "unknown", unit, "unknown")
+
+
+def _read_quality_json(root: Path, raw_path: str) -> tuple[dict[str, Any] | None, str, dict[str, Any] | None]:
+    try:
+        path = resolve_input_path(root, raw_path)
+    except RepositoryKnowledgeError as exc:
+        return None, raw_path, _quality_diagnostic("quality_input_invalid", raw_path, str(exc))
+    rel_path = _repo_relative(path, root)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return None, rel_path, _quality_diagnostic("quality_input_invalid", rel_path, f"quality input cannot be read: {exc}")
+    except json.JSONDecodeError as exc:
+        return None, rel_path, _quality_diagnostic("quality_input_invalid", rel_path, f"quality input is not valid JSON: {exc.msg}")
+    if not isinstance(payload, dict):
+        return None, rel_path, _quality_diagnostic("quality_input_invalid", rel_path, "quality input must be one JSON object")
+    return payload, rel_path, None
+
+
+def _load_quality_reports(
+    root: Path,
+    paths: list[str],
+    diagnostics: list[dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    reports: list[tuple[str, dict[str, Any]]] = []
+    for raw_path in paths:
+        payload, rel_path, diagnostic = _read_quality_json(root, raw_path)
+        if diagnostic:
+            diagnostics.append(diagnostic)
+            continue
+        assert payload is not None
+        errors = validate_lifecycle_report(payload)
+        if errors:
+            diagnostics.append(_quality_diagnostic("maintenance_report_invalid", rel_path, "; ".join(errors)))
+            continue
+        reports.append((rel_path, payload))
+    return reports
+
+
+def _load_quality_triage(
+    root: Path,
+    paths: list[str],
+    diagnostics: list[dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    records: list[tuple[str, dict[str, Any]]] = []
+    for raw_path in paths:
+        try:
+            path = resolve_input_path(root, raw_path)
+            normalized = normalize_triage_annotations(path)
+        except RepositoryKnowledgeError as exc:
+            diagnostics.append(_quality_diagnostic("maintenance_triage_invalid", raw_path, str(exc)))
+            continue
+        records.append((_repo_relative(path, root), normalized))
+    return records
+
+
+def _load_proposal_decisions(
+    root: Path,
+    paths: list[str],
+    diagnostics: list[dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    decisions: list[tuple[str, dict[str, Any]]] = []
+    for raw_path in paths:
+        payload, rel_path, diagnostic = _read_quality_json(root, raw_path)
+        if diagnostic:
+            diagnostics.append(diagnostic)
+            continue
+        assert payload is not None
+        errors = validate_proposal_decision(payload)
+        if errors:
+            diagnostics.append(_quality_diagnostic("proposal_decision_invalid", rel_path, "; ".join(errors)))
+            continue
+        decisions.append((rel_path, payload))
+    return decisions
+
+
+def _report_sort_key(item: tuple[str, dict[str, Any]]) -> str:
+    return str(item[1].get("generated_at") or "")
+
+
+def _report_fingerprints(report: dict[str, Any]) -> set[str]:
+    return {
+        str(finding.get("fingerprint"))
+        for finding in report.get("findings", [])
+        if isinstance(finding, dict) and isinstance(finding.get("fingerprint"), str)
+    }
+
+
+def _latest_complete_report(reports: list[tuple[str, dict[str, Any]]]) -> dict[str, Any] | None:
+    complete = [report for _, report in reports if report.get("complete") is True]
+    if not complete:
+        return None
+    return sorted(complete, key=lambda report: str(report.get("generated_at") or ""))[-1]
+
+
+def _quality_lifecycle_metrics(reports: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+    latest = _latest_complete_report(reports)
+    if latest is None:
+        return [
+            _unknown_metric("findings.open"),
+            _unknown_metric("findings.accepted"),
+            _unknown_metric("findings.waived"),
+        ]
+    summary = latest.get("summary") if isinstance(latest.get("summary"), dict) else {}
+    return [
+        _quality_metric("findings.open", int(summary.get("open", 0))),
+        _quality_metric("findings.accepted", int(summary.get("accepted", 0))),
+        _quality_metric("findings.waived", int(summary.get("waived", 0))),
+    ]
+
+
+def _quality_resolved_metric(reports: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    if len(reports) < 2 or any(report.get("complete") is not True for _, report in reports):
+        return _unknown_metric("findings.resolved")
+    ordered = sorted(reports, key=_report_sort_key)
+    earliest = ordered[0][1]
+    latest = ordered[-1][1]
+    return _quality_metric("findings.resolved", len(_report_fingerprints(earliest) - _report_fingerprints(latest)))
+
+
+def _quality_catalog_metrics(
+    root: Path,
+    *,
+    catalog_path: str | Path,
+    policy_path: str | Path,
+    diagnostics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        validation = validate_catalog_and_policy(root=root, catalog_path=catalog_path, policy_path=policy_path)
+    except RepositoryKnowledgeError as exc:
+        diagnostics.append(_quality_diagnostic("catalog_quality_invalid", str(catalog_path), str(exc)))
+        return [_unknown_metric("catalog.records.total"), _unknown_metric("catalog.records.active")]
+    blocking = [diagnostic for diagnostic in validation.diagnostics if diagnostic.code != "not_configured"]
+    if blocking or not isinstance(validation.catalog, dict):
+        diagnostics.extend(
+            _quality_diagnostic("catalog_quality_invalid", diagnostic.path, diagnostic.message)
+            for diagnostic in blocking
+        )
+        return [_unknown_metric("catalog.records.total"), _unknown_metric("catalog.records.active")]
+    records = [record for record in validation.catalog.get("records", []) if isinstance(record, dict)]
+    active = [record for record in records if record.get("status") == "active"]
+    return [
+        _quality_metric("catalog.records.total", len(records)),
+        _quality_metric("catalog.records.active", len(active)),
+    ]
+
+
+def _quality_stale_generated_metric(latest: dict[str, Any] | None) -> dict[str, Any]:
+    if latest is None:
+        return _unknown_metric("stale_generated.findings")
+    count = 0
+    for finding in latest.get("findings", []) if isinstance(latest.get("findings"), list) else []:
+        if not isinstance(finding, dict):
+            continue
+        detector = str(finding.get("detector") or "")
+        rule = str(finding.get("rule") or "")
+        if detector == "generated-freshness" or "generated" in rule or "stale" in rule:
+            count += 1
+    return _quality_metric("stale_generated.findings", count)
+
+
+def _quality_board_metrics(root: Path, latest: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if latest is None:
+        return [
+            _unknown_metric("board.dedup.represented"),
+            _unknown_metric("board.dedup.missing"),
+            _unknown_metric("board.dedup.conflicting"),
+        ]
+    represented = 0
+    missing = 0
+    conflicting = 0
+    for fingerprint in sorted(_report_fingerprints(latest)):
+        existing, diagnostics = find_board_card_by_origin(root, fingerprint)
+        if any(diagnostic.get("code") in {"duplicate_origin_marker_in_card", "duplicate_maintenance_cards"} for diagnostic in diagnostics):
+            conflicting += 1
+        elif existing is not None:
+            represented += 1
+        else:
+            missing += 1
+    return [
+        _quality_metric("board.dedup.represented", represented),
+        _quality_metric("board.dedup.missing", missing),
+        _quality_metric("board.dedup.conflicting", conflicting),
+    ]
+
+
+def _quality_triage_metric(
+    reports: list[tuple[str, dict[str, Any]]],
+    triage_records: list[tuple[str, dict[str, Any]]],
+) -> dict[str, Any]:
+    if not triage_records:
+        return _unknown_metric("triage.time_to_triage_seconds", "seconds")
+    first_seen_by_fingerprint: dict[str, datetime] = {}
+    for _, report in reports:
+        for finding in report.get("findings", []) if isinstance(report.get("findings"), list) else []:
+            if not isinstance(finding, dict):
+                continue
+            fingerprint = finding.get("fingerprint")
+            first_seen = finding.get("first_seen")
+            if not isinstance(fingerprint, str) or not isinstance(first_seen, str):
+                continue
+            parsed = _parse_iso_boundary(first_seen)
+            if parsed and fingerprint not in first_seen_by_fingerprint:
+                first_seen_by_fingerprint[fingerprint] = parsed
+    durations: list[int] = []
+    for _, triage in triage_records:
+        triage_at = _parse_iso_boundary(str(triage.get("generated_at") or ""))
+        if triage_at is None:
+            continue
+        for annotation in triage.get("annotations", []) if isinstance(triage.get("annotations"), list) else []:
+            if not isinstance(annotation, dict):
+                continue
+            fingerprint = annotation.get("fingerprint")
+            first_seen = first_seen_by_fingerprint.get(fingerprint) if isinstance(fingerprint, str) else None
+            if first_seen is not None:
+                durations.append(max(0, int((triage_at - first_seen).total_seconds())))
+    if not durations:
+        return _unknown_metric("triage.time_to_triage_seconds", "seconds")
+    return _quality_metric("triage.time_to_triage_seconds", int(sum(durations) / len(durations)), "seconds")
+
+
+def _quality_proposal_metrics(decisions: list[tuple[str, dict[str, Any]]], proposal_paths: list[str]) -> list[dict[str, Any]]:
+    if not proposal_paths:
+        return [_unknown_metric("proposals.accepted"), _unknown_metric("proposals.rejected")]
+    accepted = sum(1 for _, decision in decisions if decision.get("decision") == "accepted")
+    rejected = sum(1 for _, decision in decisions if decision.get("decision") == "rejected")
+    return [_quality_metric("proposals.accepted", accepted), _quality_metric("proposals.rejected", rejected)]
+
+
+def build_quality_rollup(
+    *,
+    root: Path | None = None,
+    report_paths: list[str] | None = None,
+    history_paths: list[str] | None = None,
+    triage_paths: list[str] | None = None,
+    proposal_paths: list[str] | None = None,
+    catalog_path: str | Path = DEFAULT_CATALOG_PATH,
+    policy_path: str | Path = DEFAULT_POLICY_PATH,
+) -> dict[str, Any]:
+    repo_root = repo_root_from_path(root)
+    reports_input = report_paths or []
+    history_input = history_paths or []
+    triage_input = triage_paths or []
+    proposal_input = proposal_paths or []
+    diagnostics: list[dict[str, Any]] = []
+    reports = _load_quality_reports(repo_root, [*history_input, *reports_input], diagnostics)
+    triage_records = _load_quality_triage(repo_root, triage_input, diagnostics)
+    proposal_decisions = _load_proposal_decisions(repo_root, proposal_input, diagnostics)
+    latest = _latest_complete_report(reports)
+    metrics: list[dict[str, Any]] = []
+    metrics.extend(_quality_lifecycle_metrics(reports))
+    metrics.append(_quality_resolved_metric(reports))
+    metrics.extend(_quality_catalog_metrics(repo_root, catalog_path=catalog_path, policy_path=policy_path, diagnostics=diagnostics))
+    metrics.append(_quality_stale_generated_metric(latest))
+    metrics.extend(_quality_board_metrics(repo_root, latest))
+    metrics.append(_quality_triage_metric(reports, triage_records))
+    metrics.extend(_quality_proposal_metrics(proposal_decisions, proposal_input))
+    metrics.append(_unknown_metric("instruction.bytes", "bytes"))
+    rollup = {
+        "schema": QUALITY_ROLLUP_SCHEMA_ID,
+        "generated_at": _utc_now(),
+        "workspace": {"root": repo_root.as_posix()},
+        "inputs": {
+            "reports": reports_input,
+            "histories": history_input,
+            "triage": triage_input,
+            "proposals": proposal_input,
+        },
+        "metrics": sorted(metrics, key=lambda metric: metric["id"]),
+        "diagnostics": diagnostics,
+    }
+    schema_errors = validate_quality_rollup(rollup)
+    if schema_errors:
+        rollup["diagnostics"].append(_quality_diagnostic("quality_rollup_schema_error", "quality", "; ".join(schema_errors)))
+    return rollup
+
+
+def render_quality_csv(rollup: dict[str, Any]) -> str:
+    lines = ["metric,value,unit,status"]
+    for metric in sorted(rollup.get("metrics", []), key=lambda item: str(item.get("id", "")) if isinstance(item, dict) else ""):
+        if not isinstance(metric, dict):
+            continue
+        lines.append(f"{metric.get('id')},{metric.get('value')},{metric.get('unit')},{metric.get('status')}")
+    return "\n".join(lines) + "\n"
+
+
+def render_quality_text(rollup: dict[str, Any]) -> str:
+    lines = ["ChangeRail maintenance quality"]
+    for metric in sorted(rollup.get("metrics", []), key=lambda item: str(item.get("id", "")) if isinstance(item, dict) else ""):
+        if not isinstance(metric, dict):
+            continue
+        lines.append(f"{metric.get('id')}: {metric.get('value')} {metric.get('unit')} ({metric.get('status')})")
+    if rollup.get("diagnostics"):
+        lines.append("diagnostics:")
+        for diagnostic in rollup.get("diagnostics", []):
+            if isinstance(diagnostic, dict):
+                lines.append(f"{diagnostic.get('code')}: {diagnostic.get('message')}")
+    return "\n".join(lines) + "\n"
 
 
 def _safe_slug(value: str, *, default: str = "finding") -> str:

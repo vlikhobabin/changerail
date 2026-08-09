@@ -335,18 +335,367 @@ def main() -> int:
     if before_adapter_scan != after_adapter_scan:
         failures.append("adapter scan fixture mutated repository files")
 
+    feedback_fixture = fixture_root / "feedback"
+    before_feedback = snapshot_tree(feedback_fixture)
+    feedback_result = run(
+        [
+            "bin/changerail-maintenance",
+            "feedback",
+            "--adapter-id",
+            "lifecycle",
+            "--review-history",
+            "fixtures/repository-knowledge/feedback/review-history.json",
+            "--delivery-run",
+            "fixtures/repository-knowledge/feedback/delivery-blocked.json",
+            "--delivery-run",
+            "fixtures/repository-knowledge/feedback/delivery-delivered.json",
+            "--detector-result",
+            "fixtures/repository-knowledge/feedback/external-valid.json",
+            "--json",
+        ]
+    )
+    after_feedback = snapshot_tree(feedback_fixture)
+    try:
+        feedback_payload = json.loads(feedback_result.stdout)
+    except ValueError as exc:
+        feedback_payload = {}
+        failures.append(f"feedback output is not one JSON object: {exc}")
+    feedback_findings = feedback_payload.get("findings") if isinstance(feedback_payload.get("findings"), list) else []
+    feedback_codes = {finding.get("code") for finding in feedback_findings if isinstance(finding, dict)}
+    feedback_text = json.dumps(feedback_payload, ensure_ascii=True)
+    if (
+        feedback_result.returncode != 0
+        or feedback_payload.get("schema") != "changerail.maintenance-detector-result.v1"
+        or feedback_payload.get("id") != "adapter-lifecycle"
+        or feedback_payload.get("status") != "fail"
+    ):
+        failures.append(f"feedback valid fixture did not emit adapter result: {feedback_result.stderr or feedback_result.stdout}")
+    expected_feedback_codes = {"review_cycle_finding", "blocked_delivery_run", "external_fixture_finding"}
+    if not expected_feedback_codes.issubset(feedback_codes):
+        failures.append(f"feedback fixture missing finding code(s): {sorted(expected_feedback_codes - feedback_codes)}")
+    if len(feedback_findings) != 4:
+        failures.append(f"feedback fixture expected 4 normalized findings, got {len(feedback_findings)}")
+    if "Review prose must stay" in feedback_text or "Detailed review prose" in feedback_text:
+        failures.append("feedback copied review summary/detail prose into normalized output")
+    if before_feedback != after_feedback:
+        failures.append("feedback command mutated fixture files")
+
+    same_path_feedback = run(
+        [
+            "bin/changerail-maintenance",
+            "feedback",
+            "--adapter-id",
+            "lifecycle",
+            "--review-history",
+            "fixtures/repository-knowledge/feedback/review-history-same-path.json",
+            "--json",
+        ]
+    )
+    try:
+        same_path_feedback_payload = json.loads(same_path_feedback.stdout)
+    except ValueError as exc:
+        same_path_feedback_payload = {}
+        failures.append(f"same-path review feedback output is not one JSON object: {exc}")
+    same_path_findings = (
+        same_path_feedback_payload.get("findings")
+        if isinstance(same_path_feedback_payload.get("findings"), list)
+        else []
+    )
+    same_path_scan = {
+        "schema": "changerail.maintenance-scan-report.v1",
+        "generated_at": "2026-08-09T00:10:00Z",
+        "workspace": {"root": ROOT.as_posix()},
+        "catalog_path": ".changerail/knowledge.yaml",
+        "policy_path": ".changerail/maintenance.yaml",
+        "complete": True,
+        "fail_on": "major",
+        "detectors": [same_path_feedback_payload] if isinstance(same_path_feedback_payload, dict) else [],
+        "configuration_diagnostics": [],
+        "summary": {
+            "detectors": 1,
+            "findings": len(same_path_findings),
+            "errors": 0,
+            "max_severity": "blocker",
+            "threshold_reached": True,
+        },
+    }
+    same_path_report, same_path_exit = normalize_maintenance_report(
+        same_path_scan,
+        root=ROOT,
+        state_path=".runtime/changerail/maintenance/same-path-review-feedback-state.json",
+    )
+    same_path_lifecycle_findings = (
+        same_path_report.get("findings") if isinstance(same_path_report.get("findings"), list) else []
+    )
+    same_path_fingerprints = {
+        finding.get("fingerprint")
+        for finding in same_path_lifecycle_findings
+        if isinstance(finding, dict)
+    }
+    same_path_subject_ids = {
+        finding.get("subject", {}).get("original_finding_id")
+        for finding in same_path_lifecycle_findings
+        if isinstance(finding, dict) and isinstance(finding.get("subject"), dict)
+    }
+    if same_path_feedback.returncode != 0 or len(same_path_findings) != 2:
+        failures.append("same-path review feedback fixture did not emit two normalized findings")
+    if (
+        same_path_exit != 1
+        or validate_lifecycle_report(same_path_report)
+        or len(same_path_lifecycle_findings) != 2
+        or len(same_path_fingerprints) != 2
+        or same_path_subject_ids != {"R1", "R2"}
+    ):
+        failures.append("same-path review feedback findings collapsed to one lifecycle identity")
+
+    feedback_error = run(
+        [
+            "bin/changerail-maintenance",
+            "feedback",
+            "--adapter-id",
+            "lifecycle",
+            "--review-history",
+            "fixtures/repository-knowledge/feedback/review-history-unsafe-path.json",
+            "--delivery-run",
+            "fixtures/repository-knowledge/feedback/delivery-blocked-prose-only.json",
+            "--detector-result",
+            "fixtures/repository-knowledge/feedback/external-unsafe.json",
+            "--json",
+        ]
+    )
+    try:
+        feedback_error_payload = json.loads(feedback_error.stdout)
+    except ValueError as exc:
+        feedback_error_payload = {}
+        failures.append(f"feedback error output is not one JSON object: {exc}")
+    feedback_error_codes = {
+        error.get("code")
+        for error in feedback_error_payload.get("errors", [])
+        if isinstance(error, dict)
+    }
+    expected_feedback_errors = {
+        "unsupported_review_history",
+        "unsupported_delivery_run",
+        "unsafe_feedback_path",
+    }
+    if (
+        feedback_error.returncode != 0
+        or feedback_error_payload.get("status") != "error"
+        or not expected_feedback_errors.issubset(feedback_error_codes)
+    ):
+        failures.append(f"feedback invalid fixture did not fail closed: {feedback_error.stderr or feedback_error.stdout}")
+
+    quality_fixture = fixture_root / "quality"
+    before_quality = snapshot_tree(quality_fixture)
+    quality_json = run(
+        [
+            "bin/changerail-maintenance",
+            "quality",
+            "--report",
+            "fixtures/repository-knowledge/quality/report-latest.json",
+            "--history",
+            "fixtures/repository-knowledge/quality/report-earlier.json",
+            "--triage",
+            "fixtures/repository-knowledge/quality/triage.json",
+            "--proposal",
+            "fixtures/repository-knowledge/quality/proposal-accepted.json",
+            "--proposal",
+            "fixtures/repository-knowledge/quality/proposal-rejected.json",
+            "--json",
+        ]
+    )
+    after_quality = snapshot_tree(quality_fixture)
+    try:
+        quality_payload = json.loads(quality_json.stdout)
+    except ValueError as exc:
+        quality_payload = {}
+        failures.append(f"quality --json output is not one JSON object: {exc}")
+    quality_metrics = {
+        metric.get("id"): metric
+        for metric in quality_payload.get("metrics", [])
+        if isinstance(metric, dict)
+    }
+    expected_quality_values = {
+        "findings.open": 0,
+        "findings.accepted": 1,
+        "findings.waived": 1,
+        "findings.resolved": 1,
+        "proposals.accepted": 1,
+        "proposals.rejected": 1,
+        "triage.time_to_triage_seconds": 1800,
+        "stale_generated.findings": 1,
+        "board.dedup.missing": 2,
+    }
+    if quality_json.returncode != 0 or quality_payload.get("schema") != "changerail.maintenance-quality-rollup.v1":
+        failures.append(f"quality --json did not emit schema-valid rollup: {quality_json.stderr or quality_json.stdout}")
+    for metric_id, expected_value in expected_quality_values.items():
+        metric = quality_metrics.get(metric_id, {})
+        if metric.get("value") != expected_value or metric.get("status") != "known":
+            failures.append(f"quality metric {metric_id} expected known {expected_value}, got {metric}")
+    if quality_metrics.get("instruction.bytes", {}).get("status") != "unknown":
+        failures.append("quality instruction bytes did not remain unknown without producer input")
+    if quality_metrics.get("catalog.records.total", {}).get("status") != "known":
+        failures.append("quality catalog records metric was not calculated from tracked catalog")
+    if before_quality != after_quality:
+        failures.append("quality command mutated fixture files")
+
+    quality_csv = run(
+        [
+            "bin/changerail-maintenance",
+            "quality",
+            "--report",
+            "fixtures/repository-knowledge/quality/report-latest.json",
+            "--csv",
+        ]
+    )
+    csv_lines = quality_csv.stdout.splitlines()
+    if quality_csv.returncode != 0 or not csv_lines or csv_lines[0] != "metric,value,unit,status":
+        failures.append(f"quality --csv did not emit stable header: {quality_csv.stderr or quality_csv.stdout}")
+    if not any(line == "instruction.bytes,unknown,bytes,unknown" for line in csv_lines):
+        failures.append("quality --csv did not render unknown instruction bytes")
+
+    quality_text = run(
+        [
+            "bin/changerail-maintenance",
+            "quality",
+            "--report",
+            "fixtures/repository-knowledge/quality/report-latest.json",
+        ]
+    )
+    if quality_text.returncode != 0 or "findings.open" not in quality_text.stdout:
+        failures.append(f"quality text output did not include metric ids: {quality_text.stderr or quality_text.stdout}")
+
+    quality_incomplete = run(
+        [
+            "bin/changerail-maintenance",
+            "quality",
+            "--report",
+            "fixtures/repository-knowledge/quality/report-latest.json",
+            "--history",
+            "fixtures/repository-knowledge/quality/report-incomplete.json",
+            "--json",
+        ]
+    )
+    try:
+        quality_incomplete_payload = json.loads(quality_incomplete.stdout)
+    except ValueError:
+        quality_incomplete_payload = {}
+    incomplete_metrics = {
+        metric.get("id"): metric
+        for metric in quality_incomplete_payload.get("metrics", [])
+        if isinstance(metric, dict)
+    }
+    if incomplete_metrics.get("findings.resolved", {}).get("status") != "unknown":
+        failures.append("quality incomplete history did not render resolved count as unknown")
+
+    quality_invalid_proposal = run(
+        [
+            "bin/changerail-maintenance",
+            "quality",
+            "--report",
+            "fixtures/repository-knowledge/quality/report-latest.json",
+            "--proposal",
+            "fixtures/repository-knowledge/quality/proposal-invalid.json",
+            "--json",
+        ]
+    )
+    try:
+        quality_invalid_payload = json.loads(quality_invalid_proposal.stdout)
+    except ValueError:
+        quality_invalid_payload = {}
+    quality_invalid_codes = {
+        diagnostic.get("code")
+        for diagnostic in quality_invalid_payload.get("diagnostics", [])
+        if isinstance(diagnostic, dict)
+    }
+    if quality_invalid_proposal.returncode == 0 or "proposal_decision_invalid" not in quality_invalid_codes:
+        failures.append("quality invalid proposal decision did not fail closed")
+
+    contradiction_fixture = quality_fixture / "contradiction-annotation.json"
+    try:
+        contradiction_payload = json.loads(contradiction_fixture.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        contradiction_payload = {}
+        failures.append(f"contradiction annotation fixture is not JSON: {exc}")
+    contradiction_evidence_refs = (
+        contradiction_payload.get("evidence_refs")
+        if isinstance(contradiction_payload.get("evidence_refs"), list)
+        else []
+    )
+    if (
+        contradiction_payload.get("schema") != "changerail.maintenance-proposal-decision.v1"
+        or contradiction_payload.get("transformation_class") != "contradiction-annotation"
+        or not any(
+            isinstance(ref, dict)
+            and ref.get("kind") == "model_annotation"
+            and ref.get("value") == "evidence_only"
+            for ref in contradiction_evidence_refs
+        )
+    ):
+        failures.append("contradiction annotation fixture is not retained as schema-valid evidence")
+    contradiction_quality = run(
+        [
+            "bin/changerail-maintenance",
+            "quality",
+            "--proposal",
+            "fixtures/repository-knowledge/quality/contradiction-annotation.json",
+            "--json",
+        ]
+    )
+    try:
+        contradiction_quality_payload = json.loads(contradiction_quality.stdout)
+    except ValueError:
+        contradiction_quality_payload = {}
+    contradiction_metrics = {
+        metric.get("id"): metric
+        for metric in contradiction_quality_payload.get("metrics", [])
+        if isinstance(metric, dict)
+    }
+    if (
+        contradiction_quality.returncode != 0
+        or contradiction_quality_payload.get("schema") != "changerail.maintenance-quality-rollup.v1"
+        or contradiction_metrics.get("proposals.rejected", {}).get("value") != 1
+    ):
+        failures.append("quality rollup did not accept contradiction annotation evidence as proposal input")
+
+    dogfood_status_before = run(["git", "status", "--short", "--untracked-files=all"])
     dogfood_scan = run(["bin/changerail-maintenance", "scan", "--json"])
+    dogfood_status_after = run(["git", "status", "--short", "--untracked-files=all"])
     try:
         dogfood_scan_payload = json.loads(dogfood_scan.stdout)
     except ValueError as exc:
         dogfood_scan_payload = {}
         failures.append(f"dogfood scan --json output is not one JSON object: {exc}")
+    dogfood_summary = dogfood_scan_payload.get("summary") if isinstance(dogfood_scan_payload.get("summary"), dict) else {}
+    dogfood_detector_ids = {
+        detector.get("id")
+        for detector in dogfood_scan_payload.get("detectors", [])
+        if isinstance(detector, dict) and isinstance(detector.get("id"), str)
+    }
+    expected_dogfood_detectors = {
+        "catalog-coverage",
+        "repository-orphans",
+        "markdown-local-links",
+        "generated-freshness",
+        "forbidden-active-references",
+    }
     if (
         dogfood_scan.returncode != 0
         or dogfood_scan_payload.get("schema") != "changerail.maintenance-scan-report.v1"
         or dogfood_scan_payload.get("complete") is not True
     ):
         failures.append(f"dogfood scan failed: {dogfood_scan.stderr or dogfood_scan.stdout}")
+    if dogfood_summary.get("detectors", 0) <= 0:
+        failures.append("dogfood scan did not exercise deterministic detector coverage")
+    missing_dogfood_detectors = sorted(expected_dogfood_detectors - dogfood_detector_ids)
+    if missing_dogfood_detectors:
+        failures.append(f"dogfood scan missing detector(s): {', '.join(missing_dogfood_detectors)}")
+    if "adapters" in dogfood_detector_ids or any(detector_id.startswith("adapter-") for detector_id in dogfood_detector_ids):
+        failures.append("dogfood scan enabled runtime-dependent adapters by default")
+    if dogfood_status_before.stdout != dogfood_status_after.stdout:
+        failures.append("dogfood scan mutated git-visible repository files")
+    if any("contradiction" in code for code in detector_codes(dogfood_scan_payload)):
+        failures.append("dogfood scan treated model-only contradiction annotation as a deterministic finding")
 
     lifecycle_root = ROOT / ".runtime" / "changerail" / "repository-knowledge-lifecycle-smoke"
     shutil.rmtree(lifecycle_root, ignore_errors=True)

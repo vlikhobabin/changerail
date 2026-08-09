@@ -1,0 +1,42 @@
+{
+  "schema": "changerail.maintenance-report.v1",
+  "generated_at": "2026-08-09T02:00:00Z",
+  "workspace": {
+    "root": "/opt/changerail"
+  },
+  "source_scan": {
+    "schema": "changerail.maintenance-scan-report.v1",
+    "generated_at": "2026-08-09T02:00:00Z",
+    "catalog_path": ".changerail/knowledge.yaml",
+    "policy_path": ".changerail/maintenance.yaml",
+    "complete": false
+  },
+  "state": {
+    "path": ".runtime/changerail/maintenance/state.json",
+    "restored": false,
+    "written": false,
+    "continuity": "not_restored"
+  },
+  "complete": false,
+  "fail_on": "major",
+  "summary": {
+    "detectors": 0,
+    "findings": 0,
+    "open": 0,
+    "accepted": 0,
+    "waived": 0,
+    "diagnostics": 1,
+    "max_severity": "blocker",
+    "threshold_reached": true
+  },
+  "detectors": [],
+  "findings": [],
+  "diagnostics": [
+    {
+      "code": "source_scan_incomplete",
+      "path": "scan",
+      "message": "fixture incomplete report",
+      "severity": "blocker"
+    }
+  ]
+}

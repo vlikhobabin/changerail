@@ -1,0 +1,15 @@
+{
+  "schema": "changerail.maintenance-detector-result.v1",
+  "id": "adapter-external",
+  "status": "fail",
+  "findings": [
+    {
+      "id": "external:fixture:unsafe",
+      "severity": "major",
+      "code": "external_fixture_finding",
+      "message": "external producer unsafe fixture",
+      "path": "/home/example/private.md"
+    }
+  ],
+  "errors": []
+}

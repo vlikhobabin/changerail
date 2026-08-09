@@ -1,13 +1,13 @@
 # Подключить feedback и quality rollup
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `060-repository-knowledge-maintenance`
@@ -172,6 +172,9 @@ maintenance findings, добавить quality rollup и полное ChangeRail
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
 - `openspec/board/4.done/060-03-add-maintenance-findings-lifecycle.md`
 - `openspec/board/4.done/060-04-add-maintain-skill-and-scheduler-adapters.md`
+- `openspec/changes/archive/2026-08-09-connect-maintenance-feedback-adapters/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-quality-rollup/`
+- `openspec/changes/archive/2026-08-09-complete-maintenance-dogfood/`
 - `openspec/specs/changerail-delivery-observability/spec.md`
 - `openspec/specs/changerail-repository-knowledge/spec.md`
 - `bin/changerail-delivery-metrics`
@@ -201,7 +204,7 @@ common finding lifecycle.
 - `060-03-add-maintenance-findings-lifecycle`
 
 ### Related
-- `openspec/changes/connect-maintenance-feedback-adapters/`
+- `openspec/changes/archive/2026-08-09-connect-maintenance-feedback-adapters/`
 
 ## Change 2: `add-maintenance-quality-rollup`
 
@@ -229,7 +232,7 @@ and CSV outputs without altering delivery metrics.
 - `060-04-add-maintain-skill-and-scheduler-adapters`
 
 ### Related
-- `openspec/changes/add-maintenance-quality-rollup/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-quality-rollup/`
 
 ## Change 3: `complete-maintenance-dogfood`
 
@@ -262,17 +265,55 @@ annotation boundaries.
 - `060-04-add-maintain-skill-and-scheduler-adapters`
 
 ### Related
-- `openspec/changes/complete-maintenance-dogfood/`
+- `openspec/changes/archive/2026-08-09-complete-maintenance-dogfood/`
 
 ## Result
-Dependencies refreshed and implementation contract accepted.
+Implemented feedback normalization, quality rollup contracts/CLI and root
+repository-knowledge dogfood scanning. Synced main specs and archived all three
+card-owned OpenSpec changes.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
+
+## Verification
+- passed: `./bin/openspec validate connect-maintenance-feedback-adapters --strict`
+- passed: `./bin/openspec validate add-maintenance-quality-rollup --strict`
+- passed: `./bin/openspec validate complete-maintenance-dogfood --strict`
+- passed: `./bin/openspec validate --all --strict` after archive (23/23)
+- passed: `python3 scripts/smoke-contract-schemas.py` (18 schemas)
+- passed: `python3 scripts/smoke-repository-knowledge.py`
+- passed: `bin/changerail-maintenance validate-catalog`
+- passed: `bin/changerail-maintenance render-index --check`
+- passed: `bin/changerail-maintenance scan --json` (5 detectors, 0 findings)
+- passed: `python3 scripts/public-surface-scan.py` (869 files, 0 findings)
+- passed: `python3 scripts/public-surface-scan.py --history` (869 files, 0 findings)
+- passed: `python3 scripts/run-release-baseline.py` (31/31)
+- passed: `git diff --check`
+- passed: `bin/changerail-python scripts/changerail_delivery_manifest.py validate .runtime/changerail/delivery-manifests/060-05-connect-feedback-and-quality-rollup.json --json`
+- passed: `bin/changerail-python scripts/changerail_delivery_manifest.py scope-check .runtime/changerail/delivery-manifests/060-05-connect-feedback-and-quality-rollup.json --target working-tree --json`
+
+## Archive
+- `openspec/changes/archive/2026-08-09-connect-maintenance-feedback-adapters/`
+- `openspec/changes/archive/2026-08-09-add-maintenance-quality-rollup/`
+- `openspec/changes/archive/2026-08-09-complete-maintenance-dogfood/`
 
 ## Next
-- Run this single card through supervised `$chrl-deliver`; then evaluate the
-  `060-06` entry gate from actual rollup/proposal evidence.
+- done
 
 ## Log
 - `2026-08-09T12:35:25Z` — feedback/rollup story extracted from broad harness card.
 - `2026-08-09T19:40:00Z` — refreshed after published `060-04`; feedback input,
   rollup snapshot/proposal semantics, full dogfood boundary and non-blocking
   `050` optional metric were frozen, and the story moved to `2.todo`.
+- `2026-08-09T19:53:27Z` — fast-forward created apply-ready artifacts for
+  `connect-maintenance-feedback-adapters`, `add-maintenance-quality-rollup` and
+  `complete-maintenance-dogfood`; story moved to `3.inprogress`.
+- `2026-08-09T20:17:15Z` — implementation finished, main spec synced, all three
+  card-owned changes archived, and delivery-level verification passed.
+- `2026-08-09T20:27:55Z` — fresh independent review cycle 1 returned `no-go`
+  with blockers R1 for review-feedback lifecycle identity collapse and R2 for
+  missing completed full release-baseline evidence.
+- `2026-08-09T20:32:23Z` — same-card rescue attempt 1 fixed R1 by promoting
+  review `original_finding_id` into lifecycle subject identity and added
+  same-path feedback fingerprint smoke coverage; R2 was addressed by retaining
+  full release-baseline evidence for the final payload.
+- 2026-08-09T20:53:18Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

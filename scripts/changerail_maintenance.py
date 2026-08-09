@@ -17,6 +17,8 @@ from changerail_repository_knowledge import (
     RepositoryKnowledgeError,
     atomic_write_text,
     baseline_from_report,
+    build_feedback_detector_result,
+    build_quality_rollup,
     configured_index_path,
     dumps_result,
     load_maintenance_baseline,
@@ -25,10 +27,14 @@ from changerail_repository_knowledge import (
     normalize_triage_annotations,
     read_lifecycle_report,
     render_index_content,
+    render_quality_csv,
+    render_quality_text,
     require_valid_result,
     scan_exit_code,
     validate_catalog_and_policy,
+    validate_detector_result,
     validate_maintenance_baseline,
+    validate_quality_rollup,
     upsert_maintenance_card,
     write_maintenance_baseline,
 )
@@ -88,6 +94,23 @@ def build_parser() -> argparse.ArgumentParser:
     triage_parser = subparsers.add_parser("triage", help="validate and normalize maintenance triage annotations")
     triage_parser.add_argument("--annotations", required=True, help="repository-relative triage annotation JSON")
     triage_parser.add_argument("--json", action="store_true", help="write structured JSON output")
+
+    feedback_parser = subparsers.add_parser("feedback", help="normalize review and delivery feedback as detector output")
+    feedback_parser.add_argument("--adapter-id", required=True, help="adapter id used to emit adapter-<id> detector output")
+    feedback_parser.add_argument("--review-history", action="append", default=[], help="repository-relative review-cycle history JSON")
+    feedback_parser.add_argument("--delivery-run", action="append", default=[], help="repository-relative delivery-run status JSON")
+    feedback_parser.add_argument("--detector-result", action="append", default=[], help="repository-relative detector-result JSON")
+    feedback_parser.add_argument("--json", action="store_true", help="accepted for consistency; feedback always writes JSON")
+
+    quality_parser = subparsers.add_parser("quality", help="emit maintenance quality rollup metrics")
+    add_common_paths(quality_parser)
+    quality_parser.add_argument("--report", action="append", default=[], help="repository-relative latest lifecycle report JSON")
+    quality_parser.add_argument("--history", action="append", default=[], help="repository-relative historical lifecycle report JSON")
+    quality_parser.add_argument("--triage", action="append", default=[], help="repository-relative maintenance triage JSON")
+    quality_parser.add_argument("--proposal", action="append", default=[], help="repository-relative proposal-decision JSON")
+    output = quality_parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help="write structured JSON output")
+    output.add_argument("--csv", action="store_true", help="write stable CSV output")
 
     cards_parser = subparsers.add_parser("cards", help="preview or upsert board cards for open maintenance findings")
     add_common_paths(cards_parser)
@@ -334,6 +357,79 @@ def command_triage(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_feedback(args: argparse.Namespace) -> int:
+    root = Path(args.workspace).resolve(strict=False)
+    try:
+        payload = build_feedback_detector_result(
+            root=root,
+            adapter_id=args.adapter_id,
+            review_history_paths=args.review_history,
+            delivery_run_paths=args.delivery_run,
+            detector_result_paths=args.detector_result,
+        )
+    except RepositoryKnowledgeError as exc:
+        payload = {
+            "schema": "changerail.maintenance-detector-result.v1",
+            "id": "adapter-feedback",
+            "status": "error",
+            "findings": [],
+            "errors": [
+                {
+                    "code": "feedback_input_invalid",
+                    "message": str(exc),
+                    "severity": "blocker",
+                }
+            ],
+        }
+    errors = validate_detector_result(payload)
+    if errors:
+        payload = {
+            "schema": "changerail.maintenance-detector-result.v1",
+            "id": "adapter-feedback",
+            "status": "error",
+            "findings": [],
+            "errors": [
+                {
+                    "code": "feedback_output_invalid",
+                    "message": "; ".join(errors),
+                    "severity": "blocker",
+                }
+            ],
+        }
+    print(json_line(payload))
+    return 0
+
+
+def command_quality(args: argparse.Namespace) -> int:
+    root = Path(args.workspace).resolve(strict=False)
+    rollup = build_quality_rollup(
+        root=root,
+        report_paths=args.report,
+        history_paths=args.history,
+        triage_paths=args.triage,
+        proposal_paths=args.proposal,
+        catalog_path=args.catalog,
+        policy_path=args.policy,
+    )
+    errors = validate_quality_rollup(rollup)
+    if errors:
+        rollup["diagnostics"].append(
+            {
+                "code": "quality_rollup_schema_error",
+                "path": "quality",
+                "message": "; ".join(errors),
+                "severity": "blocker",
+            }
+        )
+    if args.json:
+        print(json_line(rollup))
+    elif args.csv:
+        print(render_quality_csv(rollup), end="")
+    else:
+        print(render_quality_text(rollup), end="")
+    return 1 if rollup.get("diagnostics") else 0
+
+
 def command_cards(args: argparse.Namespace) -> int:
     root = Path(args.workspace).resolve(strict=False)
     report, report_exit = _lifecycle_report_for_args(args)
@@ -371,6 +467,10 @@ def main(argv: list[str] | None = None) -> int:
         return command_accept_baseline(args)
     if args.command == "triage":
         return command_triage(args)
+    if args.command == "feedback":
+        return command_feedback(args)
+    if args.command == "quality":
+        return command_quality(args)
     if args.command == "cards":
         return command_cards(args)
     parser.error(f"unknown command: {args.command}")
