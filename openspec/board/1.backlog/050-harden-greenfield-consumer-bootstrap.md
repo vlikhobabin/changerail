@@ -267,6 +267,23 @@ policy, но final docs/release baseline объединяются после в�
   локально и в CI после trust establishment.
 - Установить warning/fail budgets для generated AGENTS с учетом Codex и Claude.
 
+## Cross-card Decisions For Series 060
+- `060-04` может добавить maintenance wiring как explicit additive
+  `--with-maintenance` opt-in. Этот флаг ортогонален текущим `--kind`, surface
+  policy и wiring backend и не считается реализацией будущих profile presets.
+- Existing consumers и bootstrap без `--with-maintenance` не получают новые
+  config/helper artifacts и остаются обратно совместимыми.
+- `verify-project` определяет maintenance opt-in по наличию любого известного
+  tracked maintenance artifact и требует полный schema/config/helper/ignore
+  contract только в этом случае.
+- Windows generated-copy manifest может владеть opted-in maintenance helper
+  copies; POSIX и native Windows entrypoints используют уже существующие wiring
+  backend contracts.
+- Threshold, remediation guidance и structured producer для generated AGENTS
+  instruction budget остаются в scope этой карточки `050`. `060-04` не вводит
+  временный competing threshold, а `060-05` импортирует метрику только после
+  появления стабильного producer contract.
+
 ## Change Set
 - none yet
 
@@ -313,3 +330,6 @@ not started
 ## Log
 - 2026-08-05T14:14:56Z card created from sanitized greenfield consumer
   bootstrap, clean-clone CI and Codex setup review.
+- 2026-08-09T17:56:40Z зафиксированы только cross-card решения, необходимые
+  для `060-04`: additive maintenance opt-in разрешен без преждевременного
+  выбора profile/path-mode/instruction-budget решений этой карточки.

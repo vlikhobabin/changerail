@@ -76,7 +76,7 @@ maintenance findings, добавить quality rollup и полное ChangeRail
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/1.backlog/060-04-add-maintain-skill-and-scheduler-adapters.md`
+- `openspec/board/2.todo/060-04-add-maintain-skill-and-scheduler-adapters.md`
 - `openspec/specs/changerail-delivery-observability/spec.md`
 - `bin/changerail-delivery-metrics`
 

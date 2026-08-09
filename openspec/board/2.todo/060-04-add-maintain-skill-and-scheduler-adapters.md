@@ -1,7 +1,7 @@
 # Добавить maintain skill и scheduler adapters
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -16,7 +16,8 @@ story
 `04`
 
 ## Planning State
-post-MVP story; blocked on `060-03`
+deliver-ready; `060-03` published as commit `275621b` and the series MVP exit
+gate passed
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -27,6 +28,60 @@ post-MVP story; blocked on `060-03`
 Добавить agent-facing `changerail-maintain` modes `audit`/`triage`, bounded
 scheduler-neutral runner, least-privilege examples и opt-in consumer wiring.
 Fix mode остается отдельной карточкой `060-06`.
+
+## Delivered Dependency Contract
+- `bin/changerail-maintenance scan` and `report` provide deterministic,
+  schema-valid input for agent workflows; the CLI does not invoke an LLM.
+- Lifecycle reports, state, baseline, triage annotations and card previews have
+  public v1 schemas. Runtime continuity and raw evidence remain below
+  `.runtime/changerail/maintenance/`.
+- `triage` validates supplied annotations, while `cards` and
+  `accept-baseline` are preview-only unless explicit `--write` is present.
+- Board dedup uses the tracked `Maintenance Origin: <sha256 fingerprint>`
+  marker across every lane and rejects unsafe report-sourced card material.
+- The MVP audit passed schema and repository-knowledge smokes and proved that
+  default scan/report/card/baseline preview commands do not mutate tracked
+  files. Full ChangeRail self-scan detector coverage remains owned by `060-05`.
+
+## Frozen Implementation Contract
+- Add canonical `changerail-maintain` and short alias `chrl-maintain` skills,
+  plus Claude `changerail/maintain` wrapper. Their public modes are `audit` and
+  `triage`; neither mode implements delivery, publish or fix.
+- `audit` runs/consumes deterministic scan and lifecycle report output, may
+  explain ambiguity in prose, and MUST NOT write state, baseline, board cards,
+  repository files or external systems.
+- `triage` writes only schema-valid annotations and previews below the ignored
+  maintenance runtime root. A distinct explicit `--write-cards` operator intent
+  may delegate to `bin/changerail-maintenance cards --write`; it never implies
+  commit, push, comment, PR or publish.
+- Add `bin/changerail-maintenance-runner` and native
+  `bin/changerail-maintenance-runner.cmd`. Runner modes are `scan` and optional
+  agent `triage`; scan mode MUST work without Codex authentication.
+- Publish `changerail.maintenance-run.v1` for runner status. Control flow uses
+  schema fields for mode, phase, result, timestamps, report/annotation refs,
+  timeout/budget/lock diagnostics and optional observed usage; human prose is
+  never scraped for terminal state.
+- Runner defaults are read-only, single-workspace and non-overlapping. It owns
+  an atomic lock and status under
+  `.runtime/changerail/maintenance/runs/<run-id>/`, bounds child execution by
+  explicit timeout and agent budget, and fails closed on invalid child output.
+- Scheduler examples live below a public `examples/maintenance/` surface and
+  use generic paths. GitHub Actions uses `contents: read`, uploads ignored
+  report output as an artifact and documents default-branch/at-least-once
+  behavior. systemd and Codex examples use repository cwd, isolated execution,
+  bounded timeout and no overlapping runs.
+- Consumer bootstrap integration is an additive `--with-maintenance` opt-in,
+  orthogonal to the existing `--kind`, surface policy and wiring backend. It
+  does not wait for or silently implement the broader profile redesign in card
+  `050`.
+- Presence of any tracked maintenance config/helper declaration is the verifier
+  opt-in signal. Opted-in consumers must have the complete schema/config/helper/
+  ignore wiring; consumers with no maintenance artifacts remain valid and
+  unchanged.
+- Generated-copy manifests own opted-in maintenance helper copies on Windows;
+  POSIX wiring and `.cmd` discovery follow the current backend contracts. The
+  instruction-budget threshold/producer remains owned by card `050` and is not
+  introduced by this story.
 
 ## Acceptance
 - Skill `changerail-maintain` и Claude wrapper имеют default read-only `audit`
@@ -72,7 +127,7 @@ Fix mode остается отдельной карточкой `060-06`.
 
 ## Related
 - `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
-- `openspec/board/2.todo/060-03-add-maintenance-findings-lifecycle.md`
+- `openspec/board/4.done/060-03-add-maintenance-findings-lifecycle.md`
 - `skills/changerail-deliver/SKILL.md`
 - `bin/changerail-delivery-runner`
 - `templates/project/`
@@ -141,10 +196,15 @@ coverage for maintenance surfaces.
 - `openspec/changes/wire-maintenance-consumer-opt-in/`
 
 ## Result
-Not started.
+Dependencies and MVP gate refreshed; accepted for implementation.
 
 ## Next
-- Refresh after MVP exit gate and card `050` bootstrap decisions.
+- Run this single card through supervised `$chrl-deliver`; refresh `060-05`
+  against the delivered skill, runner and bootstrap contracts.
 
 ## Log
 - `2026-08-09T12:35:25Z` — operational story extracted from broad harness card.
+- `2026-08-09T17:56:40Z` — refreshed after `060-03` and the MVP exit audit;
+  skill modes, structured runner status, scheduler examples and additive
+  `--with-maintenance` bootstrap opt-in were frozen, and the story moved to
+  `2.todo`.

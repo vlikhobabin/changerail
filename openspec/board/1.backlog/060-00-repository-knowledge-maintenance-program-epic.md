@@ -16,9 +16,9 @@ epic
 `00`
 
 ## Planning State
-series delivery in progress; `060-01` and `060-02` are published in `4.done`,
-`060-03` passed its dependency/readiness gate and is in `2.todo`, and later
-cards remain in `1.backlog` until their gates pass
+series delivery in progress; `060-01`..`060-03` are published in `4.done`, the
+MVP exit gate passed, `060-04` is admitted to `2.todo`, and later cards remain
+in `1.backlog` until their gates pass
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -157,12 +157,12 @@ delivery runner или consumer-owned repository policy.
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
 
 ## Result
-Planning baseline, repository knowledge contract and deterministic scan are
-published; the lifecycle/dedup delivery unit is admitted to implementation.
+The series MVP is published and independently audited; the operational
+skill/scheduler/bootstrap delivery unit is admitted to implementation.
 
 ## Next
-- Выполнить `060-03` через supervised single-card `$chrl-deliver`, затем
-  провести MVP exit audit и dependency/readiness audit для `060-04`.
+- Выполнить `060-04` через supervised single-card `$chrl-deliver`, затем
+  актуализировать feedback/quality semantics карточки `060-05`.
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
@@ -177,3 +177,9 @@ published; the lifecycle/dedup delivery unit is admitted to implementation.
   cycles; scan report, detector adapter и fail-closed exit semantics проверены.
 - `2026-08-09T15:40:00Z` — `060-03` актуализирована по фактическому scan
   contract, получила frozen lifecycle/dedup boundary и допущена в `2.todo`.
+- `2026-08-09T17:53:44Z` — `060-03` опубликована в `4.done` после четырех
+  independent review cycles и трех bounded rescue attempts; final review
+  вернул `go`, release baseline прошел 30/30.
+- `2026-08-09T17:56:40Z` — MVP exit audit подтвердил schema-backed broken
+  fixtures, identity/evidence continuity, durable dedup и default no-mutation;
+  `060-04` получила additive bootstrap boundary и допущена в `2.todo`.
