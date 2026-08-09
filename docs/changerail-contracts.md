@@ -15,6 +15,8 @@
 - `changerail.review-cycle-history.v1`
 - `changerail.repository-knowledge.v1`
 - `changerail.maintenance-policy.v1`
+- `changerail.maintenance-scan-report.v1`
+- `changerail.maintenance-detector-result.v1`
 
 Schemas находятся в `schemas/`:
 
@@ -28,6 +30,8 @@ schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-review-cycle-history.schema.json
 schemas/changerail-repository-knowledge.schema.json
 schemas/changerail-maintenance-policy.schema.json
+schemas/changerail-maintenance-scan-report.schema.json
+schemas/changerail-maintenance-detector-result.schema.json
 ```
 
 Review verdict-файлы и public schemas должны использовать только
@@ -310,6 +314,7 @@ bin/changerail-maintenance validate-catalog \
   --catalog .changerail/knowledge.yaml --policy .changerail/maintenance.yaml
 bin/changerail-maintenance render-index --check
 bin/changerail-maintenance render-index --write
+bin/changerail-maintenance scan --json
 ```
 
 `validate-catalog` поддерживает explicit `--catalog` и `--policy` overrides,
@@ -324,6 +329,93 @@ Ordering stable: normalized `path`, затем `type`, затем `status`; YAML
 сравнивает ожидаемый content с configured generated index path и возвращает
 non-zero при drift, не меняя файл. Только `--write` обновляет generated index
 path, заданный policy `generated_index_path` или explicit `--index`.
+
+`scan` является read-only deterministic integrity gate. Он не использует LLM,
+не запускает arbitrary generator commands и всегда пишет один JSON document в
+stdout. Report schema id: `changerail.maintenance-scan-report.v1`. Каждый
+detector result внутри report использует
+`changerail.maintenance-detector-result.v1`. Report разделяет:
+
+- `detectors[].findings`: catalog/link/generated/reference findings;
+- `detectors[].errors`: detector failure, timeout или invalid detector output;
+- `configuration_diagnostics`: invalid policy/catalog/input diagnostics, когда
+  schema-valid complete report нельзя построить.
+
+Exit semantics:
+
+- `0`: complete schema-valid report создан, configured `fail_on` threshold не
+  достигнут;
+- `1`: complete schema-valid report создан, finding или detector error достиг
+  configured `fail_on` threshold;
+- `2`: invalid configuration или невозможность создать schema-valid report.
+
+Optional policy `scan` configuration remains additive. Minimal policy with only
+`schema`, `catalog_path` and `generated_index_path` is still valid and enables
+no detectors implicitly. Configured fields:
+
+- `include_globs` / `exclude_globs`: repository-relative documentation universe
+  for coverage and active-scope checks;
+- `active_scope_globs`: optional narrower active knowledge scope;
+- `enabled_detectors`: `catalog-coverage`, `repository-orphans`,
+  `markdown-local-links`, `generated-freshness`,
+  `forbidden-active-references`, `adapters`;
+- `fail_on`: severity threshold `info`, `minor`, `major` or `blocker`;
+- `timeout_seconds`: per-scan detector budget used by bounded detectors;
+- `detectors.*`: per-detector options such as Markdown extensions, passive
+  generated-index check mode and forbidden active-reference patterns.
+
+Core detectors are intentionally deterministic:
+
+- catalog coverage checks only the explicitly configured documentation universe
+  and reports uncovered files; an empty configured universe is a detector error,
+  not a silent pass;
+- repository orphan detection distinguishes active catalog targets that are
+  missing from discovered knowledge files that lack an active catalog record;
+- Markdown local link/anchor detection uses `markdown-it-py` token parsing and
+  the documented GitHub-compatible anchor algorithm: lowercase heading text,
+  convert spaces/hyphens to single hyphens, remove punctuation, and append
+  `-1`, `-2` for duplicate headings;
+- generated freshness compares maintained source/output state or the existing
+  `render-index --check` behavior without running configured generator
+  commands;
+- forbidden active references scan only configured active knowledge scope and
+  report repository-relative path evidence.
+
+Adapter detector configuration is optional and generic. It lets consumer-owned
+native checks feed architecture or instruction findings into the same scan
+report without adding language-specific analyzers to ChangeRail core:
+
+```yaml
+scan:
+  enabled_detectors:
+    - adapters
+  timeout_seconds: 30
+  adapters:
+    - id: architecture-check
+      argv:
+        - python3
+        - scripts/example-adapter.py
+      timeout_seconds: 10
+      options:
+        profile: architecture
+```
+
+Adapters run with `shell=False`, repository cwd and bounded timeout. `argv` is
+an array; shell-string command configuration is rejected by schema validation.
+Adapter stdout must be one `changerail.maintenance-detector-result.v1` JSON
+object with generic fields such as detector id, severity, code, message and
+repository-relative path evidence. ChangeRail normalizes any adapter-provided
+`path`, `source_path` or `target_path` through the same safe-path rules used by
+catalog and policy validation.
+
+Adapter failures cannot become false green results:
+
+- timeout -> detector error `adapter_timeout`;
+- non-zero exit -> detector error `adapter_nonzero_exit`;
+- invalid JSON or schema-invalid output -> detector error
+  `invalid_adapter_json` or `invalid_adapter_output`;
+- absolute paths, traversal or root escapes in adapter evidence -> detector
+  error `unsafe_adapter_path`.
 
 ## Delivery Run Record
 

@@ -793,3 +793,38 @@ summary without making it the canonical source when review-cycle history exists.
 - **THEN** schema validation still accepts the record
 - **AND** observability consumers report budget values as unknown unless
   review-cycle history provides them
+
+### Requirement: Maintenance scan report contract schemas
+ChangeRail MUST publish Draft 2020-12 JSON Schemas for maintenance scan reports
+and detector results using canonical ids `changerail.maintenance-scan-report.v1`
+and `changerail.maintenance-detector-result.v1`.
+
+#### Scenario: Maintainer lists maintenance scan schemas
+- **WHEN** the `schemas/` directory is listed
+- **THEN** schemas exist for `changerail.maintenance-scan-report.v1`
+- **AND** schemas exist for `changerail.maintenance-detector-result.v1`
+
+#### Scenario: Scan report separates diagnostics
+- **WHEN** a maintenance scan report contains raw detector findings, detector
+  execution errors and configuration diagnostics
+- **THEN** schema validation preserves those as distinct fields
+- **AND** rejects unknown contract-owned fields
+
+#### Scenario: Contract schema smoke covers scan schemas
+- **WHEN** `python3 scripts/smoke-contract-schemas.py` runs
+- **THEN** the smoke validates representative positive and negative documents
+  for maintenance scan report and detector result schemas
+
+### Requirement: Maintenance adapter detector-result contract
+ChangeRail detector-result contracts MUST represent adapter-produced findings
+and adapter execution errors without language-specific fields.
+
+#### Scenario: Adapter finding validates
+- **WHEN** an adapter emits a generic finding with detector id, severity, code,
+  message and repository-relative path evidence
+- **THEN** the detector-result schema accepts the mapped finding
+
+#### Scenario: Adapter execution error validates separately
+- **WHEN** an adapter times out, exits non-zero or emits invalid JSON
+- **THEN** the scan report can represent that outcome as a detector error
+- **AND** schema validation keeps it separate from ordinary detector findings

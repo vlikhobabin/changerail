@@ -38,6 +38,15 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--check", action="store_true", help="check existing generated index without writing")
     mode.add_argument("--write", action="store_true", help="write the generated index")
     render_parser.add_argument("--json", action="store_true", help="write structured JSON output")
+
+    scan_parser = subparsers.add_parser("scan", help="run read-only repository knowledge integrity detectors")
+    add_common_paths(scan_parser)
+    scan_parser.add_argument("--json", action="store_true", help="accepted for consistency; scan always writes JSON")
+    scan_parser.add_argument(
+        "--fail-on",
+        choices=("info", "minor", "major", "blocker"),
+        help="override the scan policy severity threshold",
+    )
     return parser
 
 
@@ -135,6 +144,51 @@ def command_render(args: argparse.Namespace) -> int:
     return 0 if payload["ok"] else 1
 
 
+def command_scan(args: argparse.Namespace) -> int:
+    from changerail_repository_knowledge import (
+        scan_exit_code,
+        scan_repository_knowledge,
+        validate_scan_report,
+    )
+
+    root = Path(args.workspace).resolve(strict=False)
+    report = scan_repository_knowledge(
+        root=root,
+        catalog_path=args.catalog,
+        policy_path=args.policy,
+        fail_on=args.fail_on,
+    )
+    errors = validate_scan_report(report)
+    if errors:
+        report = {
+            "schema": "changerail.maintenance-scan-report.v1",
+            "generated_at": report.get("generated_at", "1970-01-01T00:00:00Z"),
+            "workspace": {"root": root.as_posix()},
+            "catalog_path": args.catalog,
+            "policy_path": args.policy,
+            "complete": False,
+            "fail_on": args.fail_on or "major",
+            "detectors": [],
+            "configuration_diagnostics": [
+                {
+                    "code": "scan_report_schema_error",
+                    "path": "scan",
+                    "message": "; ".join(errors),
+                    "severity": "blocker",
+                }
+            ],
+            "summary": {
+                "detectors": 0,
+                "findings": 0,
+                "errors": 0,
+                "max_severity": "none",
+                "threshold_reached": False,
+            },
+        }
+    print(json_line(report))
+    return scan_exit_code(report)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -142,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         return command_validate(args)
     if args.command == "render-index":
         return command_render(args)
+    if args.command == "scan":
+        return command_scan(args)
     parser.error(f"unknown command: {args.command}")
     return 2
 

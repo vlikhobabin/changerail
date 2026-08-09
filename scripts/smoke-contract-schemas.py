@@ -18,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from changerail_contract_schema import validate_with_schema  # noqa: E402
 from changerail_delivery_manifest import validate_manifest  # noqa: E402
+from changerail_repository_knowledge import validate_detector_result, validate_scan_report  # noqa: E402
 from changerail_review_verdict import _validate_verdict  # noqa: E402
 
 
@@ -399,6 +400,90 @@ def maintenance_policy() -> dict[str, Any]:
         "schema": "changerail.maintenance-policy.v1",
         "catalog_path": ".changerail/knowledge.yaml",
         "generated_index_path": ".changerail/KNOWLEDGE.md",
+        "scan": {
+            "include_globs": ["docs/**/*.md"],
+            "exclude_globs": ["docs/archive/**/*.md"],
+            "active_scope_globs": ["docs/**/*.md"],
+            "enabled_detectors": [
+                "catalog-coverage",
+                "repository-orphans",
+                "markdown-local-links",
+                "generated-freshness",
+                "forbidden-active-references",
+                "adapters",
+            ],
+            "fail_on": "major",
+            "timeout_seconds": 30,
+            "detectors": {
+                "markdown_local_links": {"extensions": [".md"]},
+                "generated_freshness": {"check_render_index": True},
+                "forbidden_active_references": {
+                    "patterns": [
+                        {
+                            "id": "private-path",
+                            "pattern": "/home/example",
+                            "severity": "major",
+                            "message": "private path must not be active knowledge",
+                        }
+                    ]
+                },
+            },
+            "adapters": [
+                {
+                    "id": "architecture-check",
+                    "argv": ["python3", "scripts/example-adapter.py"],
+                    "timeout_seconds": 10,
+                    "options": {"profile": "architecture"},
+                }
+            ],
+        },
+    }
+
+
+def maintenance_detector_result() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-detector-result.v1",
+        "id": "adapter-architecture-check",
+        "status": "error",
+        "summary": "schema smoke detector result",
+        "findings": [
+            {
+                "id": "adapter-architecture-check:architecture-rule:docs:example-md",
+                "severity": "major",
+                "code": "architecture_rule_violation",
+                "message": "adapter reported a generic architecture finding",
+                "path": "docs/example.md",
+                "evidence": {"line": 1},
+            }
+        ],
+        "errors": [
+            {
+                "code": "adapter_timeout",
+                "message": "adapter exceeded timeout",
+                "severity": "blocker",
+            }
+        ],
+    }
+
+
+def maintenance_scan_report() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-scan-report.v1",
+        "generated_at": DATE,
+        "workspace": {"root": "/opt/changerail"},
+        "catalog_path": ".changerail/knowledge.yaml",
+        "policy_path": ".changerail/maintenance.yaml",
+        "complete": True,
+        "fail_on": "major",
+        "detectors": [maintenance_detector_result()],
+        "configuration_diagnostics": [],
+        "summary": {
+            "detectors": 1,
+            "findings": 1,
+            "errors": 0,
+            "max_severity": "major",
+            "threshold_reached": True,
+        },
     }
 
 
@@ -509,6 +594,14 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
     "changerail-maintenance-policy.schema.json": (
         maintenance_policy,
         schema_validator("changerail-maintenance-policy.schema.json"),
+    ),
+    "changerail-maintenance-detector-result.schema.json": (
+        maintenance_detector_result,
+        validate_detector_result,
+    ),
+    "changerail-maintenance-scan-report.schema.json": (
+        maintenance_scan_report,
+        validate_scan_report,
     ),
 }
 

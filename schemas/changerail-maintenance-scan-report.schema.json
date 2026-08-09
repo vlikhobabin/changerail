@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-maintenance-scan-report.schema.json",
+  "title": "ChangeRail maintenance scan report",
+  "type": "object",
+  "required": [
+    "schema",
+    "generated_at",
+    "workspace",
+    "catalog_path",
+    "policy_path",
+    "complete",
+    "fail_on",
+    "detectors",
+    "configuration_diagnostics",
+    "summary"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "changerail.maintenance-scan-report.v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "catalog_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_path": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "fail_on": {
+      "enum": ["info", "minor", "major", "blocker"]
+    },
+    "detectors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/detectorResult"
+      }
+    },
+    "configuration_diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/configurationDiagnostic"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["detectors", "findings", "errors", "max_severity", "threshold_reached"],
+      "additionalProperties": false,
+      "properties": {
+        "detectors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "findings": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_severity": {
+          "enum": ["none", "info", "minor", "major", "blocker"]
+        },
+        "threshold_reached": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "detectorResult": {
+      "type": "object",
+      "required": ["schema", "id", "status", "findings", "errors"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.maintenance-detector-result.v1"
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "status": {
+          "enum": ["pass", "fail", "error", "skipped"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/detectorError"
+          }
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "severity", "code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]*$"
+        },
+        "severity": {
+          "enum": ["info", "minor", "major", "blocker"]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fragment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "integer", "boolean", "null"]
+          }
+        }
+      }
+    },
+    "detectorError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": ["info", "minor", "major", "blocker"]
+        }
+      }
+    },
+    "configurationDiagnostic": {
+      "type": "object",
+      "required": ["code", "path", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "severity": {
+          "enum": ["info", "minor", "major", "blocker"]
+        }
+      }
+    }
+  }
+}

@@ -41,6 +41,32 @@ def has_code(diagnostics: list[Diagnostic], code: str) -> bool:
     return any(diagnostic.code == code for diagnostic in diagnostics)
 
 
+def snapshot_tree(path: Path) -> dict[str, bytes]:
+    return {
+        candidate.relative_to(path).as_posix(): candidate.read_bytes()
+        for candidate in sorted(path.rglob("*"))
+        if candidate.is_file()
+    }
+
+
+def detector_codes(payload: dict[str, object]) -> set[str]:
+    codes: set[str] = set()
+    detectors = payload.get("detectors")
+    if not isinstance(detectors, list):
+        return codes
+    for detector in detectors:
+        if not isinstance(detector, dict):
+            continue
+        for field in ("findings", "errors"):
+            entries = detector.get(field)
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if isinstance(entry, dict) and isinstance(entry.get("code"), str):
+                    codes.add(entry["code"])
+    return codes
+
+
 def main() -> int:
     failures: list[str] = []
     fixture_root = ROOT / "fixtures" / "repository-knowledge"
@@ -83,6 +109,7 @@ def main() -> int:
     invalid_policy_cases = {
         "policy unknown field": ("policy-unknown-field.yaml", "schema_error"),
         "policy traversal": ("policy-traversal.yaml", "path_traversal"),
+        "policy scan traversal": ("policy-scan-traversal.yaml", "path_traversal"),
     }
     for label, (filename, expected_code) in invalid_policy_cases.items():
         data, load_errors = load_yaml(fixture_root / "invalid" / filename)
@@ -209,6 +236,103 @@ def main() -> int:
     )
     if current_check.returncode != 0:
         failures.append(f"render-index --check failed after write: {current_check.stderr or current_check.stdout}")
+
+    scan_fixture = fixture_root / "scan"
+    before_scan = snapshot_tree(scan_fixture)
+    scan_result = run(
+        [
+            "bin/changerail-maintenance",
+            "--workspace",
+            rel(scan_fixture),
+            "scan",
+            "--catalog",
+            "knowledge.yaml",
+            "--policy",
+            "maintenance.yaml",
+            "--json",
+        ]
+    )
+    after_scan = snapshot_tree(scan_fixture)
+    try:
+        scan_payload = json.loads(scan_result.stdout)
+    except ValueError as exc:
+        scan_payload = {}
+        failures.append(f"scan --json output is not one JSON object: {exc}")
+    expected_scan_codes = {
+        "uncovered_knowledge_file",
+        "missing_catalog_target",
+        "orphan_discovered_file",
+        "missing_link_target",
+        "stale_anchor",
+        "stale_generated_output",
+        "forbidden_active_reference",
+    }
+    observed_scan_codes = detector_codes(scan_payload)
+    if scan_result.returncode != 1:
+        failures.append(f"scan fixture expected exit 1, got {scan_result.returncode}: {scan_result.stderr or scan_result.stdout}")
+    if scan_payload.get("schema") != "changerail.maintenance-scan-report.v1" or scan_payload.get("complete") is not True:
+        failures.append("scan fixture did not produce a complete maintenance scan report")
+    missing_scan_codes = sorted(expected_scan_codes - observed_scan_codes)
+    if missing_scan_codes:
+        failures.append(f"scan fixture missing detector code(s): {', '.join(missing_scan_codes)}")
+    if before_scan != after_scan:
+        failures.append("scan fixture mutated repository files")
+
+    adapter_fixture = fixture_root / "adapters"
+    before_adapter_scan = snapshot_tree(adapter_fixture)
+    adapter_result = run(
+        [
+            "bin/changerail-maintenance",
+            "--workspace",
+            rel(adapter_fixture),
+            "scan",
+            "--catalog",
+            "knowledge.yaml",
+            "--policy",
+            "maintenance.yaml",
+            "--json",
+        ]
+    )
+    after_adapter_scan = snapshot_tree(adapter_fixture)
+    try:
+        adapter_payload = json.loads(adapter_result.stdout)
+    except ValueError as exc:
+        adapter_payload = {}
+        failures.append(f"adapter scan --json output is not one JSON object: {exc}")
+    expected_adapter_codes = {
+        "adapter_fixture_finding",
+        "invalid_adapter_json",
+        "invalid_adapter_output",
+        "unsafe_adapter_path",
+        "adapter_nonzero_exit",
+        "adapter_timeout",
+    }
+    observed_adapter_codes = detector_codes(adapter_payload)
+    if adapter_result.returncode != 1:
+        failures.append(
+            f"adapter scan fixture expected exit 1, got {adapter_result.returncode}: "
+            f"{adapter_result.stderr or adapter_result.stdout}"
+        )
+    if adapter_payload.get("schema") != "changerail.maintenance-scan-report.v1" or adapter_payload.get("complete") is not True:
+        failures.append("adapter scan fixture did not produce a complete maintenance scan report")
+    missing_adapter_codes = sorted(expected_adapter_codes - observed_adapter_codes)
+    if missing_adapter_codes:
+        failures.append(f"adapter scan fixture missing detector code(s): {', '.join(missing_adapter_codes)}")
+    if before_adapter_scan != after_adapter_scan:
+        failures.append("adapter scan fixture mutated repository files")
+
+    dogfood_scan = run(["bin/changerail-maintenance", "scan", "--json"])
+    try:
+        dogfood_scan_payload = json.loads(dogfood_scan.stdout)
+    except ValueError as exc:
+        dogfood_scan_payload = {}
+        failures.append(f"dogfood scan --json output is not one JSON object: {exc}")
+    if (
+        dogfood_scan.returncode != 0
+        or dogfood_scan_payload.get("schema") != "changerail.maintenance-scan-report.v1"
+        or dogfood_scan_payload.get("complete") is not True
+    ):
+        failures.append(f"dogfood scan failed: {dogfood_scan.stderr or dogfood_scan.stdout}")
 
     if failures:
         for failure in failures:
