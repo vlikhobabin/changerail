@@ -28,6 +28,14 @@ EXPECTED_SCHEMAS = (
     "schemas/changerail-delivery-run.schema.json",
     "schemas/changerail-evidence-index.schema.json",
 )
+EXPECTED_MAINTENANCE_CHECKS = (
+    ".changerail/knowledge.yaml",
+    ".changerail/maintenance.yaml",
+    ".gitignore maintenance runtime policy",
+    "bin/changerail-maintenance",
+    "bin/changerail-maintenance-runner",
+    "schemas/changerail-maintenance-run.schema.json",
+)
 MCP_FILES = (".mcp.json", ".codex/config.toml")
 OPTIONAL_BROWSER_MCP_NEEDLES = ("@playwright/mcp", "chrome-devtools-mcp")
 WIRING_MANIFEST = Path("openspec/changerail-wiring.json")
@@ -95,7 +103,7 @@ def symlink_force(target: Path, link_path: Path) -> None:
     os.symlink(target, link_path)
 
 
-def create_fixture(project: Path, changerail_root: Path) -> None:
+def create_fixture(project: Path, changerail_root: Path, *, with_maintenance: bool = False) -> None:
     template_root = changerail_root / "templates" / "project"
     if project.exists():
         shutil.rmtree(project)
@@ -105,6 +113,8 @@ def create_fixture(project: Path, changerail_root: Path) -> None:
         if source.is_dir():
             continue
         rel = source.relative_to(template_root)
+        if rel.parts and rel.parts[0] == ".changerail" and not with_maintenance:
+            continue
         out_rel = output_path_for(rel)
         if out_rel is None:
             continue
@@ -125,6 +135,12 @@ def create_fixture(project: Path, changerail_root: Path) -> None:
     symlink_force(changerail_root / "bin" / "verify-project", project / "bin" / "verify-project")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
     symlink_force(changerail_root / "bin" / "changerail-evidence", project / "bin" / "changerail-evidence")
+    if with_maintenance:
+        symlink_force(changerail_root / "bin" / "changerail-maintenance", project / "bin" / "changerail-maintenance")
+        symlink_force(
+            changerail_root / "bin" / "changerail-maintenance-runner",
+            project / "bin" / "changerail-maintenance-runner",
+        )
 
 
 def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -150,23 +166,28 @@ def digest_file(path: Path) -> str:
     return f"sha256:{digest.hexdigest()}"
 
 
-def bootstrap_generated_project(changerail_root: Path, project: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return run(
-        [
-            str(changerail_root / "bin" / "bootstrap-project"),
-            str(project),
-            "--name",
-            project.name,
-            "--kind",
-            "generic",
-            "--wiring-platform",
-            "windows",
-            "--wiring-backend",
-            "generated-copy",
-        ],
-        changerail_root,
-        env,
-    )
+def bootstrap_generated_project(
+    changerail_root: Path,
+    project: Path,
+    env: dict[str, str],
+    *,
+    with_maintenance: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    cmd = [
+        str(changerail_root / "bin" / "bootstrap-project"),
+        str(project),
+        "--name",
+        project.name,
+        "--kind",
+        "generic",
+        "--wiring-platform",
+        "windows",
+        "--wiring-backend",
+        "generated-copy",
+    ]
+    if with_maintenance:
+        cmd.append("--with-maintenance")
+    return run(cmd, changerail_root, env)
 
 
 def generated_manifest(project: Path) -> dict[str, object]:
@@ -699,6 +720,79 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "all expected schemas present" if not missing_schema_checks else "missing: " + ", ".join(missing_schema_checks),
         )
     )
+    checks.append(
+        Check(
+            "maintenance default opt-out skipped",
+            "pass"
+            if verify.returncode == 0
+            and "SKIP maintenance opt-in: not configured" in verify.stdout
+            and "bin/changerail-maintenance" not in verify.stdout
+            else "fail",
+            verify.stdout.strip(),
+        )
+    )
+
+    maintenance_project = run_dir / "maintenance-project"
+    create_fixture(maintenance_project, changerail_root, with_maintenance=True)
+    maintenance_verify, maintenance_data = verify_json(changerail_root, maintenance_project, fake_env)
+    missing_maintenance_checks = [
+        name
+        for name in EXPECTED_MAINTENANCE_CHECKS
+        if not check_result(maintenance_data, name=name, status="pass")
+    ]
+    checks.append(
+        Check(
+            "maintenance opt-in wiring passes",
+            "pass"
+            if maintenance_verify.returncode == 0
+            and not missing_maintenance_checks
+            else "fail",
+            (
+                "all maintenance checks passed"
+                if not missing_maintenance_checks
+                else "missing passing maintenance checks: " + ", ".join(missing_maintenance_checks)
+            )
+            + "\n"
+            + maintenance_verify.stdout.strip(),
+        )
+    )
+
+    partial_maintenance_project = run_dir / "bad-partial-maintenance-project"
+    shutil.copytree(good_project, partial_maintenance_project, symlinks=True)
+    maintenance_dir = partial_maintenance_project / ".changerail"
+    maintenance_dir.mkdir(parents=True, exist_ok=True)
+    (maintenance_dir / "knowledge.yaml").write_text(
+        "schema: changerail.repository-knowledge.v1\nrecords: []\n",
+        encoding="utf-8",
+    )
+    (maintenance_dir / "maintenance.yaml").write_text(
+        "schema: changerail.maintenance-policy.v1\n"
+        "catalog_path: .changerail/knowledge.yaml\n"
+        "generated_index_path: .changerail/KNOWLEDGE.md\n",
+        encoding="utf-8",
+    )
+    partial_maintenance, partial_maintenance_data = verify_json(changerail_root, partial_maintenance_project, fake_env)
+    checks.append(
+        Check(
+            "partial maintenance opt-in fails",
+            "pass"
+            if partial_maintenance.returncode != 0
+            and check_result(
+                partial_maintenance_data,
+                name="bin/changerail-maintenance",
+                status="fail",
+                severity="blocking",
+            )
+            and check_result(
+                partial_maintenance_data,
+                name="bin/changerail-maintenance-runner",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            partial_maintenance.stdout.strip(),
+        )
+    )
 
     generated_project = run_dir / "generated-windows-project"
     generated_bootstrap = bootstrap_generated_project(changerail_root, generated_project, fake_env)
@@ -878,6 +972,102 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
                 ),
             )
         )
+
+        maintenance_generated_project = run_dir / "generated-windows-maintenance-project"
+        maintenance_generated_bootstrap = bootstrap_generated_project(
+            changerail_root,
+            maintenance_generated_project,
+            fake_env,
+            with_maintenance=True,
+        )
+        if maintenance_generated_bootstrap.returncode != 0:
+            checks.append(
+                Check(
+                    "generated Windows maintenance wiring passes",
+                    "fail",
+                    maintenance_generated_bootstrap.stdout.strip(),
+                )
+            )
+        else:
+            maintenance_generated_verify, maintenance_generated_data = verify_json(
+                changerail_root,
+                maintenance_generated_project,
+                fake_env,
+            )
+            checks.append(
+                Check(
+                    "generated Windows maintenance wiring passes",
+                    "pass"
+                    if maintenance_generated_verify.returncode == 0
+                    and check_result(
+                        maintenance_generated_data,
+                        name="bin/changerail-maintenance",
+                        status="pass",
+                    )
+                    and check_result(
+                        maintenance_generated_data,
+                        name="bin/changerail-maintenance-runner",
+                        status="pass",
+                    )
+                    and check_result(
+                        maintenance_generated_data,
+                        name="bin/changerail-maintenance.cmd",
+                        status="pass",
+                    )
+                    and check_result(
+                        maintenance_generated_data,
+                        name="bin/changerail-maintenance-runner.cmd",
+                        status="pass",
+                    )
+                    else "fail",
+                    maintenance_generated_verify.stdout.strip(),
+                )
+            )
+
+            stale_maintenance_project = run_dir / "bad-generated-maintenance-stale"
+            shutil.copytree(maintenance_generated_project, stale_maintenance_project, symlinks=True)
+            stale_maintenance_target = stale_maintenance_project / "bin" / "changerail-maintenance-runner"
+            stale_maintenance_target.write_text(
+                "stale generated maintenance runner fake-secret-sentinel\n",
+                encoding="utf-8",
+            )
+            set_manifest_digest(
+                stale_maintenance_project,
+                "bin/changerail-maintenance-runner",
+                digest_file(stale_maintenance_target),
+            )
+            stale_maintenance, _ = verify_json(changerail_root, stale_maintenance_project, fake_env)
+            checks.append(
+                Check(
+                    "stale generated maintenance helper fails",
+                    "pass"
+                    if stale_maintenance.returncode != 0
+                    and "stale generated wiring" in stale_maintenance.stdout
+                    and "--refresh-wiring" in stale_maintenance.stdout
+                    and "fake-secret-sentinel" not in stale_maintenance.stdout
+                    else "fail",
+                    stale_maintenance.stdout.strip(),
+                )
+            )
+
+            divergent_maintenance_project = run_dir / "bad-generated-maintenance-divergence"
+            shutil.copytree(maintenance_generated_project, divergent_maintenance_project, symlinks=True)
+            (divergent_maintenance_project / "bin" / "changerail-maintenance-runner").write_text(
+                "project-owned maintenance runner change fake-secret-sentinel\n",
+                encoding="utf-8",
+            )
+            divergent_maintenance, _ = verify_json(changerail_root, divergent_maintenance_project, fake_env)
+            checks.append(
+                Check(
+                    "project-owned generated maintenance divergence fails",
+                    "pass"
+                    if divergent_maintenance.returncode != 0
+                    and "project-owned divergence" in divergent_maintenance.stdout
+                    and "fake-secret-sentinel" not in divergent_maintenance.stdout
+                    else "fail",
+                    divergent_maintenance.stdout.strip(),
+                )
+            )
 
     symlink_proof_project = run_dir / "symlink-fallback-proof-project"
     symlink_proof = write_windows_fallback_proof(run_dir, "symlink")

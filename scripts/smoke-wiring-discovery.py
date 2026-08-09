@@ -24,12 +24,14 @@ SKILLS = (
     "changerail-review",
     "changerail-pub",
     "changerail-deliver",
+    "changerail-maintain",
     "chrl-explore",
     "chrl-ff",
     "chrl-do",
     "chrl-review",
     "chrl-pub",
     "chrl-deliver",
+    "chrl-maintain",
     "openspec-apply-change",
     "openspec-archive-change",
     "openspec-bulk-archive-change",
@@ -49,6 +51,7 @@ COMMANDS = {
     "review": "changerail-review",
     "pub": "changerail-pub",
     "deliver": "changerail-deliver",
+    "maintain": "changerail-maintain",
 }
 SHORT_COMMANDS = {
     "explore": "chrl-explore",
@@ -57,6 +60,7 @@ SHORT_COMMANDS = {
     "review": "chrl-review",
     "pub": "chrl-pub",
     "deliver": "chrl-deliver",
+    "maintain": "chrl-maintain",
 }
 FORBIDDEN_CONSUMER_ROOT_SKILLS = re.compile(r"(^|[\s`'\"])(\./)?skills/")
 DELIVER_REVIEW_CYCLE_CONTRACT = (

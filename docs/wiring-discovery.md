@@ -14,11 +14,15 @@ wrappers, и какой smoke подтверждает discovery. ChangeRail о�
 - Codex skills: `changerail-*`, short aliases `chrl-*` и `openspec-*`;
 - Claude skills: те же каталоги через `.claude/skills`;
 - Claude commands: `/changerail:explore`, `/changerail:ff`, `/changerail:do`,
-  `/changerail:review`, `/changerail:pub`, `/changerail:deliver`;
+  `/changerail:review`, `/changerail:pub`, `/changerail:deliver`,
+  `/changerail:maintain`;
 - Claude short aliases: `/chrl:explore`, `/chrl:ff`, `/chrl:do`,
-  `/chrl:review`, `/chrl:pub`, `/chrl:deliver`;
-- helper wrappers: `bin/openspec`, `bin/changerail-python`,
-  `bin/changerail-review-verdict`, `bin/changerail-evidence`.
+  `/chrl:review`, `/chrl:pub`, `/chrl:deliver`, `/chrl:maintain`;
+- default helper wrappers: `bin/openspec`, `bin/changerail-python`,
+  `bin/changerail-review-verdict` and `bin/changerail-evidence`;
+- maintenance opt-in helper wrappers: `bin/changerail-maintenance` and
+  `bin/changerail-maintenance-runner`, wired only by
+  `bin/bootstrap-project --with-maintenance` or an equivalent manual adoption.
 
 Smoke проверяет discovery wiring, а не полный runtime-flow этих команд.
 
@@ -37,12 +41,14 @@ Smoke проверяет discovery wiring, а не полный runtime-flow э�
 .codex/skills/changerail-review  -> ../../skills/changerail-review
 .codex/skills/changerail-pub     -> ../../skills/changerail-pub
 .codex/skills/changerail-deliver -> ../../skills/changerail-deliver
+.codex/skills/changerail-maintain -> ../../skills/changerail-maintain
 .codex/skills/chrl-explore -> ../../skills/chrl-explore
 .codex/skills/chrl-ff      -> ../../skills/chrl-ff
 .codex/skills/chrl-do      -> ../../skills/chrl-do
 .codex/skills/chrl-review  -> ../../skills/chrl-review
 .codex/skills/chrl-pub     -> ../../skills/chrl-pub
 .codex/skills/chrl-deliver -> ../../skills/chrl-deliver
+.codex/skills/chrl-maintain -> ../../skills/chrl-maintain
 .codex/skills/openspec-*   -> ../../skills/openspec-*
 ```
 
@@ -67,12 +73,14 @@ wiring и не коммитятся.
 .codex/skills/changerail-review  -> /opt/changerail/skills/changerail-review
 .codex/skills/changerail-pub     -> /opt/changerail/skills/changerail-pub
 .codex/skills/changerail-deliver -> /opt/changerail/skills/changerail-deliver
+.codex/skills/changerail-maintain -> /opt/changerail/skills/changerail-maintain
 .codex/skills/chrl-explore -> /opt/changerail/skills/chrl-explore
 .codex/skills/chrl-ff      -> /opt/changerail/skills/chrl-ff
 .codex/skills/chrl-do      -> /opt/changerail/skills/chrl-do
 .codex/skills/chrl-review  -> /opt/changerail/skills/chrl-review
 .codex/skills/chrl-pub     -> /opt/changerail/skills/chrl-pub
 .codex/skills/chrl-deliver -> /opt/changerail/skills/chrl-deliver
+.codex/skills/chrl-maintain -> /opt/changerail/skills/chrl-maintain
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
 bin/openspec                    -> /opt/changerail/bin/openspec
 bin/changerail-python           -> /opt/changerail/bin/changerail-python
@@ -80,8 +88,16 @@ bin/bootstrap-project           -> /opt/changerail/bin/bootstrap-project
 bin/verify-project              -> /opt/changerail/bin/verify-project
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
 bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
-bin/changerail-delivery-runner  -> /opt/changerail/bin/changerail-delivery-runner
-bin/changerail-delivery-metrics -> /opt/changerail/bin/changerail-delivery-metrics
+```
+
+При opt-in maintenance (`bin/bootstrap-project --with-maintenance` или
+эквивалентная ручная migration) дополнительно появляются:
+
+```text
+.changerail/knowledge.yaml
+.changerail/maintenance.yaml
+bin/changerail-maintenance        -> /opt/changerail/bin/changerail-maintenance
+bin/changerail-maintenance-runner -> /opt/changerail/bin/changerail-maintenance-runner
 ```
 
 Для Codex допустимы generated copies под `.codex/skills/changerail-*` и

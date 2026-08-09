@@ -11,12 +11,14 @@ daily use and `.claude/commands/changerail` as the canonical reference surface:
 - `/chrl:review`
 - `/chrl:pub`
 - `/chrl:deliver`
+- `/chrl:maintain`
 - `/changerail:explore`
 - `/changerail:ff`
 - `/changerail:do`
 - `/changerail:review`
 - `/changerail:pub`
 - `/changerail:deliver`
+- `/changerail:maintain`
 
 Do not write runtime state, auth files, traces or local reports into tracked
 files. Keep project-specific rules in `AGENTS.md`; reusable ChangeRail methodology is

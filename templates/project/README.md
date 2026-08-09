@@ -58,5 +58,20 @@ them:
 - `bin/changerail-review-verdict`
 - `bin/changerail-evidence`
 
+Maintenance integration is opt-in. `bin/bootstrap-project --with-maintenance`
+also renders:
+
+- `.changerail/knowledge.yaml`
+- `.changerail/maintenance.yaml`
+
+and wires:
+
+- `bin/changerail-maintenance`
+- `bin/changerail-maintenance-runner`
+
+Native Windows generated-copy wiring records those maintenance helpers and their
+`.cmd` wrappers in `openspec/changerail-wiring.json` only when maintenance is
+opted in.
+
 Runtime/auth paths remain ignored in generated `.gitignore`; bootstrap smoke
 projects and reports stay under `.runtime`.

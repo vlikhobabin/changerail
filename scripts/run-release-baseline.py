@@ -63,6 +63,7 @@ def steps() -> list[Step]:
         Step("review verdict validation smoke", ["python3", "scripts/smoke-review-verdict-validation.py"]),
         Step("review fingerprint smoke", ["python3", "scripts/smoke-review-fingerprint.py"]),
         Step("retained evidence smoke", ["python3", "scripts/smoke-retained-evidence.py"]),
+        Step("maintenance runner smoke", ["python3", "scripts/smoke-maintenance-runner.py"]),
         Step("delivery manifest smoke", ["python3", "scripts/smoke-delivery-manifest.py"]),
         Step("delivery manifest derive smoke", ["python3", "scripts/smoke-delivery-manifest-derive.py"]),
         Step("delivery runner one-command smoke", ["python3", "scripts/smoke-delivery-runner.py"]),

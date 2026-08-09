@@ -220,6 +220,15 @@ for skill_path in "$ChangeRail"/skills/*; do
 done
 ```
 
+Maintenance helper wiring is not part of the default adoption surface. If the
+project explicitly opts in to maintenance by adding tracked
+`.changerail/knowledge.yaml` and `.changerail/maintenance.yaml`, also wire:
+
+```bash
+ln -sfnT "$ChangeRail/bin/changerail-maintenance" "$PROJECT/bin/changerail-maintenance"
+ln -sfnT "$ChangeRail/bin/changerail-maintenance-runner" "$PROJECT/bin/changerail-maintenance-runner"
+```
+
 Если команда не может заменить существующий реальный каталог или файл, агент
 должен остановиться и показать конфликт. Типовые конфликты:
 

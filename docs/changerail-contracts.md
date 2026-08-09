@@ -21,6 +21,7 @@
 - `changerail.maintenance-state.v1`
 - `changerail.maintenance-baseline.v1`
 - `changerail.maintenance-triage.v1`
+- `changerail.maintenance-run.v1`
 
 Schemas находятся в `schemas/`:
 
@@ -40,6 +41,7 @@ schemas/changerail-maintenance-report.schema.json
 schemas/changerail-maintenance-state.schema.json
 schemas/changerail-maintenance-baseline.schema.json
 schemas/changerail-maintenance-triage.schema.json
+schemas/changerail-maintenance-run.schema.json
 ```
 
 Review verdict-файлы и public schemas должны использовать только
@@ -539,6 +541,43 @@ another card. Written card titles, summaries and evidence references use only
 sanitized repository-relative metadata; raw detector output, absolute consumer
 paths, secret-like `finding.path` values, credentials and unredacted snippets
 remain indirect runtime evidence.
+
+## Maintenance Run Status
+
+Maintenance runner status является runtime-файлом:
+
+```text
+.runtime/changerail/maintenance/runs/<run-id>/status.json
+```
+
+Schema id: `changerail.maintenance-run.v1`. Status содержит workspace, mode,
+phase, result, timestamps, command metadata, lock diagnostics,
+timeout/budget diagnostics, optional usage availability и references на
+retained report/annotation/preview artifacts. Raw command logs, credentials и
+local traces не inline-ятся в status.
+
+Runner surface:
+
+```bash
+bin/changerail-maintenance-runner scan --json
+bin/changerail-maintenance-runner triage --annotations <path> --json
+```
+
+`scan` вызывает deterministic `bin/changerail-maintenance report --json` и не
+требует Codex auth. `triage` принимает schema-bound annotation input или
+operator-supplied child command output and validates it as
+`changerail.maintenance-triage.v1`; successful card previews остаются below
+ignored `.runtime/changerail/maintenance/`.
+
+Control flow читает только structured status fields and validated JSON
+artifacts. Human prose from child output is never enough for success:
+schema-invalid report, invalid triage JSON, timeout or lock conflict records
+`result: BLOCKED` or `FAILED` with stable `terminal_reason`.
+
+The runner owns an atomic repository-local non-overlap lock under the ignored
+maintenance runtime root. Stale or externally created locks block a new run and
+must be handled by an operator; the runner does not delete uncertain locks
+automatically.
 
 ## Delivery Run Record
 

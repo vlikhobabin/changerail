@@ -28,12 +28,14 @@ LIFECYCLE_REPORT_SCHEMA_ID = "changerail.maintenance-report.v1"
 MAINTENANCE_STATE_SCHEMA_ID = "changerail.maintenance-state.v1"
 MAINTENANCE_BASELINE_SCHEMA_ID = "changerail.maintenance-baseline.v1"
 MAINTENANCE_TRIAGE_SCHEMA_ID = "changerail.maintenance-triage.v1"
+MAINTENANCE_RUN_SCHEMA_ID = "changerail.maintenance-run.v1"
 SCAN_REPORT_SCHEMA_FILE = "changerail-maintenance-scan-report.schema.json"
 DETECTOR_RESULT_SCHEMA_FILE = "changerail-maintenance-detector-result.schema.json"
 LIFECYCLE_REPORT_SCHEMA_FILE = "changerail-maintenance-report.schema.json"
 MAINTENANCE_STATE_SCHEMA_FILE = "changerail-maintenance-state.schema.json"
 MAINTENANCE_BASELINE_SCHEMA_FILE = "changerail-maintenance-baseline.schema.json"
 MAINTENANCE_TRIAGE_SCHEMA_FILE = "changerail-maintenance-triage.schema.json"
+MAINTENANCE_RUN_SCHEMA_FILE = "changerail-maintenance-run.schema.json"
 DEFAULT_CATALOG_PATH = Path(".changerail/knowledge.yaml")
 DEFAULT_POLICY_PATH = Path(".changerail/maintenance.yaml")
 DEFAULT_INDEX_PATH = Path(".changerail/KNOWLEDGE.md")
@@ -981,6 +983,10 @@ def validate_maintenance_baseline(baseline: Any) -> list[str]:
 
 def validate_maintenance_triage(triage: Any) -> list[str]:
     return validate_with_schema(triage, MAINTENANCE_TRIAGE_SCHEMA_FILE)
+
+
+def validate_maintenance_run(run: Any) -> list[str]:
+    return validate_with_schema(run, MAINTENANCE_RUN_SCHEMA_FILE)
 
 
 def _repo_relative(path: Path, root: Path) -> str:

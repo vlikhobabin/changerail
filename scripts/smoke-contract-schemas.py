@@ -22,6 +22,7 @@ from changerail_repository_knowledge import (  # noqa: E402
     validate_detector_result,
     validate_lifecycle_report,
     validate_maintenance_baseline,
+    validate_maintenance_run,
     validate_maintenance_state,
     validate_maintenance_triage,
     validate_scan_report,
@@ -603,6 +604,37 @@ def maintenance_triage() -> dict[str, Any]:
     }
 
 
+def maintenance_run() -> dict[str, Any]:
+    return {
+        "schema": "changerail.maintenance-run.v1",
+        "run_id": "maintenance-schema-smoke",
+        "updated_at": DATE,
+        "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
+        "mode": "scan",
+        "phase": "terminal",
+        "result": "SUCCEEDED",
+        "timestamps": {"started_at": DATE, "ended_at": DATE},
+        "command": {
+            "argv": ["bin/changerail-maintenance", "report", "--json"],
+            "stdin": "closed",
+            "json": True,
+            "timeout_seconds": 900,
+        },
+        "process": {"exit_code": 0, "timed_out": False},
+        "lock": {
+            "path": ".runtime/changerail/maintenance/maintenance.lock",
+            "acquired": True,
+            "released": True,
+            "diagnostics": [],
+        },
+        "artifacts": {
+            "lifecycle_report": ".runtime/changerail/maintenance/runs/maintenance-schema-smoke/maintenance-report.json"
+        },
+        "usage": {"available": False, "reason": "scan mode has no agent usage"},
+        "diagnostics": [],
+    }
+
+
 def schema_validator(schema_file: str) -> Validator:
     return lambda payload: validate_with_schema(payload, schema_file)
 
@@ -735,6 +767,10 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         maintenance_triage,
         validate_maintenance_triage,
     ),
+    "changerail-maintenance-run.schema.json": (
+        maintenance_run,
+        validate_maintenance_run,
+    ),
 }
 
 
@@ -817,6 +853,11 @@ def main() -> int:
             missing_detectors.pop("detectors")
             if not validator(missing_detectors):
                 failures.append(f"{name}: missing detector summary unexpectedly passed")
+        if name == "changerail-maintenance-run.schema.json":
+            invalid_alias = copy.deepcopy(positive)
+            invalid_alias["status"] = "success"
+            if not validator(invalid_alias):
+                failures.append(f"{name}: duplicate top-level status alias unexpectedly passed")
         negative = mutate_invalid(positive)
         negative_errors = validator(negative)
         if not negative_errors:

@@ -49,6 +49,7 @@ REQUIRED_COMMANDS = {
     "delivery manifest derive smoke": "python3 scripts/smoke-delivery-manifest-derive.py",
     "delivery runner smoke": "python3 scripts/smoke-delivery-runner.py",
     "delivery metrics smoke": "python3 scripts/smoke-delivery-metrics.py",
+    "maintenance runner smoke": "python3 scripts/smoke-maintenance-runner.py",
     "openspec archive diagnostics smoke": "python3 scripts/smoke-openspec-archive-diagnostics.py",
     "drift smoke": "python3 scripts/smoke-drift.py",
 }

@@ -198,6 +198,10 @@ def make_workspace(root: Path) -> Path:
     bad_byte_path = write_non_utf8_path(workspace, b"docs/bad-\xff.txt", b"bad byte\n")
     write(workspace / "new files" / "one.txt", "one\n")
     write(workspace / "new files" / "two.txt", "two\n")
+    try:
+        os.symlink("docs", workspace / "linked-docs", target_is_directory=True)
+    except OSError:
+        pass
     write(
         workspace / "openspec" / "board" / "3.inprogress" / "example-card.md",
         """# Example Card
@@ -239,6 +243,13 @@ Implemented and archived.
 def check_scope_reconciliation(root: Path) -> None:
     workspace, _ = make_workspace(root / "scope-positive")
     manifest_path = derive_manifest(workspace)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (workspace / "linked-docs").is_symlink() and not any(
+        entry.get("path") == "linked-docs"
+        for entry in manifest.get("committable_paths", [])
+    ):
+        sys.stderr.write("derive manifest omitted untracked directory symlink\n")
+        raise SystemExit(1)
     require_scope_ok(manifest_path, workspace, "working-tree", "scope-check working tree")
     stage_manifest_paths(manifest_path, workspace)
     require_scope_ok(manifest_path, workspace, "staged", "scope-check staged")

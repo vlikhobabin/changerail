@@ -59,6 +59,33 @@ SCHEMAS = (
     "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
 )
+MAINTENANCE_HELPERS = (
+    "changerail-maintenance",
+    "changerail-maintenance-runner",
+)
+MAINTENANCE_SCHEMAS = (
+    "changerail-repository-knowledge.schema.json",
+    "changerail-maintenance-policy.schema.json",
+    "changerail-maintenance-detector-result.schema.json",
+    "changerail-maintenance-scan-report.schema.json",
+    "changerail-maintenance-report.schema.json",
+    "changerail-maintenance-state.schema.json",
+    "changerail-maintenance-baseline.schema.json",
+    "changerail-maintenance-triage.schema.json",
+    "changerail-maintenance-run.schema.json",
+)
+MAINTENANCE_OPT_IN_PATHS = (
+    ".changerail/maintenance.yaml",
+    ".changerail/knowledge.yaml",
+    "bin/changerail-maintenance",
+    "bin/changerail-maintenance-runner",
+)
+MAINTENANCE_MANIFEST_PATHS = (
+    "bin/changerail-maintenance",
+    "bin/changerail-maintenance.cmd",
+    "bin/changerail-maintenance-runner",
+    "bin/changerail-maintenance-runner.cmd",
+)
 AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 EXACT_NPM_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.\-]+)?$")
@@ -297,6 +324,25 @@ def manifest_artifact(manifest: dict[str, object] | None, rel_path: str) -> dict
         if isinstance(entry, dict) and entry.get("path") == rel_path:
             return entry
     return None
+
+
+def manifest_declares_any(manifest: dict[str, object] | None, rel_paths: Iterable[str]) -> bool:
+    if not manifest:
+        return False
+    targets = set(rel_paths)
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return False
+    for entry in artifacts:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        source = entry.get("source")
+        if isinstance(path, str) and path in targets:
+            return True
+        if isinstance(source, str) and source in targets:
+            return True
+    return False
 
 
 def generated_wiring_active(manifest: dict[str, object] | None) -> bool:
@@ -1143,6 +1189,133 @@ def check_schemas_and_helper_with_wiring(
     return checks
 
 
+def check_yaml_schema_key(project: Path, rel_path: str, schema: str) -> Check:
+    path = project / rel_path
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return Check(rel_path, False, f"cannot read: {exc}")
+    expected = f"schema: {schema}"
+    if expected not in text:
+        return Check(rel_path, False, f"missing {expected}")
+    return Check(rel_path, True, f"declares {schema}")
+
+
+def check_maintenance_policy_paths(project: Path) -> Check:
+    rel_path = ".changerail/maintenance.yaml"
+    path = project / rel_path
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return Check(rel_path, False, f"cannot read: {exc}")
+    missing = [
+        needle
+        for needle in (
+            "catalog_path: .changerail/knowledge.yaml",
+            "generated_index_path: .changerail/KNOWLEDGE.md",
+        )
+        if needle not in text
+    ]
+    if missing:
+        return Check(rel_path, False, "missing maintenance paths: " + ", ".join(missing))
+    return Check(rel_path, True, "maintenance catalog and generated index paths are declared")
+
+
+def check_maintenance_runtime_ignore(project: Path) -> Check:
+    path = project / ".gitignore"
+    try:
+        lines = {
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    except OSError as exc:
+        return Check(".gitignore maintenance runtime policy", False, f"cannot read .gitignore: {exc}")
+    if ".runtime/" in lines:
+        return Check(".gitignore maintenance runtime policy", True, ".runtime/ covers .runtime/changerail/maintenance/")
+    accepted = {
+        ".runtime/changerail/maintenance/",
+        ".runtime/changerail/maintenance/**",
+    }
+    if lines.intersection(accepted):
+        return Check(".gitignore maintenance runtime policy", True, ".runtime/changerail/maintenance/ is ignored")
+    return Check(".gitignore maintenance runtime policy", False, "missing ignore pattern for .runtime/changerail/maintenance/")
+
+
+def maintenance_opted_in(project: Path, manifest: dict[str, object] | None) -> bool:
+    if any(path_present(project, rel_path) for rel_path in MAINTENANCE_OPT_IN_PATHS):
+        return True
+    return manifest_declares_any(manifest, MAINTENANCE_MANIFEST_PATHS)
+
+
+def check_maintenance_opt_in_wiring(
+    project: Path,
+    changerail_root: Path,
+    aggregator_root: Path | None,
+    manifest: dict[str, object] | None,
+) -> list[Check]:
+    if not maintenance_opted_in(project, manifest):
+        return [
+            Check(
+                "maintenance opt-in",
+                True,
+                "not configured",
+                status="skip",
+            )
+        ]
+
+    checks: list[Check] = [
+        check_yaml_schema_key(
+            project,
+            ".changerail/knowledge.yaml",
+            "changerail.repository-knowledge.v1",
+        ),
+        check_yaml_schema_key(
+            project,
+            ".changerail/maintenance.yaml",
+            "changerail.maintenance-policy.v1",
+        ),
+        check_maintenance_policy_paths(project),
+        check_maintenance_runtime_ignore(project),
+    ]
+    for helper in MAINTENANCE_HELPERS:
+        checks.append(
+            check_wiring_path(
+                project,
+                f"bin/{helper}",
+                changerail_root / "bin" / helper,
+                changerail_root,
+                aggregator_root,
+                manifest,
+            )
+        )
+    if generated_wiring_active(manifest):
+        for helper in MAINTENANCE_HELPERS:
+            windows_helper = f"{helper}.cmd"
+            source = changerail_root / "bin" / windows_helper
+            if source.is_file():
+                checks.append(
+                    check_wiring_path(
+                        project,
+                        f"bin/{windows_helper}",
+                        source,
+                        changerail_root,
+                        aggregator_root,
+                        manifest,
+                    )
+                )
+    for schema in MAINTENANCE_SCHEMAS:
+        path = changerail_root / "schemas" / schema
+        checks.append(
+            Check(
+                f"schemas/{schema}",
+                path.is_file(),
+                "reachable from ChangeRail root" if path.is_file() else "missing",
+            )
+        )
+    return checks
+
+
 def apply_surface_policy(check: Check, surface: str, state: str, exists: bool) -> Check:
     if state == "required":
         return check
@@ -1396,6 +1569,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
             )
         )
     checks.extend(check_schemas_and_helper_with_wiring(project, changerail_root, aggregator_root, wiring_manifest))
+    checks.extend(check_maintenance_opt_in_wiring(project, changerail_root, aggregator_root, wiring_manifest))
     targeted_openspec_validate = check_targeted_openspec_validate(project)
     openspec_validate = maybe_downgrade_baseline_debt(check_openspec_validate(project), policy)
     stale_check = check_no_stale_opsx_wiring(project)

@@ -104,19 +104,22 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - generic ChangeRail lifecycle skills: `changerail-explore`, `changerail-ff`, `changerail-do`,
   `changerail-review`, `changerail-pub`, `changerail-deliver` и short aliases
   `chrl-explore`, `chrl-ff`, `chrl-do`, `chrl-review`, `chrl-pub`,
-  `chrl-deliver`;
+  `chrl-deliver`, plus maintenance skills `changerail-maintain` and
+  `chrl-maintain`;
 - OpenSpec lifecycle skills `openspec-*` для proposal/spec/tasks, apply,
   verify, sync и archive;
 - Claude wrappers `/changerail:explore`, `/changerail:ff`, `/changerail:do`, `/changerail:review`,
   `/changerail:pub`, `/changerail:deliver` и daily aliases
   `/chrl:explore`, `/chrl:ff`, `/chrl:do`, `/chrl:review`, `/chrl:pub`,
-  `/chrl:deliver`;
+  `/chrl:deliver`, plus `/changerail:maintain` and `/chrl:maintain`;
 - `bin/openspec` с pin версии OpenSpec CLI;
 - `bin/changerail-python` как shared runtime selector для Python helpers;
 - schemas `changerail.review-verdict.v1`,
   `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
-  `changerail.delivery-run.v1`, `changerail.evidence-index.v1` и helpers
-  `bin/changerail-review-verdict`, `bin/changerail-evidence`;
+  `changerail.delivery-run.v1`, `changerail.evidence-index.v1`,
+  repository knowledge and maintenance contracts, plus helpers
+  `bin/changerail-review-verdict`, `bin/changerail-evidence` and
+  `bin/changerail-maintenance`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как fail-closed gate для consumer wiring/config с явными
   non-blocking diagnostics;
@@ -125,6 +128,8 @@ changes**, каждый со своими OpenSpec-артефактами в `op
   runs со structured runtime status;
 - `bin/changerail-delivery-metrics` для чтения delivery run records и review
   cycle history;
+- `bin/changerail-maintenance-runner` для read-only scheduled maintenance scans
+  и optional bounded triage со structured runtime status;
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
 - `scripts/public-surface-scan.py`, `scripts/run-release-baseline.py`,
   `scripts/compile-python-inventory.py`, `scripts/smoke-contract-schemas.py`,
@@ -179,6 +184,9 @@ cd /opt/changerail
   --name example-project \
   --kind generic
 ```
+
+Если проект должен сразу получить maintenance policy/catalog skeleton и
+scheduled maintenance helper wiring, добавьте `--with-maintenance`.
 
 После генерации bootstrap запускает тот же verifier.
 По умолчанию bootstrap рендерит portable tracked config: project scope в

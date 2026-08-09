@@ -96,6 +96,9 @@ jobs:
           python3 scripts/smoke-delivery-runner.py
           python3 scripts/smoke-delivery-metrics.py
 
+      - name: Maintenance runner smoke
+        run: python3 scripts/smoke-maintenance-runner.py
+
       - name: OpenSpec archive diagnostics smoke
         run: python3 scripts/smoke-openspec-archive-diagnostics.py
 

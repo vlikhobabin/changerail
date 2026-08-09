@@ -1,13 +1,13 @@
 # Добавить maintain skill и scheduler adapters
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail core
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 `060-repository-knowledge-maintenance`
@@ -115,7 +115,9 @@ Fix mode остается отдельной карточкой `060-06`.
 - `060-03-add-maintenance-findings-lifecycle`
 
 ## Change Set
-- none yet
+- `add-changerail-maintain-audit-and-triage`
+- `add-scheduled-maintenance-runners`
+- `wire-maintenance-consumer-opt-in`
 
 ## Verify
 - Skill frontmatter and path-neutrality validation.
@@ -150,7 +152,7 @@ Add canonical skill/command surfaces for audit and bounded triage.
 - `060-03-add-maintenance-findings-lifecycle`
 
 ### Related
-- `openspec/changes/add-changerail-maintain-audit-and-triage/`
+- `openspec/changes/archive/2026-08-09-add-changerail-maintain-audit-and-triage/`
 
 ## Change 2: `add-scheduled-maintenance-runners`
 
@@ -171,7 +173,7 @@ examples.
 - `add-changerail-maintain-audit-and-triage`
 
 ### Related
-- `openspec/changes/add-scheduled-maintenance-runners/`
+- `openspec/changes/archive/2026-08-09-add-scheduled-maintenance-runners/`
 
 ## Change 3: `wire-maintenance-consumer-opt-in`
 
@@ -193,14 +195,40 @@ coverage for maintenance surfaces.
 - Relevant bootstrap decisions from card `050` when they affect profiles/wiring.
 
 ### Related
-- `openspec/changes/wire-maintenance-consumer-opt-in/`
+- `openspec/changes/archive/2026-08-09-wire-maintenance-consumer-opt-in/`
 
 ## Result
-Dependencies and MVP gate refreshed; accepted for implementation.
+Implemented maintain skills and Claude wrappers, scheduled maintenance runner,
+public scheduler examples and explicit `--with-maintenance` consumer opt-in.
+Synced main specs and archived all three card-owned OpenSpec changes.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
+
+## Verification
+- passed: `python3 -m py_compile bin/bootstrap-project bin/verify-project scripts/changerail_maintenance_runner.py scripts/smoke-bootstrap-project.py scripts/smoke-contract-schemas.py scripts/smoke-maintenance-runner.py scripts/smoke-verify-project.py`
+- passed: `python3 scripts/smoke-contract-schemas.py`
+- passed: `python3 scripts/smoke-maintenance-runner.py`
+- passed: `python3 scripts/smoke-delivery-manifest-derive.py`
+- passed: `python3 scripts/smoke-bootstrap-project.py` (17/17)
+- passed: `python3 scripts/smoke-verify-project.py` (46/46)
+- passed: `python3 scripts/public-surface-scan.py` (852 files, 0 findings)
+- passed: `./bin/openspec validate add-changerail-maintain-audit-and-triage --strict`
+- passed: `./bin/openspec validate add-scheduled-maintenance-runners --strict`
+- passed: `./bin/openspec validate wire-maintenance-consumer-opt-in --strict`
+- passed: `./bin/openspec validate --all --strict` before archive (26/26)
+- passed: `./bin/openspec validate --all --strict` after archive (23/23)
+- passed: `git diff --check`
+- passed: `bin/changerail-python scripts/changerail_delivery_manifest.py validate .runtime/changerail/delivery-manifests/060-04-add-maintain-skill-and-scheduler-adapters.json --json`
+- passed: `bin/changerail-python scripts/changerail_delivery_manifest.py scope-check .runtime/changerail/delivery-manifests/060-04-add-maintain-skill-and-scheduler-adapters.json --target working-tree --json`
+- passed: `python3 scripts/run-release-baseline.py` final current-tree run (31/31)
+
+## Archive
+- `openspec/changes/archive/2026-08-09-add-changerail-maintain-audit-and-triage/`
+- `openspec/changes/archive/2026-08-09-add-scheduled-maintenance-runners/`
+- `openspec/changes/archive/2026-08-09-wire-maintenance-consumer-opt-in/`
 
 ## Next
-- Run this single card through supervised `$chrl-deliver`; refresh `060-05`
-  against the delivered skill, runner and bootstrap contracts.
+- done
 
 ## Log
 - `2026-08-09T12:35:25Z` — operational story extracted from broad harness card.
@@ -208,3 +236,10 @@ Dependencies and MVP gate refreshed; accepted for implementation.
   skill modes, structured runner status, scheduler examples and additive
   `--with-maintenance` bootstrap opt-in were frozen, and the story moved to
   `2.todo`.
+- `2026-08-09T18:04:32Z` — fast-forward phase created apply-ready OpenSpec
+  artifacts for all three card-owned changes.
+- `2026-08-09T18:57:20Z` — implementation finished, focused smokes and release
+  baseline passed, main specs synced and card-owned OpenSpec changes archived.
+- `2026-08-09T19:09:00Z` — delivery manifest derived, manifest scope matched
+  the working tree, and final current-tree release baseline passed.
+- 2026-08-09T19:31:30Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

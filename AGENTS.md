@@ -24,7 +24,8 @@ The project is currently in bootstrap stage. The tracked public surface is:
 - helper wrappers `bin/openspec`, `bin/changerail-python`,
   `bin/changerail-review-verdict`, `bin/changerail-evidence`,
   `bin/bootstrap-project`, `bin/verify-project`,
-  `bin/changerail-delivery-runner` and `bin/changerail-delivery-metrics`;
+  `bin/changerail-delivery-runner`, `bin/changerail-delivery-metrics`,
+  `bin/changerail-maintenance` and `bin/changerail-maintenance-runner`;
 - project bootstrap templates under `templates/project/`;
 - drift, smoke, release baseline, schema validation and public-surface checks
   under `scripts/`;

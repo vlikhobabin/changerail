@@ -321,6 +321,8 @@ def decode_git_path(raw_path: bytes) -> str:
 
 def ensure_safe_untracked_path(workspace: Path, path: str) -> None:
     absolute = workspace / path
+    if absolute.is_symlink():
+        return
     if absolute.is_dir():
         raise ManifestError(f"untracked directory cannot be staged as a directory-wide path: {path}", 1)
     if absolute.exists() and not (absolute.is_file() or absolute.is_symlink()):

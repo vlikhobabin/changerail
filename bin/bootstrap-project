@@ -41,8 +41,11 @@ SUPPORTED_HELPERS = (
     "changerail-review-verdict",
     "changerail-evidence",
 )
-SUPPORTED_WINDOWS_HELPERS = (
-    *SUPPORTED_HELPERS,
+MAINTENANCE_HELPERS = (
+    "changerail-maintenance",
+    "changerail-maintenance-runner",
+)
+WINDOWS_EXTRA_HELPERS = (
     "bootstrap-project",
     "changerail-delivery-runner",
     "changerail-delivery-metrics",
@@ -114,7 +117,22 @@ def resolve_wiring_backend(platform: str, value: str) -> str:
     return value
 
 
-def wiring_artifacts(changerail_root: Path, target: Path, *, include_windows_helpers: bool) -> list[WiringArtifact]:
+def helper_names(*, include_windows_helpers: bool, include_maintenance_helpers: bool) -> tuple[str, ...]:
+    helpers = list(SUPPORTED_HELPERS)
+    if include_maintenance_helpers:
+        helpers.extend(MAINTENANCE_HELPERS)
+    if include_windows_helpers:
+        helpers.extend(WINDOWS_EXTRA_HELPERS)
+    return tuple(dict.fromkeys(helpers))
+
+
+def wiring_artifacts(
+    changerail_root: Path,
+    target: Path,
+    *,
+    include_windows_helpers: bool,
+    include_maintenance_helpers: bool,
+) -> list[WiringArtifact]:
     artifacts = [
         WiringArtifact(changerail_root / "skills", target / ".claude" / "skills", "directory", "claude-skills"),
         WiringArtifact(
@@ -130,7 +148,10 @@ def wiring_artifacts(changerail_root: Path, target: Path, *, include_windows_hel
             "claude-commands",
         ),
     ]
-    helpers = SUPPORTED_WINDOWS_HELPERS if include_windows_helpers else SUPPORTED_HELPERS
+    helpers = helper_names(
+        include_windows_helpers=include_windows_helpers,
+        include_maintenance_helpers=include_maintenance_helpers,
+    )
     for helper in helpers:
         source = changerail_root / "bin" / helper
         artifacts.append(WiringArtifact(source, target / "bin" / helper, "file", "helper"))
@@ -190,12 +211,19 @@ def output_path_for(rel: Path) -> Path | None:
     return rel
 
 
-def collect_plan(template_root: Path, target: Path) -> list[tuple[str, Path, Path | None]]:
+def collect_plan(
+    template_root: Path,
+    target: Path,
+    *,
+    include_maintenance: bool,
+) -> list[tuple[str, Path, Path | None]]:
     plan: list[tuple[str, Path, Path | None]] = []
     for source in sorted(template_root.rglob("*")):
         if source.is_dir():
             continue
         rel = source.relative_to(template_root)
+        if rel.parts and rel.parts[0] == ".changerail" and not include_maintenance:
+            continue
         out_rel = output_path_for(rel)
         if out_rel is None:
             continue
@@ -203,10 +231,20 @@ def collect_plan(template_root: Path, target: Path) -> list[tuple[str, Path, Pat
     return plan
 
 
-def symlink_plan(changerail_root: Path, target: Path) -> list[tuple[Path, Path]]:
+def symlink_plan(
+    changerail_root: Path,
+    target: Path,
+    *,
+    include_maintenance_helpers: bool,
+) -> list[tuple[Path, Path]]:
     return [
         (artifact.source, artifact.destination)
-        for artifact in wiring_artifacts(changerail_root, target, include_windows_helpers=False)
+        for artifact in wiring_artifacts(
+            changerail_root,
+            target,
+            include_windows_helpers=False,
+            include_maintenance_helpers=include_maintenance_helpers,
+        )
     ]
 
 
@@ -240,8 +278,13 @@ def write_templates(
     project_kind: str,
     changerail_root: Path,
     config_mode: str,
+    include_maintenance: bool,
 ) -> None:
-    for action, destination, source in collect_plan(template_root, target):
+    for action, destination, source in collect_plan(
+        template_root,
+        target,
+        include_maintenance=include_maintenance,
+    ):
         assert source is not None
         destination.parent.mkdir(parents=True, exist_ok=True)
         if action == "render":
@@ -271,14 +314,28 @@ def create_symlink(target: Path, link_path: Path) -> None:
     os.symlink(relative_target, link_path)
 
 
-def create_symlinks(changerail_root: Path, target: Path) -> None:
-    for source, link_path in symlink_plan(changerail_root, target):
+def create_symlinks(changerail_root: Path, target: Path, *, include_maintenance_helpers: bool) -> None:
+    for source, link_path in symlink_plan(
+        changerail_root,
+        target,
+        include_maintenance_helpers=include_maintenance_helpers,
+    ):
         create_symlink(source, link_path)
 
 
-def create_symlinks_with_rollback(changerail_root: Path, target: Path, created: list[Path]) -> None:
+def create_symlinks_with_rollback(
+    changerail_root: Path,
+    target: Path,
+    created: list[Path],
+    *,
+    include_maintenance_helpers: bool,
+) -> None:
     count = 0
-    for source, link_path in symlink_plan(changerail_root, target):
+    for source, link_path in symlink_plan(
+        changerail_root,
+        target,
+        include_maintenance_helpers=include_maintenance_helpers,
+    ):
         destination_existed = link_path.exists() or link_path.is_symlink()
         create_symlink(source, link_path)
         if not destination_existed:
@@ -441,8 +498,20 @@ def maybe_fail_after_artifact(count: int) -> None:
         raise BootstrapError("simulated wiring failure after generated artifact creation")
 
 
-def create_generated_wiring(changerail_root: Path, target: Path, *, platform: str, backend: str) -> None:
-    artifacts = wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows")
+def create_generated_wiring(
+    changerail_root: Path,
+    target: Path,
+    *,
+    platform: str,
+    backend: str,
+    include_maintenance_helpers: bool,
+) -> None:
+    artifacts = wiring_artifacts(
+        changerail_root,
+        target,
+        include_windows_helpers=platform == "windows",
+        include_maintenance_helpers=include_maintenance_helpers,
+    )
     created: list[Path] = []
     count = 0
     try:
@@ -856,8 +925,20 @@ def create_junction(target: Path, link_path: Path) -> None:
         raise BootstrapError(result.stdout.strip() or f"mklink /J failed for {link_path}")
 
 
-def create_junction_wiring(changerail_root: Path, target: Path, *, platform: str, proof: dict[str, object]) -> None:
-    artifacts = wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows")
+def create_junction_wiring(
+    changerail_root: Path,
+    target: Path,
+    *,
+    platform: str,
+    proof: dict[str, object],
+    include_maintenance_helpers: bool,
+) -> None:
+    artifacts = wiring_artifacts(
+        changerail_root,
+        target,
+        include_windows_helpers=platform == "windows",
+        include_maintenance_helpers=include_maintenance_helpers,
+    )
     created: list[Path] = []
     manifest_artifacts: list[WiringArtifact] = []
     count = 0
@@ -917,14 +998,26 @@ def create_wiring(
     platform: str,
     backend: str,
     fallback_proof: dict[str, object] | None,
+    include_maintenance_helpers: bool,
 ) -> None:
     if backend == "generated-copy":
-        create_generated_wiring(changerail_root, target, platform=platform, backend=backend)
+        create_generated_wiring(
+            changerail_root,
+            target,
+            platform=platform,
+            backend=backend,
+            include_maintenance_helpers=include_maintenance_helpers,
+        )
         return
     if backend == "symlink":
         created: list[Path] = []
         try:
-            create_symlinks_with_rollback(changerail_root, target, created)
+            create_symlinks_with_rollback(
+                changerail_root,
+                target,
+                created,
+                include_maintenance_helpers=include_maintenance_helpers,
+            )
         except Exception:
             cleanup_created_artifacts(created)
             raise
@@ -934,7 +1027,12 @@ def create_wiring(
                 changerail_root=changerail_root,
                 platform=platform,
                 backend=backend,
-                artifacts=wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows"),
+                artifacts=wiring_artifacts(
+                    changerail_root,
+                    target,
+                    include_windows_helpers=platform == "windows",
+                    include_maintenance_helpers=include_maintenance_helpers,
+                ),
                 fallback_reasons=[],
                 fallback_proof=fallback_proof,
                 artifact_owner="symlink",
@@ -943,7 +1041,13 @@ def create_wiring(
     if backend == "junction":
         if fallback_proof is None:
             raise BootstrapError("junction fallback proof missing")
-        create_junction_wiring(changerail_root, target, platform=platform, proof=fallback_proof)
+        create_junction_wiring(
+            changerail_root,
+            target,
+            platform=platform,
+            proof=fallback_proof,
+            include_maintenance_helpers=include_maintenance_helpers,
+        )
         return
     raise BootstrapError(f"unsupported wiring backend: {backend}")
 
@@ -988,6 +1092,7 @@ def print_plan(
     backend: str,
     fallback_proof: dict[str, object] | None,
     refresh_wiring: bool,
+    include_maintenance: bool,
 ) -> None:
     print(f"PLAN wiring-platform {platform}")
     print(f"PLAN wiring-backend {backend}")
@@ -1000,20 +1105,38 @@ def print_plan(
         return
     if backup is not None:
         print(f"PLAN backup {target} -> {backup}")
-    for action, destination, source in collect_plan(template_root, target):
+    for action, destination, source in collect_plan(
+        template_root,
+        target,
+        include_maintenance=include_maintenance,
+    ):
         print(f"PLAN {action} {source} -> {destination}")
     if backend == "generated-copy":
-        for artifact in wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows"):
+        for artifact in wiring_artifacts(
+            changerail_root,
+            target,
+            include_windows_helpers=platform == "windows",
+            include_maintenance_helpers=include_maintenance,
+        ):
             rel = rel_to_root(artifact.destination, target)
             print(f"PLAN generated {artifact.kind} {rel} <- {rel_to_root(artifact.source, changerail_root)}")
         print(f"PLAN generated-manifest {target / WIRING_MANIFEST_REL}")
     elif backend == "junction":
-        for artifact in wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows"):
+        for artifact in wiring_artifacts(
+            changerail_root,
+            target,
+            include_windows_helpers=platform == "windows",
+            include_maintenance_helpers=include_maintenance,
+        ):
             rel = rel_to_root(artifact.destination, target)
             action = "junction" if artifact.kind == "directory" else "generated"
             print(f"PLAN {action} {artifact.kind} {rel} <- {rel_to_root(artifact.source, changerail_root)}")
     else:
-        for source, link_path in symlink_plan(changerail_root, target):
+        for source, link_path in symlink_plan(
+            changerail_root,
+            target,
+            include_maintenance_helpers=include_maintenance,
+        ):
             print(f"PLAN symlink {link_path} -> {source}")
     if codex_auth_source is not None:
         print(f"PLAN symlink {target / '.codex' / 'auth.json'} -> {codex_auth_source}")
@@ -1052,6 +1175,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--refresh-wiring",
         action="store_true",
         help="Refresh generated-owned wiring artifacts from the ChangeRail source of truth.",
+    )
+    parser.add_argument(
+        "--with-maintenance",
+        action="store_true",
+        help="Opt in to tracked maintenance policy/catalog skeletons and maintenance helper wiring.",
     )
     parser.add_argument(
         "--windows-fallback-proof",
@@ -1100,6 +1228,8 @@ def main(argv: list[str]) -> int:
                 raise BootstrapError("--backup-existing cannot be used with --refresh-wiring")
             if args.link_codex_auth:
                 raise BootstrapError("--link-codex-auth cannot be used with --refresh-wiring")
+            if args.with_maintenance:
+                raise BootstrapError("--with-maintenance cannot be used with --refresh-wiring")
             if not target.is_dir():
                 raise BootstrapError(f"target must exist for refresh: {target}")
             backup = None
@@ -1117,6 +1247,7 @@ def main(argv: list[str]) -> int:
                 backend=backend,
                 fallback_proof=fallback_proof,
                 refresh_wiring=args.refresh_wiring,
+                include_maintenance=args.with_maintenance,
             )
             print("dry-run: no files were written")
             return 0
@@ -1136,6 +1267,7 @@ def main(argv: list[str]) -> int:
             project_kind=args.kind,
             changerail_root=changerail_root,
             config_mode=args.config_mode,
+            include_maintenance=args.with_maintenance,
         )
         create_wiring(
             changerail_root=changerail_root,
@@ -1143,6 +1275,7 @@ def main(argv: list[str]) -> int:
             platform=platform,
             backend=backend,
             fallback_proof=fallback_proof,
+            include_maintenance_helpers=args.with_maintenance,
         )
         if codex_auth_source is not None:
             link_codex_auth(codex_auth_source, target)
@@ -1156,9 +1289,14 @@ def main(argv: list[str]) -> int:
         if codex_auth_source is not None:
             print("auth linked: .codex/auth.json")
         print("next: git init")
+        if args.with_maintenance:
+            print("maintenance: opted in (.changerail/maintenance.yaml)")
         if args.config_mode == "local":
             print("warning: --config-mode local rendered machine-local absolute paths; review before git add")
-        print("next: git add AGENTS.md CLAUDE.md .gitignore .mcp.json .codex/config.toml .codex/skills .claude bin openspec")
+        add_paths = "AGENTS.md CLAUDE.md .gitignore .mcp.json .codex/config.toml .codex/skills .claude bin openspec"
+        if args.with_maintenance:
+            add_paths += " .changerail"
+        print(f"next: git add {add_paths}")
         print("next: git commit -m 'Bootstrap ChangeRail project'")
         print("next: add a remote when the project is ready to publish")
         return 0

@@ -221,6 +221,7 @@ The CI workflow runs:
 - `scripts/smoke-review-verdict-validation.py`;
 - `scripts/smoke-review-fingerprint.py`;
 - `scripts/smoke-retained-evidence.py`;
+- `scripts/smoke-maintenance-runner.py`;
 - `scripts/smoke-delivery-manifest.py`;
 - `scripts/smoke-delivery-manifest-derive.py`;
 - `scripts/smoke-delivery-runner.py`, including one-command delivery success,

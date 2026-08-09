@@ -210,6 +210,23 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
         return Check("bootstrap verification profile guidance", "fail", "; ".join(profile_missing))
     if (project / ".codex" / "auth.json").exists() or (project / ".codex" / "auth.json").is_symlink():
         return Check("bootstrap valid project", "fail", "default bootstrap created auth marker")
+    maintenance_paths = [
+        ".changerail/knowledge.yaml",
+        ".changerail/maintenance.yaml",
+        "bin/changerail-maintenance",
+        "bin/changerail-maintenance-runner",
+    ]
+    present = [
+        rel_path
+        for rel_path in maintenance_paths
+        if (project / rel_path).exists() or (project / rel_path).is_symlink()
+    ]
+    if present:
+        return Check(
+            "bootstrap valid project",
+            "fail",
+            "default bootstrap created maintenance opt-in paths: " + ", ".join(present),
+        )
     return Check("bootstrap valid project", "pass", "project generated and verified")
 
 
@@ -235,7 +252,117 @@ def check_dry_run(changerail_root: Path, run_dir: Path) -> Check:
     missing = [needle for needle in expected if needle not in result.stdout]
     if missing:
         return Check("dry-run no-write", "fail", "dry-run omitted alias wiring: " + ", ".join(missing))
+    forbidden = (".changerail/maintenance.yaml", "bin/changerail-maintenance")
+    leaked = [needle for needle in forbidden if needle in result.stdout]
+    if leaked:
+        return Check(
+            "dry-run no-write",
+            "fail",
+            "default dry-run included maintenance opt-in paths: " + ", ".join(leaked),
+        )
     return Check("dry-run no-write", "pass", "dry-run printed plan and left no target")
+
+
+def check_maintenance_bootstrap(
+    changerail_root: Path,
+    run_dir: Path,
+    extra_env: dict[str, str],
+) -> Check:
+    project = run_dir / "maintenance-project"
+    result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            "maintenance-project",
+            "--kind",
+            "generic",
+            "--with-maintenance",
+        ],
+        changerail_root,
+        extra_env,
+    )
+    if result.returncode != 0:
+        return Check("maintenance opt-in bootstrap", "fail", result.stdout.strip())
+    expected = [
+        ".changerail/knowledge.yaml",
+        ".changerail/maintenance.yaml",
+        "bin/changerail-maintenance",
+        "bin/changerail-maintenance-runner",
+    ]
+    missing = [
+        rel_path
+        for rel_path in expected
+        if not ((project / rel_path).exists() or (project / rel_path).is_symlink())
+    ]
+    if missing:
+        return Check(
+            "maintenance opt-in bootstrap",
+            "fail",
+            "missing maintenance paths: " + ", ".join(missing),
+        )
+    verify = run(
+        [str(changerail_root / "bin" / "verify-project"), str(project), "--json"],
+        changerail_root,
+        extra_env,
+    )
+    if verify.returncode != 0:
+        return Check("maintenance opt-in bootstrap", "fail", verify.stdout.strip())
+    try:
+        data = json.loads(verify.stdout)
+    except json.JSONDecodeError as exc:
+        return Check("maintenance opt-in bootstrap", "fail", f"verify-project did not emit JSON: {exc}")
+    checks = data.get("checks", [])
+    names = {
+        check.get("name")
+        for check in checks
+        if isinstance(check, dict) and check.get("status") == "pass"
+    }
+    required = {
+        ".changerail/knowledge.yaml",
+        ".changerail/maintenance.yaml",
+        "bin/changerail-maintenance",
+        "bin/changerail-maintenance-runner",
+        "schemas/changerail-maintenance-run.schema.json",
+    }
+    missing_checks = sorted(required - names)
+    if missing_checks:
+        return Check(
+            "maintenance opt-in bootstrap",
+            "fail",
+            "missing passing checks: " + ", ".join(missing_checks),
+        )
+    return Check(
+        "maintenance opt-in bootstrap",
+        "pass",
+        "maintenance paths rendered, wired and verified",
+    )
+
+
+def check_maintenance_dry_run(changerail_root: Path, run_dir: Path) -> Check:
+    project = run_dir / "maintenance-dry-run-project"
+    result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--name",
+            "maintenance-dry-run-project",
+            "--kind",
+            "generic",
+            "--with-maintenance",
+            "--dry-run",
+        ],
+        changerail_root,
+    )
+    if result.returncode != 0:
+        return Check("maintenance opt-in dry-run", "fail", result.stdout.strip())
+    if project.exists():
+        return Check("maintenance opt-in dry-run", "fail", f"target was created: {project}")
+    expected = (".changerail/maintenance.yaml", ".changerail/knowledge.yaml", "bin/changerail-maintenance-runner")
+    missing = [needle for needle in expected if needle not in result.stdout]
+    if missing:
+        return Check("maintenance opt-in dry-run", "fail", "dry-run omitted maintenance paths: " + ", ".join(missing))
+    return Check("maintenance opt-in dry-run", "pass", "maintenance dry-run printed plan and left no target")
 
 
 def check_windows_generated_dry_run(changerail_root: Path, run_dir: Path) -> Check:
@@ -907,6 +1034,8 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     checks = [
         check_bootstrap_success(changerail_root, run_dir, fake_env),
         check_dry_run(changerail_root, run_dir),
+        check_maintenance_bootstrap(changerail_root, run_dir, fake_env),
+        check_maintenance_dry_run(changerail_root, run_dir),
         check_windows_generated_dry_run(changerail_root, run_dir),
         check_windows_generated_bootstrap(changerail_root, run_dir, fake_env),
         check_windows_generated_partial_rollback(changerail_root, run_dir, fake_env),
