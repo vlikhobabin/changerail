@@ -16,8 +16,8 @@ epic
 `00`
 
 ## Planning State
-series baseline captured; executable cards remain in `1.backlog` until their
-dependency and readiness gates pass
+series delivery started; `060-01` passed readiness review and is in `2.todo`,
+later cards remain in `1.backlog` until their dependency and readiness gates pass
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -156,14 +156,16 @@ delivery runner или consumer-owned repository policy.
 - `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
 
 ## Result
-Planning baseline captured; implementation not started.
+Planning baseline published; first delivery unit admitted to implementation.
 
 ## Next
-- Провести readiness review карточки `060-01`; после принятия переместить ее в
-  `2.todo` и запустить `$chrl-deliver` или explicit `$changerail-ff`.
+- Выполнить `060-01` через supervised single-card `$chrl-deliver`, затем
+  актуализировать `060-02` по опубликованному contract.
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
   результатам исследования Harness Engineering и maintenance practices.
 - `2026-08-09T12:35:25Z` — исходная card преобразована в coordination epic;
   зафиксированы architecture decisions, MVP boundary и шесть executable stories.
+- `2026-08-09T13:16:00Z` — `060-01` прошла readiness review и перемещена в
+  `2.todo`; запущен последовательный delivery cycle серии.

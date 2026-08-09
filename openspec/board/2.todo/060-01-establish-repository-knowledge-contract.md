@@ -1,7 +1,7 @@
 # Определить repository knowledge contract
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail core
@@ -16,7 +16,8 @@ story
 `01`
 
 ## Planning State
-candidate for first series delivery after readiness review
+deliver-ready; OpenSpec artifacts are delegated to the internal `ff` phase of
+`$chrl-deliver`
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -120,7 +121,9 @@ Add shared-runtime CLI entrypoints and idempotent index check/write behavior.
 Not started.
 
 ## Next
-- Readiness review; if accepted, move to `2.todo` and run `$chrl-deliver`.
+- Run `$chrl-deliver openspec/board/2.todo/060-01-establish-repository-knowledge-contract.md`.
 
 ## Log
 - `2026-08-09T12:35:25Z` — story extracted from broad maintenance harness card.
+- `2026-08-09T13:16:00Z` — readiness review accepted; moved to `2.todo` for
+  supervised single-card delivery.
