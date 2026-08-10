@@ -73,6 +73,8 @@ MAINTENANCE_SCHEMAS = (
     "changerail-maintenance-baseline.schema.json",
     "changerail-maintenance-triage.schema.json",
     "changerail-maintenance-run.schema.json",
+    "changerail-maintenance-quality-rollup.schema.json",
+    "changerail-maintenance-proposal-decision.schema.json",
 )
 MAINTENANCE_OPT_IN_PATHS = (
     ".changerail/maintenance.yaml",

@@ -35,6 +35,8 @@ EXPECTED_MAINTENANCE_CHECKS = (
     "bin/changerail-maintenance",
     "bin/changerail-maintenance-runner",
     "schemas/changerail-maintenance-run.schema.json",
+    "schemas/changerail-maintenance-quality-rollup.schema.json",
+    "schemas/changerail-maintenance-proposal-decision.schema.json",
 )
 MCP_FILES = (".mcp.json", ".codex/config.toml")
 OPTIONAL_BROWSER_MCP_NEEDLES = ("@playwright/mcp", "chrome-devtools-mcp")
@@ -101,6 +103,25 @@ def symlink_force(target: Path, link_path: Path) -> None:
         else:
             link_path.unlink()
     os.symlink(target, link_path)
+
+
+def create_changerail_root_fixture(source_root: Path, target_root: Path, *, missing_schemas: tuple[str, ...] = ()) -> None:
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    target_root.mkdir(parents=True)
+    for rel_path in (
+        "AGENTS.shared.md",
+        "mcp-npm-lock.json",
+        "templates",
+        "skills",
+        "claude",
+        "bin",
+        "openspec",
+    ):
+        symlink_force(source_root / rel_path, target_root / rel_path)
+    shutil.copytree(source_root / "schemas", target_root / "schemas")
+    for schema in missing_schemas:
+        (target_root / "schemas" / schema).unlink(missing_ok=True)
 
 
 def create_fixture(project: Path, changerail_root: Path, *, with_maintenance: bool = False) -> None:
@@ -754,6 +775,66 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             )
             + "\n"
             + maintenance_verify.stdout.strip(),
+        )
+    )
+
+    missing_quality_root = run_dir / "changerail-root-missing-maintenance-quality-schema"
+    create_changerail_root_fixture(
+        changerail_root,
+        missing_quality_root,
+        missing_schemas=("changerail-maintenance-quality-rollup.schema.json",),
+    )
+    missing_quality_project = run_dir / "bad-maintenance-missing-quality-schema"
+    create_fixture(missing_quality_project, missing_quality_root, with_maintenance=True)
+    missing_quality = run(
+        [
+            str(changerail_root / "bin" / "verify-project"),
+            str(missing_quality_project),
+            "--changerail-root",
+            str(missing_quality_root),
+            "--json",
+        ],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "missing maintenance quality schema fails",
+            "pass"
+            if missing_quality.returncode != 0
+            and "schemas/changerail-maintenance-quality-rollup.schema.json" in missing_quality.stdout
+            else "fail",
+            missing_quality.stdout.strip(),
+        )
+    )
+
+    missing_proposal_root = run_dir / "changerail-root-missing-maintenance-proposal-schema"
+    create_changerail_root_fixture(
+        changerail_root,
+        missing_proposal_root,
+        missing_schemas=("changerail-maintenance-proposal-decision.schema.json",),
+    )
+    missing_proposal_project = run_dir / "bad-maintenance-missing-proposal-schema"
+    create_fixture(missing_proposal_project, missing_proposal_root, with_maintenance=True)
+    missing_proposal = run(
+        [
+            str(changerail_root / "bin" / "verify-project"),
+            str(missing_proposal_project),
+            "--changerail-root",
+            str(missing_proposal_root),
+            "--json",
+        ],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "missing maintenance proposal-decision schema fails",
+            "pass"
+            if missing_proposal.returncode != 0
+            and "schemas/changerail-maintenance-proposal-decision.schema.json" in missing_proposal.stdout
+            else "fail",
+            missing_proposal.stdout.strip(),
         )
     )
 

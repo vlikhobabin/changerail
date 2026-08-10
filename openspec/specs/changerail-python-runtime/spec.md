@@ -17,6 +17,8 @@ and MUST separate runtime dependencies from release-only tooling.
 - **AND** it identifies `tomllib` as a stdlib runtime module requirement
 - **AND** it identifies `jsonschema` as a runtime package requirement for
   schema-backed contract helpers
+- **AND** it identifies `markdown-it-py` / import module `markdown_it` as a
+  runtime package requirement for maintenance Markdown link checks
 
 #### Scenario: Runtime dependencies are explicit
 - **WHEN** the repository dependency files are inspected

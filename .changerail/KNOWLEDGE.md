@@ -18,6 +18,7 @@ Generated from the tracked ChangeRail repository knowledge catalog.
 | `docs/compatibility.md` | active | reference | ChangeRail core | none | python3 scripts/run-release-baseline.py |
 | `docs/consumer-adoption-runbook.md` | active | runbook | ChangeRail core | none | python3 scripts/public-surface-scan.py |
 | `docs/how-it-works.md` | active | explanation | ChangeRail core | none | python3 scripts/public-surface-scan.py |
+| `docs/maintenance-operations-runbook.md` | active | runbook | ChangeRail core | none | python3 scripts/public-surface-scan.py, python3 scripts/smoke-contract-schemas.py |
 | `docs/migration-guide.md` | active | how-to | ChangeRail core | none | python3 scripts/public-surface-scan.py |
 | `docs/openspec-lifecycle.md` | active | reference | ChangeRail core | none | ./bin/openspec validate --all --strict |
 | `docs/release-discipline.md` | active | runbook | ChangeRail core | none | python3 scripts/run-release-baseline.py, python3 scripts/public-surface-scan.py |

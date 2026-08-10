@@ -145,6 +145,8 @@ Expected contract:
 - Runtime helper dependencies are declared in `requirements-runtime.txt`.
 - `tomllib` is required from the Python 3.11 stdlib.
 - `jsonschema` is required for schema-backed manifest and verdict validation.
+- `markdown-it-py` (`markdown_it` import module) is required for deterministic
+  maintenance Markdown local-link checks.
 - `requirements-dev.txt` includes runtime requirements plus release-only tools
   such as `PyYAML` and `ruff`; it is not the implicit runtime API.
 - Operators can choose a specific interpreter without editing tracked shebangs:
@@ -476,8 +478,8 @@ ignored runtime state.
 
 | Host | Prerequisite baseline | Live clean-clone result |
 | --- | --- | --- |
-| `windows-host-a` | Git, Python `3.13.1`, Node `v24.11.1`, npm `11.6.2`; selected Python can import `jsonschema` | passed clean clone, native `.cmd` helper launch, generated-copy bootstrap, `verify-project.cmd`, generated surface discovery, stale generated wiring refresh, scoped no-push staging and cleanup |
-| `windows-host-b` | Git, Python `3.13.1`, Node `v24.11.1`, npm `11.15.0`; selected Python can import `jsonschema` | passed clean clone, native `.cmd` helper launch, generated-copy bootstrap, `verify-project.cmd`, generated surface discovery, stale generated wiring refresh, scoped no-push staging and cleanup |
+| `windows-host-a` | Git, Python `3.13.1`, Node `v24.11.1`, npm `11.6.2`; selected Python can import runtime modules from `requirements-runtime.txt` | passed clean clone, native `.cmd` helper launch, generated-copy bootstrap, `verify-project.cmd`, generated surface discovery, stale generated wiring refresh, scoped no-push staging and cleanup |
+| `windows-host-b` | Git, Python `3.13.1`, Node `v24.11.1`, npm `11.15.0`; selected Python can import runtime modules from `requirements-runtime.txt` | passed clean clone, native `.cmd` helper launch, generated-copy bootstrap, `verify-project.cmd`, generated surface discovery, stale generated wiring refresh, scoped no-push staging and cleanup |
 
 Local deterministic matrix items passed in the same aggregate run:
 entrypoint smoke `56/56`, generated bootstrap smoke `15/15`, verifier/drift

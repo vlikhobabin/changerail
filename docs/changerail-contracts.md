@@ -1,6 +1,6 @@
 # ChangeRail contracts
 
-Статус: рабочий контракт для review, delivery и evidence handoff.
+Статус: рабочий контракт для review, delivery, evidence и maintenance handoff.
 
 ## Namespace
 
@@ -22,6 +22,8 @@
 - `changerail.maintenance-baseline.v1`
 - `changerail.maintenance-triage.v1`
 - `changerail.maintenance-run.v1`
+- `changerail.maintenance-quality-rollup.v1`
+- `changerail.maintenance-proposal-decision.v1`
 
 Schemas находятся в `schemas/`:
 
@@ -42,6 +44,8 @@ schemas/changerail-maintenance-state.schema.json
 schemas/changerail-maintenance-baseline.schema.json
 schemas/changerail-maintenance-triage.schema.json
 schemas/changerail-maintenance-run.schema.json
+schemas/changerail-maintenance-quality-rollup.schema.json
+schemas/changerail-maintenance-proposal-decision.schema.json
 ```
 
 Review verdict-файлы и public schemas должны использовать только
@@ -273,7 +277,7 @@ Evidence может быть committable, runtime или external, но committe
 ## Repository Knowledge
 
 Repository knowledge catalog и maintenance policy являются tracked opt-in
-contracts для future deterministic maintenance harness. Default paths:
+contracts для deterministic maintenance harness. Default paths:
 
 ```text
 .changerail/knowledge.yaml
@@ -578,6 +582,69 @@ The runner owns an atomic repository-local non-overlap lock under the ignored
 maintenance runtime root. Stale or externally created locks block a new run and
 must be handled by an operator; the runner does not delete uncertain locks
 automatically.
+
+## Maintenance Feedback
+
+Maintenance feedback command работает read-only и пишет ровно один
+`changerail.maintenance-detector-result.v1` JSON document для explicit feedback
+inputs:
+
+```bash
+bin/changerail-maintenance feedback \
+  --adapter-id lifecycle --review-history <path> --json
+bin/changerail-maintenance feedback \
+  --adapter-id delivery --delivery-run <path> --json
+bin/changerail-maintenance feedback \
+  --adapter-id external --detector-result <path> --json
+```
+
+Supported inputs:
+
+- schema-valid `changerail.review-cycle-history.v1` review-cycle history;
+- schema-valid `changerail.delivery-run.v1` records whose `result` and
+  `terminal_outcome` are `BLOCKED` and whose `terminal_reason` is structured;
+- schema-valid external `changerail.maintenance-detector-result.v1` producer
+  records.
+
+Feedback normalization fail-closed отклоняет malformed, unsafe,
+schema-invalid или unsupported records. Команда не выводит findings из prose
+logs, diagnostics или review comments. External producers пересекают adapter
+boundary только через detector-result schema и repository-relative safe-path
+validation.
+
+## Maintenance Quality Rollup
+
+Maintenance quality command работает read-only и по умолчанию пишет
+human-readable text, с `--json` пишет один
+`changerail.maintenance-quality-rollup.v1` JSON document, а с `--csv` - stable
+CSV:
+
+```bash
+bin/changerail-maintenance quality --report <latest-report>
+bin/changerail-maintenance quality --report <latest-report> --json
+bin/changerail-maintenance quality --report <latest-report> --csv
+```
+
+Quality inputs являются explicit repository-relative files:
+
+- `--report`: latest schema-valid `changerail.maintenance-report.v1`;
+- `--history`: historical lifecycle reports used for resolved/history metrics;
+- `--triage`: schema-valid `changerail.maintenance-triage.v1`;
+- `--proposal`: schema-valid `changerail.maintenance-proposal-decision.v1`.
+
+Proposal-decision records являются runtime quality observations. Они фиксируют
+accepted/rejected proposal outcomes как evidence для rollup metrics и не дают
+authority на board writes, commits, pushes или publication.
+
+Metric status имеет contract semantics:
+
+- `known`: metric рассчитан из complete schema-valid inputs;
+- `unknown`: required producer input отсутствует, incomplete или не может
+  поддержать calculation.
+
+Incomplete lifecycle history оставляет dependent metrics unknown.
+Schema-invalid reports, triage records или proposal decisions дают diagnostics
+и non-zero exit вместо guessed quality data.
 
 ## Delivery Run Record
 

@@ -114,6 +114,20 @@ records:
       - python3 scripts/public-surface-scan.py
     review_after: null
     supersedes: []
+  - path: docs/maintenance-operations-runbook.md
+    status: active
+    type: runbook
+    owner: ChangeRail core
+    source_globs:
+      - bin/changerail-maintenance
+      - bin/changerail-maintenance-runner
+      - examples/maintenance/**
+      - schemas/changerail-maintenance-*.schema.json
+    verify:
+      - python3 scripts/public-surface-scan.py
+      - python3 scripts/smoke-contract-schemas.py
+    review_after: null
+    supersedes: []
   - path: docs/migration-guide.md
     status: active
     type: how-to

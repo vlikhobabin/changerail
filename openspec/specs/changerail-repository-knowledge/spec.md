@@ -843,3 +843,67 @@ public-safe and default to read-only operation.
 - **WHEN** default repository knowledge smoke tests run in a clean repository
 - **THEN** feedback and runtime-dependent adapters are exercised by fixtures only
 - **AND** the tests do not require pre-existing ignored local review or delivery history
+
+### Requirement: Consumer maintenance starter knowledge contract
+ChangeRail MUST define the maintenance starter catalog/index contract for
+bootstrapped consumers that explicitly opt in to maintenance.
+
+#### Scenario: Starter catalog documents maintenance-owned files
+- **WHEN** a generated consumer opts in to maintenance
+- **THEN** the starter catalog treats `.changerail/knowledge.yaml` and `.changerail/maintenance.yaml` as first-class active knowledge records
+- **AND** the records are validated by the same repository-relative safe-path rules as any consumer-owned record
+
+#### Scenario: Starter catalog avoids exhaustive taxonomy
+- **WHEN** a generated consumer receives starter records
+- **THEN** records are limited to the generic ChangeRail maintenance and board skeleton files required for a green first scan
+- **AND** ChangeRail does not impose domain-specific documentation categories or ownership rules on the consumer repository
+
+### Requirement: First-run maintenance scan is deterministic and read-only
+The first maintenance scan for a generated opted-in consumer MUST be
+deterministic, read-only and below the configured failure threshold.
+
+#### Scenario: First scan is below threshold
+- **WHEN** `./bin/changerail-maintenance scan --json` runs in a fresh generated maintenance consumer
+- **THEN** stdout contains one complete schema-valid `changerail.maintenance-scan-report.v1` document
+- **AND** no detector finding or error reaches the configured `fail_on` threshold
+- **AND** tracked and ignored repository files are not modified by the scan
+
+#### Scenario: Index check remains explicit
+- **WHEN** an operator later edits the starter catalog or policy
+- **THEN** `render-index --check` can report drift without mutating files
+- **AND** `render-index --write` remains the explicit write surface for refreshing the generated index
+
+### Requirement: Maintenance operations runbook
+ChangeRail MUST publish a public Russian maintenance operations runbook for
+consumer repositories that explains the complete manual and agent-facing
+maintenance lifecycle.
+
+#### Scenario: Operator follows adoption flow
+- **WHEN** an operator reads the maintenance operations runbook
+- **THEN** it covers new bootstrap and existing repository adoption prerequisites
+- **AND** it shows catalog, policy, generated index and first scan commands using generic public-safe paths
+- **AND** it explains how to verify a green initial maintenance scan without reading implementation fixtures
+
+#### Scenario: Runbook separates read-only and write operations
+- **WHEN** an operator reads maintenance command examples
+- **THEN** default read-only operations are separated from explicit writes such as `render-index --write`, `--write-state`, baseline write and card write
+- **AND** no maintenance command is described as permission to commit, push, comment, open pull requests or mutate external systems
+
+#### Scenario: Runbook covers feedback and quality
+- **WHEN** an operator reads feedback and quality sections
+- **THEN** review-cycle history, blocked delivery-run and external detector-result feedback inputs are documented
+- **AND** text, JSON and CSV quality outputs are documented with `known` and `unknown` metric semantics
+
+### Requirement: Maintenance scheduler examples are indexed
+ChangeRail MUST index public maintenance scheduler examples from the main
+documentation flow and document their safe prerequisites.
+
+#### Scenario: Scheduler examples are discoverable
+- **WHEN** an operator reads README, adoption docs or the maintenance runbook
+- **THEN** the GitHub Actions, separated CI, Codex scheduled task and systemd examples are listed with their intended use
+- **AND** each example points to prerequisites for consumer checkout and ChangeRail helper wiring
+
+#### Scenario: Scheduler examples remain least privilege
+- **WHEN** scheduler examples are described
+- **THEN** read-only scheduled audit is the default
+- **AND** any write-capable follow-up is described as a separate explicit workflow requiring separate authority

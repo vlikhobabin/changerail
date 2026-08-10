@@ -117,9 +117,9 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - schemas `changerail.review-verdict.v1`,
   `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
   `changerail.delivery-run.v1`, `changerail.evidence-index.v1`,
-  repository knowledge and maintenance contracts, plus helpers
-  `bin/changerail-review-verdict`, `bin/changerail-evidence` and
-  `bin/changerail-maintenance`;
+  repository knowledge и maintenance contracts, включая quality/proposal
+  schemas, а также helpers `bin/changerail-review-verdict`,
+  `bin/changerail-evidence` and `bin/changerail-maintenance`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как fail-closed gate для consumer wiring/config с явными
   non-blocking diagnostics;
@@ -187,6 +187,9 @@ cd /opt/changerail
 
 Если проект должен сразу получить maintenance policy/catalog skeleton и
 scheduled maintenance helper wiring, добавьте `--with-maintenance`.
+Полный порядок первого scan, baseline/waiver, scheduler, feedback, quality и
+card handoff описан в
+[runbook maintenance-операций](docs/maintenance-operations-runbook.md).
 
 После генерации bootstrap запускает тот же verifier.
 По умолчанию bootstrap рендерит portable tracked config: project scope в
@@ -260,6 +263,7 @@ python3 scripts/run-release-baseline.py
 - [Как это работает](docs/how-it-works.md)
 - [Гайд по доскам и двум агентам при разработке фичи](docs/board-and-two-agent-feature-flow.md)
 - [Runbook подключения существующего проекта](docs/consumer-adoption-runbook.md)
+- [Runbook maintenance-операций](docs/maintenance-operations-runbook.md)
 - [ChangeRail как единый source of truth разработки](docs/changerail-source-of-truth-architecture.md)
 - [OpenSpec lifecycle source](docs/openspec-lifecycle.md)
 - [ChangeRail contracts](docs/changerail-contracts.md)

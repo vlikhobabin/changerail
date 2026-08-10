@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 
 MIN_VERSION = (3, 11)
-REQUIRED_MODULES = ("tomllib", "jsonschema")
+REQUIRED_MODULES = ("tomllib", "jsonschema", "markdown_it")
 
 
 def json_line(payload):

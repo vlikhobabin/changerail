@@ -3,6 +3,7 @@ catalog_path: .changerail/knowledge.yaml
 generated_index_path: .changerail/KNOWLEDGE.md
 scan:
   include_globs:
+    - .changerail/KNOWLEDGE.md
     - AGENTS.md
     - docs/**/*.md
     - openspec/**/*.md

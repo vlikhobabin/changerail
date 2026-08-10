@@ -229,6 +229,25 @@ ln -sfnT "$ChangeRail/bin/changerail-maintenance" "$PROJECT/bin/changerail-maint
 ln -sfnT "$ChangeRail/bin/changerail-maintenance-runner" "$PROJECT/bin/changerail-maintenance-runner"
 ```
 
+После opt-in выполните полный maintenance adoption flow из
+[runbook maintenance-операций](maintenance-operations-runbook.md): catalog
+validation, `render-index --check`, первый `scan --json`, lifecycle report,
+baseline/waiver policy, scheduler setup, feedback/quality rollup и card
+handoff. Scheduler examples находятся в `examples/maintenance/`:
+
+- `examples/maintenance/github-actions-readonly.yml` - read-only GitHub
+  scheduled audit с `contents: read`;
+- `examples/maintenance/ci-readonly-vs-write.yml` - разделение read-only
+  analysis и отдельного write-capable workflow;
+- `examples/maintenance/codex-scheduled-task.md` - scheduled task для
+  isolated checkout;
+- `examples/maintenance/systemd/changerail-maintenance.service` и
+  `examples/maintenance/systemd/changerail-maintenance.timer` - local POSIX
+  scheduler.
+
+Default scheduler authority остается read-only. Любой write follow-up требует
+отдельной явной authority и не наследуется от audit job.
+
 Если команда не может заменить существующий реальный каталог или файл, агент
 должен остановиться и показать конфликт. Типовые конфликты:
 
@@ -264,7 +283,8 @@ artifacts и не трогать project-owned files:
 Минимальные prerequisites для native Windows verification: Git for Windows,
 Python `3.11+` with `requirements-runtime.txt`, `cmd.exe`, and Node/npm/npx for
 OpenSpec launch and MCP npm integrity verification. Если `verify-project.cmd`
-сообщает missing `jsonschema`, выполните install в выбранный Python runtime;
+сообщает missing `jsonschema` или `markdown_it`, выполните install в выбранный
+Python runtime;
 если он сообщает missing `npm`, сначала установите supported Node/npm toolchain
 и rerun verification. Full Windows support claim требует passing live matrix или
 tracked explicit blocker в ChangeRail compatibility notes.

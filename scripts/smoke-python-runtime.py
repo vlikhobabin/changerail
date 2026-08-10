@@ -117,6 +117,15 @@ def check_missing_dependency(tmp: Path) -> Check:
     return Check("missing dependency diagnostic", "fail", detail or f"exit {result.returncode}")
 
 
+def check_missing_markdown_dependency(tmp: Path) -> Check:
+    missing = fake_python(tmp / "python-missing-markdown-it", (3, 11, 0), ["markdown_it"])
+    result = run([str(LAUNCHER), "--check"], {"CHANGERAIL_PYTHON": str(missing)})
+    detail = result.stderr.strip() or result.stdout.strip()
+    if result.returncode != 0 and "markdown_it" in detail and "requirements-runtime.txt" in detail:
+        return Check("missing markdown dependency diagnostic", "pass", detail)
+    return Check("missing markdown dependency diagnostic", "fail", detail or f"exit {result.returncode}")
+
+
 def check_invalid_override() -> Check:
     result = run([str(LAUNCHER), "--check"], {"CHANGERAIL_PYTHON": "/opt/example-project/missing-python"})
     detail = result.stderr.strip() or result.stdout.strip()
@@ -159,6 +168,7 @@ def run_smoke() -> dict[str, object]:
                 check_supported_runtime(tmp),
                 check_old_runtime(tmp),
                 check_missing_dependency(tmp),
+                check_missing_markdown_dependency(tmp),
                 check_invalid_override(),
                 check_bootstrap_invalid_override(),
                 check_runtime_state_ignored(),

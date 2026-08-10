@@ -24,6 +24,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from changerail_repository_knowledge import (
+    DEFAULT_CATALOG_PATH,
+    DEFAULT_POLICY_PATH,
+    atomic_write_text,
+    configured_index_path,
+    render_index_content,
+    require_valid_result,
+    validate_catalog_and_policy,
+)
+
 
 SPECIAL_OUTPUTS = {
     Path("gitignore.tpl"): Path(".gitignore"),
@@ -301,6 +311,26 @@ def write_templates(
             )
         else:
             shutil.copy2(source, destination)
+
+
+def write_maintenance_index(target: Path) -> None:
+    result = validate_catalog_and_policy(
+        root=target,
+        catalog_path=DEFAULT_CATALOG_PATH,
+        policy_path=DEFAULT_POLICY_PATH,
+    )
+    require_valid_result(result)
+    if result.catalog is None:
+        raise BootstrapError("maintenance catalog did not load after template rendering")
+    index_path = configured_index_path(target, result)
+    rel_index = rel_to_root(index_path, target)
+    content = render_index_content(
+        result.catalog,
+        catalog_path=result.catalog_path,
+        policy_path=result.policy_path,
+        index_path=rel_index,
+    )
+    atomic_write_text(index_path, content)
 
 
 def create_symlink(target: Path, link_path: Path) -> None:
@@ -1111,6 +1141,8 @@ def print_plan(
         include_maintenance=include_maintenance,
     ):
         print(f"PLAN {action} {source} -> {destination}")
+    if include_maintenance:
+        print(f"PLAN render-maintenance-index {target / '.changerail' / 'KNOWLEDGE.md'}")
     if backend == "generated-copy":
         for artifact in wiring_artifacts(
             changerail_root,
@@ -1269,6 +1301,8 @@ def main(argv: list[str]) -> int:
             config_mode=args.config_mode,
             include_maintenance=args.with_maintenance,
         )
+        if args.with_maintenance:
+            write_maintenance_index(target)
         create_wiring(
             changerail_root=changerail_root,
             target=target,

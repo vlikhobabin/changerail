@@ -3,7 +3,7 @@ set -u
 
 MIN_MAJOR=3
 MIN_MINOR=11
-REQUIRED_MODULES="tomllib jsonschema"
+REQUIRED_MODULES="tomllib jsonschema markdown_it"
 
 resolve_self() {
     self=$1
@@ -98,7 +98,7 @@ if [ -z "$resolved_candidate" ]; then
 fi
 
 probe='import importlib.util, sys
-required = ("tomllib", "jsonschema")
+required = ("tomllib", "jsonschema", "markdown_it")
 missing = [name for name in required if importlib.util.find_spec(name) is None]
 version = "%d.%d.%d" % sys.version_info[:3]
 print(version + "|" + sys.executable + "|" + ",".join(missing))
@@ -151,7 +151,7 @@ if [ -d "$runtime_dir" ]; then
         printf '  "source": "%s",\n' "$escaped_source"
         printf '  "executable": "%s",\n' "$escaped_executable"
         printf '  "version": "%s",\n' "$escaped_version"
-        printf '  "required_modules": ["tomllib", "jsonschema"]\n'
+        printf '  "required_modules": ["tomllib", "jsonschema", "markdown_it"]\n'
         printf '}\n'
     } > "$tmp_state" 2>/dev/null && mv "$tmp_state" "$state_path" 2>/dev/null || rm -f "$tmp_state"
 fi
@@ -160,7 +160,7 @@ if [ "$json_output" -eq 1 ] && [ "$check_only" -eq 1 ]; then
     escaped_executable=$(json_escape "$executable")
     escaped_source=$(json_escape "$candidate_source")
     escaped_version=$(json_escape "$version")
-    printf '{"ok":true,"source":"%s","executable":"%s","version":"%s","required_modules":["tomllib","jsonschema"]}\n' "$escaped_source" "$escaped_executable" "$escaped_version"
+    printf '{"ok":true,"source":"%s","executable":"%s","version":"%s","required_modules":["tomllib","jsonschema","markdown_it"]}\n' "$escaped_source" "$escaped_executable" "$escaped_version"
 fi
 
 if [ "$check_only" -eq 1 ]; then

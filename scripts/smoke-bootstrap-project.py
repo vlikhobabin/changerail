@@ -211,6 +211,7 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
     if (project / ".codex" / "auth.json").exists() or (project / ".codex" / "auth.json").is_symlink():
         return Check("bootstrap valid project", "fail", "default bootstrap created auth marker")
     maintenance_paths = [
+        ".changerail/KNOWLEDGE.md",
         ".changerail/knowledge.yaml",
         ".changerail/maintenance.yaml",
         "bin/changerail-maintenance",
@@ -285,6 +286,7 @@ def check_maintenance_bootstrap(
     if result.returncode != 0:
         return Check("maintenance opt-in bootstrap", "fail", result.stdout.strip())
     expected = [
+        ".changerail/KNOWLEDGE.md",
         ".changerail/knowledge.yaml",
         ".changerail/maintenance.yaml",
         "bin/changerail-maintenance",
@@ -300,6 +302,42 @@ def check_maintenance_bootstrap(
             "maintenance opt-in bootstrap",
             "fail",
             "missing maintenance paths: " + ", ".join(missing),
+        )
+    validate = run(
+        [str(project / "bin" / "changerail-maintenance"), "validate-catalog", "--json"],
+        project,
+        extra_env,
+    )
+    if validate.returncode != 0:
+        return Check(
+            "maintenance opt-in bootstrap",
+            "fail",
+            "first-run validate-catalog failed; starter catalog regression would not be caught: "
+            + validate.stdout.strip(),
+        )
+    render = run(
+        [str(project / "bin" / "changerail-maintenance"), "render-index", "--check"],
+        project,
+        extra_env,
+    )
+    if render.returncode != 0:
+        return Check(
+            "maintenance opt-in bootstrap",
+            "fail",
+            "first-run render-index --check failed; missing generated index regression would not be caught: "
+            + render.stdout.strip(),
+        )
+    scan = run(
+        [str(project / "bin" / "changerail-maintenance"), "scan", "--json"],
+        project,
+        extra_env,
+    )
+    if scan.returncode != 0:
+        return Check(
+            "maintenance opt-in bootstrap",
+            "fail",
+            "first-run scan failed; uncovered starter catalog regression would not be caught: "
+            + scan.stdout.strip(),
         )
     verify = run(
         [str(changerail_root / "bin" / "verify-project"), str(project), "--json"],
@@ -324,6 +362,8 @@ def check_maintenance_bootstrap(
         "bin/changerail-maintenance",
         "bin/changerail-maintenance-runner",
         "schemas/changerail-maintenance-run.schema.json",
+        "schemas/changerail-maintenance-quality-rollup.schema.json",
+        "schemas/changerail-maintenance-proposal-decision.schema.json",
     }
     missing_checks = sorted(required - names)
     if missing_checks:
@@ -335,7 +375,7 @@ def check_maintenance_bootstrap(
     return Check(
         "maintenance opt-in bootstrap",
         "pass",
-        "maintenance paths rendered, wired and verified",
+        "maintenance paths rendered, first-run checks green and wiring verified",
     )
 
 
@@ -358,7 +398,12 @@ def check_maintenance_dry_run(changerail_root: Path, run_dir: Path) -> Check:
         return Check("maintenance opt-in dry-run", "fail", result.stdout.strip())
     if project.exists():
         return Check("maintenance opt-in dry-run", "fail", f"target was created: {project}")
-    expected = (".changerail/maintenance.yaml", ".changerail/knowledge.yaml", "bin/changerail-maintenance-runner")
+    expected = (
+        ".changerail/KNOWLEDGE.md",
+        ".changerail/maintenance.yaml",
+        ".changerail/knowledge.yaml",
+        "bin/changerail-maintenance-runner",
+    )
     missing = [needle for needle in expected if needle not in result.stdout]
     if missing:
         return Check("maintenance opt-in dry-run", "fail", "dry-run omitted maintenance paths: " + ", ".join(missing))
