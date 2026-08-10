@@ -81,8 +81,14 @@ jobs:
       - name: Verify-project smoke
         run: python3 scripts/smoke-verify-project.py
 
+      - name: Runtime diagnostics smoke
+        run: python3 scripts/smoke-runtime-diagnostics.py
+
       - name: Bootstrap smoke
         run: python3 scripts/smoke-bootstrap-project.py
+
+      - name: Consumer CI smoke
+        run: python3 scripts/smoke-consumer-ci.py
 
       - name: Review contract smoke
         run: |
@@ -107,6 +113,7 @@ jobs:
           rm -rf .runtime/changerail/ci-drift
           ./bin/bootstrap-project .runtime/changerail/ci-drift/example-project \
             --name example-project \
-            --kind generic
+            --kind generic \
+            --lock-enforcement none
           python3 scripts/smoke-drift.py \
             --project .runtime/changerail/ci-drift/example-project

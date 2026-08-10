@@ -13,6 +13,7 @@
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
 - `changerail.review-cycle-history.v1`
+- `changerail.consumer-lock.v1`
 - `changerail.repository-knowledge.v1`
 - `changerail.maintenance-policy.v1`
 - `changerail.maintenance-scan-report.v1`
@@ -35,6 +36,7 @@ schemas/changerail-delivery-run.schema.json
 schemas/changerail-delivery-plan.schema.json
 schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-review-cycle-history.schema.json
+schemas/changerail-consumer-lock.schema.json
 schemas/changerail-repository-knowledge.schema.json
 schemas/changerail-maintenance-policy.schema.json
 schemas/changerail-maintenance-scan-report.schema.json
@@ -56,6 +58,20 @@ Runtime helpers валидируют указанные документы по 
 с проверкой `format`, `additionalProperties`, conditional required fields и
 nested types до применения semantic checks ChangeRail. Любая ошибка schema
 validation дает fail-closed non-zero результат со structured diagnostic.
+
+## Consumer Lock
+
+Tracked `openspec/changerail-consumer-lock.json` фиксирует public-safe
+ChangeRail `version`, exact Git `revision`, canonical HTTPS source, wiring
+backend/path mode/artifact inventory, выбранные profiles и
+`advisory|strict` enforcement. Schema `changerail.consumer-lock.v1` запрещает
+absolute source paths, credential-bearing URI, incomplete revisions,
+unsupported profiles и path traversal.
+
+Lock не хранит resolved ChangeRail root. Для POSIX symlink wiring artifact
+использует только project-relative `path` и ChangeRail-relative `source`.
+`openspec/changerail-wiring.json` остается отдельным frozen ownership manifest
+для generated Windows copies и не заменяется consumer lock.
 
 ## Review Verdict
 

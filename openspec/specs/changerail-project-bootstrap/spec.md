@@ -413,3 +413,207 @@ project-owned catalog or policy customization.
 - **WHEN** a consumer has changed `.changerail/knowledge.yaml` or `.changerail/maintenance.yaml`
 - **THEN** bootstrap or refresh refuses to overwrite that customization silently
 - **AND** diagnostics identify the required operator action without printing private paths or runtime data
+
+### Requirement: Bootstrap topology, surface and Codex authority profiles
+`bootstrap-project` MUST accept canonical project, surface and Codex authority
+profiles, normalize them before target mutation and render the selected policy
+as tracked consumer configuration. The public default MUST use `generic`,
+`all-surfaces` and `safe-interactive`; `trusted-automation` MUST require explicit
+operator selection.
+
+#### Scenario: Operator uses public defaults
+- **WHEN** an operator bootstraps a project without profile flags
+- **THEN** bootstrap selects `generic`, `all-surfaces` and `safe-interactive`
+- **AND** generated Codex policy uses `on-request` and `workspace-write`
+
+#### Scenario: Operator explicitly selects trusted automation
+- **WHEN** an operator passes `--codex-policy trusted-automation`
+- **THEN** generated Codex policy uses `never` and `danger-full-access`
+- **AND** dry-run reports that authority choice before writing files
+
+#### Scenario: Profile combination is invalid
+- **WHEN** an operator supplies an unknown profile or conflicting canonical and
+  legacy values
+- **THEN** bootstrap exits non-zero before creating or modifying the target
+
+### Requirement: Legacy kind compatibility
+`bootstrap-project` MUST retain `--kind` as a bounded compatibility alias for
+supported project profiles while generated artifacts and documentation use the
+canonical profile terminology.
+
+#### Scenario: Legacy generic bootstrap runs
+- **WHEN** an existing script passes `--kind generic` and no conflicting
+  `--profile`
+- **THEN** bootstrap normalizes the value to profile `generic`
+- **AND** generated project behavior matches the canonical profile
+
+#### Scenario: Legacy alias conflicts with canonical profile
+- **WHEN** `--kind generic` and `--profile service` are supplied together
+- **THEN** bootstrap fails before target mutation with an actionable conflict
+  diagnostic
+
+### Requirement: Portable POSIX wiring path modes
+POSIX symlink bootstrap MUST support `absolute` and `relative` wiring path modes.
+Independent consumer bootstrap MUST default to absolute targets resolved from
+the declared ChangeRail root, while relative targets MUST require explicit
+operator opt-in.
+
+#### Scenario: Independent POSIX consumer uses default wiring
+- **WHEN** an operator bootstraps a POSIX consumer without a path-mode override
+- **THEN** generated symlinks target the resolved declared ChangeRail root
+- **AND** moving the consumer checkout alone does not change the target meaning
+
+#### Scenario: Operator selects relative workspace wiring
+- **WHEN** an operator passes `--wiring-path-mode relative`
+- **THEN** bootstrap records that explicit path mode in tracked intent
+- **AND** dry-run reports the relative topology requirement
+
+#### Scenario: Path mode is incompatible with backend
+- **WHEN** an operator supplies a POSIX path mode for an incompatible backend
+- **THEN** bootstrap exits non-zero before target mutation
+
+### Requirement: Consumer source and wiring lock generation
+Bootstrap MUST support a tracked `openspec/changerail-consumer-lock.json` that
+validates as `changerail.consumer-lock.v1`. Locked modes MUST record ChangeRail
+version/revision, canonical source reference, wiring intent, selected profiles
+and enforcement without machine-local paths or credential-bearing URLs.
+
+#### Scenario: Advisory lock is generated
+- **WHEN** bootstrap uses a clean tracked ChangeRail source and advisory lock
+  enforcement
+- **THEN** it writes a schema-valid public-safe consumer lock
+
+#### Scenario: Strict lock is generated
+- **WHEN** bootstrap uses strict lock enforcement
+- **THEN** the lock records an exact Git revision suitable for CI reproduction
+
+#### Scenario: Source checkout is dirty
+- **WHEN** locked bootstrap sees uncommitted ChangeRail source changes
+- **THEN** it fails before target mutation and does not claim a reproducible
+  revision
+
+### Requirement: Manifest-owned POSIX wiring refresh
+Bootstrap MUST refresh or repair POSIX wiring only for paths declared by the
+consumer lock and MUST fail closed on project-owned content, scope escape,
+symlink parent escape or unrelated dirty state.
+
+#### Scenario: Disposable checkout is relocated
+- **WHEN** lock-driven refresh is run with the same revision at a new declared
+  ChangeRail root
+- **THEN** only known symlink targets are updated
+- **AND** verification can proceed without manual rewiring
+
+#### Scenario: Owned path contains a real file
+- **WHEN** a declared wiring path contains project-owned non-symlink content
+- **THEN** refresh exits non-zero without replacing that content
+
+### Requirement: Explicit pinned consumer CI bootstrap
+`bootstrap-project` MUST generate consumer CI only after explicit `--with-ci`
+selection and MUST require a schema-valid strict consumer lock with an exact
+ChangeRail revision. Invalid combinations MUST fail before target mutation.
+
+#### Scenario: Operator opts into CI
+- **WHEN** an operator bootstraps with `--with-ci` and strict lock enforcement
+- **THEN** the target receives the tracked consumer CI workflow
+- **AND** dry-run reports the workflow, lock and exact-revision requirements
+
+#### Scenario: CI is requested with advisory lock
+- **WHEN** `--with-ci` is combined with advisory or absent lock enforcement
+- **THEN** bootstrap exits non-zero before writing the target
+
+#### Scenario: Default bootstrap omits CI
+- **WHEN** an operator does not pass `--with-ci`
+- **THEN** bootstrap does not generate a CI provider workflow
+
+### Requirement: Consumer CI uses exact lock revision
+Generated CI MUST read `changerail.consumer-lock.v1`, checkout the declared
+ChangeRail source at the exact revision into a disposable path, perform bounded
+lock-owned wiring repair and run consumer verification without delivery auth.
+
+#### Scenario: Clean-clone CI executes
+- **WHEN** generated CI runs for a committed consumer
+- **THEN** it installs the exact locked ChangeRail revision
+- **AND** `verify-project` and the declared consumer baseline run from the clean
+  clone
+
+#### Scenario: Locked revision cannot be obtained
+- **WHEN** the exact source revision is absent or unavailable
+- **THEN** CI fails before wiring repair or verification with an actionable
+  source diagnostic
+
+### Requirement: Bounded existing-project configuration mode
+`bootstrap-project` MUST provide an explicit existing-project mode that performs
+only allowlisted auth-link and manifest-owned wiring actions without rendering
+or overwriting project-owned templates. The mode MUST be idempotent and MUST
+fail closed on unsupported flags, unrelated dirty state or ownership conflict.
+
+#### Scenario: Operator configures auth after bootstrap
+- **WHEN** an operator invokes existing-project mode with a valid auth-link
+  source
+- **THEN** bootstrap creates or confirms the ignored project-local auth symlink
+- **AND** it does not read or print credential contents
+
+#### Scenario: Desired configuration already exists
+- **WHEN** the auth link and owned wiring already match declared intent
+- **THEN** repeated configuration succeeds without changing tracked files
+
+#### Scenario: Project-owned content conflicts
+- **WHEN** an allowlisted destination contains a real project-owned file or
+  undeclared link
+- **THEN** configuration exits non-zero without replacing that content
+
+#### Scenario: Configure mode receives template flags
+- **WHEN** existing-project mode is combined with project generation or profile
+  rendering options
+- **THEN** bootstrap fails before mutation and explains the mode boundary
+
+### Requirement: Explicit README and Git initialization
+Initial bootstrap MUST support separate opt-ins for a minimal README and Git
+repository initialization. Git options MUST never stage, commit, push, create a
+remote repository or publish external state.
+
+#### Scenario: Empty consumer requests README
+- **WHEN** an operator passes `--with-readme` for a new target
+- **THEN** bootstrap renders a public-safe minimal project README
+
+#### Scenario: Consumer requests Git initialization
+- **WHEN** an operator passes `--init-git` with a default branch and optional
+  remote
+- **THEN** bootstrap initializes or confirms the requested local Git state
+- **AND** leaves the worktree uncommitted and unpushed
+
+#### Scenario: README or Git state conflicts
+- **WHEN** an existing README, repository branch or remote contradicts requested
+  initialization
+- **THEN** bootstrap fails closed without overwriting or publishing state
+
+#### Scenario: Git detail is supplied without opt-in
+- **WHEN** a default branch or remote is supplied without `--init-git`
+- **THEN** bootstrap rejects the combination before target mutation
+
+### Requirement: Tracked consumer instruction budget
+Bootstrap MUST render an explicit `project_doc_max_bytes` value in generated
+Codex config and MUST keep generated `AGENTS.md` below the warning threshold at
+creation time. The budget MUST be tracked project policy rather than an inferred
+machine default.
+
+#### Scenario: Consumer is generated
+- **WHEN** bootstrap renders a default consumer
+- **THEN** `.codex/config.toml` declares `project_doc_max_bytes = 32768`
+- **AND** generated `AGENTS.md` remains below 85 percent of that value
+
+#### Scenario: Generated instructions exceed warning threshold
+- **WHEN** template and shared instructions would reach 85 percent before target
+  creation completes
+- **THEN** bootstrap reports the measured byte count and remediation
+- **AND** it does not silently claim an unconstrained instruction surface
+
+### Requirement: Runtime diagnostic handoff
+Generated guidance MUST distinguish static verification from opt-in effective
+Codex runtime diagnostics and MUST identify ignored evidence and credential
+boundaries.
+
+#### Scenario: Operator reads generated guidance
+- **WHEN** a consumer inspects verification instructions
+- **THEN** static config validation is not described as effective runtime proof
+- **AND** the opt-in runtime command and ignored evidence location are stated

@@ -182,8 +182,14 @@ cd /opt/changerail
 ```bash
 /opt/changerail/bin/bootstrap-project /opt/example-project \
   --name example-project \
-  --kind generic
+  --profile generic
 ```
+
+Bootstrap по умолчанию выбирает `all-surfaces` и безопасную Codex policy
+`safe-interactive` (`on-request`/`workspace-write`). Для unattended automation
+нужен явный `--codex-policy trusted-automation`; Codex-only consumer выбирается
+через `--surfaces codex-only`. Legacy `--kind generic` временно поддерживается
+как alias `--profile generic`.
 
 Если проект должен сразу получить maintenance policy/catalog skeleton и
 scheduled maintenance helper wiring, добавьте `--with-maintenance`.
@@ -197,6 +203,13 @@ card handoff описан в
 absolute path. Если оператору нужен локальный absolute-path config, используйте
 `--config-mode local`; bootstrap напечатает warning перед предложенным
 `git add`.
+
+Для greenfield проекта `--with-readme` добавляет минимальный README, а
+`--init-git --default-branch main --remote <url>` настраивает только локальный
+Git repository без add/commit/push. Для уже созданного consumer обычная
+генерация по-прежнему запрещена; bounded
+`--configure-existing --link-codex-auth AUTH_JSON` и/или `--refresh-wiring`
+выполняет только allowlisted idempotent actions.
 
 Повторная проверка:
 

@@ -218,6 +218,8 @@ The CI workflow runs:
 - `scripts/smoke-wiring-discovery.py`;
 - `scripts/smoke-verify-project.py`;
 - `scripts/smoke-bootstrap-project.py`;
+- `scripts/smoke-consumer-ci.py` for structured read-only workflow validation,
+  strict-lock clean-clone execution and negative lock/wiring fixtures;
 - `scripts/smoke-review-verdict-validation.py`;
 - `scripts/smoke-review-fingerprint.py`;
 - `scripts/smoke-retained-evidence.py`;

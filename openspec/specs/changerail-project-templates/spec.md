@@ -228,3 +228,122 @@ generated knowledge index matching the rendered starter catalog and policy.
 - **WHEN** generated maintenance starter files are scanned before commit
 - **THEN** `.changerail/KNOWLEDGE.md` contains only repository-relative paths and generic public-safe text
 - **AND** it contains no credentials, runtime report content or private workspace names
+
+### Requirement: Profile-aware consumer templates
+Project templates MUST render the selected project topology, surface policy and
+Codex authority as observable tracked configuration. Profiles MUST describe
+repository ownership and agent authority without generating domain-specific
+application code.
+
+#### Scenario: Workspace root profile is rendered
+- **WHEN** bootstrap selects `workspace-root`
+- **THEN** generated guidance declares aggregator ownership and independent
+  child-repository boundaries
+- **AND** bootstrap does not create child repositories or application source
+
+#### Scenario: Service profile is rendered
+- **WHEN** bootstrap selects `service`
+- **THEN** generated guidance declares single-repository delivery ownership
+- **AND** no domain framework or deployment configuration is implied
+
+#### Scenario: Codex-only surfaces are rendered
+- **WHEN** bootstrap selects `codex-only`
+- **THEN** tracked verification policy marks Codex required, Claude optional
+  and legacy artifacts forbidden
+- **AND** mandatory targeted OpenSpec validation remains required
+
+### Requirement: Explicit Codex authority templates
+The Codex config template MUST render `safe-interactive` as
+`approval_policy = "on-request"` and `sandbox_mode = "workspace-write"`, and MUST
+render `never`/`danger-full-access` only for explicit `trusted-automation`.
+
+#### Scenario: Generic project uses safe authority
+- **WHEN** a generic project is rendered with default options
+- **THEN** its tracked Codex config does not grant unattended full access
+
+#### Scenario: Automation project records explicit authority
+- **WHEN** trusted automation is selected
+- **THEN** generated guidance identifies the profile as an explicit operator
+  choice and documents its risk boundary
+
+### Requirement: Public-safe consumer CI template
+The project template set MUST include an opt-in consumer CI workflow that uses
+read-only repository permissions, exact lock-driven ChangeRail checkout and the
+same verification commands documented for local consumers.
+
+#### Scenario: CI template is rendered
+- **WHEN** bootstrap renders the CI opt-in
+- **THEN** `.github/workflows/changerail-consumer-verify.yml` is generated
+- **AND** it reads the consumer lock rather than a floating branch
+
+#### Scenario: Workflow authority is inspected
+- **WHEN** a maintainer reviews the generated workflow
+- **THEN** repository permission is read-only
+- **AND** no commit, push, PR, publish or deployment step is present
+
+#### Scenario: Workflow runs without Codex credentials
+- **WHEN** baseline CI executes without Codex auth state
+- **THEN** static consumer verification can complete
+- **AND** no delivery runner is launched
+
+### Requirement: Provider-neutral CI handoff
+Generated guidance MUST identify the lock-driven checkout, repair and verify
+sequence as the provider-neutral contract even when the initial tracked
+template targets GitHub Actions.
+
+#### Scenario: Operator uses another CI provider
+- **WHEN** an operator reads generated CI guidance
+- **THEN** exact source checkout, disposable wiring repair and verification
+  commands are stated independently of GitHub-specific syntax
+
+### Requirement: Optional generated consumer README
+The template set MUST provide a minimal public-safe consumer README that is
+rendered only through explicit bootstrap opt-in and is never used as an
+overwrite source for an existing README.
+
+#### Scenario: README opt-in is rendered
+- **WHEN** a new empty consumer selects README generation
+- **THEN** the file identifies the project, selected ChangeRail profile and
+  local verification command
+- **AND** it contains no machine-local path, private remote or credential data
+
+#### Scenario: README already exists
+- **WHEN** bootstrap or configure sees an existing README
+- **THEN** it preserves the file and reports the ownership conflict rather than
+  replacing it
+
+### Requirement: Generated Git handoff guidance
+Generated guidance MUST distinguish local Git initialization from commit and
+publication and MUST state the exact remaining operator actions.
+
+#### Scenario: Git repository is initialized
+- **WHEN** bootstrap performs explicit local Git initialization
+- **THEN** completion output states that no files were staged, committed or
+  pushed
+- **AND** commit/push remain separate operator actions
+
+### Requirement: Instruction-budget-aware templates
+Project templates MUST render one explicit instruction budget source of truth
+and MUST keep project-specific rules before generated shared methodology so
+budget remediation can distinguish the two ownership classes.
+
+#### Scenario: Default template is measured
+- **WHEN** bootstrap smoke renders `AGENTS.md`
+- **THEN** the UTF-8 byte size is measured against the tracked Codex budget
+- **AND** the fixture fails if default content reaches the 85 percent warning
+  threshold
+
+#### Scenario: Project rules approach the budget
+- **WHEN** a fixture expands project-specific instructions past 85 percent but
+  not beyond the budget
+- **THEN** verification emits a non-blocking warning naming both measured and
+  allowed bytes
+
+### Requirement: Runtime evidence guidance is public-safe
+Templates MUST state that raw Codex diagnostic output remains ignored and that
+only allowlisted redacted fields may appear in reports, cards or documentation.
+
+#### Scenario: Runtime guidance is scanned
+- **WHEN** public-surface checks inspect generated guidance
+- **THEN** it contains no example credential, private home path or raw doctor
+  output

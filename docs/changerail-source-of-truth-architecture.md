@@ -332,19 +332,31 @@ Bootstrap должен:
    `.codex/config.toml`, `openspec/config.yaml`, `openspec/board/README.md`.
 5. Для domain-specific templates добавить расширенные verification rules.
 6. Запустить `verify-project`.
-7. Напечатать следующие шаги: `git init`, первый commit, подключение remote.
+7. Напечатать operator-owned шаги для staging, первого commit и публикации.
 
 Шаблоны project-local файлов находятся в `templates/project/`. Bootstrap
 рендерит `*.tpl` файлы с placeholders для portable project scope, project name,
-project kind и ChangeRail source label, копирует OpenSpec skeleton и создает
+project/surface/Codex profiles и ChangeRail source label, копирует OpenSpec skeleton и создает
 symlink-и на ChangeRail-owned surfaces.
 
 Текущая реализация `bin/bootstrap-project` поддерживает `--dry-run`,
 `--backup-existing`, `--skip-verify` и `--config-mode portable|local` для
-диагностики. Default `portable` не записывает machine-local absolute target path
-в tracked templates; `local` требует explicit opt-in и печатает warning перед
-предложенным staging. Bootstrap по умолчанию запускает `bin/verify-project`
-после генерации.
+диагностики. `--with-readme` opt-in рендерит минимальный README, а `--init-git`
+может задать initial branch и `origin`, не выполняя add/commit/push. Отдельный
+`--configure-existing` не рендерит templates и выполняет только idempotent
+auth-link и lock-owned POSIX wiring repair. Default `portable` не записывает
+machine-local absolute target path в tracked templates; `local` требует
+explicit opt-in и печатает warning перед предложенным staging. Bootstrap по
+умолчанию запускает `bin/verify-project` после генерации.
+
+Три независимые оси задаются через `--profile
+generic|workspace-root|service`, `--surfaces all-surfaces|codex-only` и
+`--codex-policy safe-interactive|trusted-automation`. Public default безопасный:
+`safe-interactive` рендерит `on-request`/`workspace-write`; unattended
+`never`/`danger-full-access` требует explicit `trusted-automation`. Legacy
+`--kind` ограниченно поддерживается как alias project profile. Verifier
+сопоставляет metadata с surface matrix и Codex TOML; consumers без metadata
+остаются в строгом legacy all-surfaces режиме.
 
 ## 11. Verification и drift
 

@@ -6,7 +6,25 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
-- none
+- POSIX bootstrap defaults to absolute symlink targets and can write
+  `changerail.consumer-lock.v1` with advisory or strict source enforcement.
+- Existing lockless consumers remain supported. Development fixtures that
+  intentionally use a dirty ChangeRail checkout should pass
+  `--lock-enforcement none` explicitly.
+- Existing relative-layout consumers can retain that topology with
+  `--wiring-path-mode relative`; lock-owned repair uses `--refresh-wiring` and
+  refuses project-owned paths or unrelated dirty state.
+- Existing wired consumers can run bounded `--configure-existing` with only
+  `--link-codex-auth` and/or lock-owned POSIX `--refresh-wiring`; template and
+  profile flags are rejected before mutation.
+- Greenfield consumers can explicitly request a minimal README and local Git
+  initialization. `--init-git` may set the initial branch and `origin`, but
+  never stages, commits, pushes or creates a remote repository.
+- Generated Codex config now tracks `project_doc_max_bytes = 32768`; older
+  consumers without the key use that compatibility default until migrated.
+  Runtime proof is separate and opt-in through `verify-project
+  --runtime-diagnostics`; default verification remains static and does not
+  invoke Codex.
 
 ## 0.3.0 -> 0.4.0
 

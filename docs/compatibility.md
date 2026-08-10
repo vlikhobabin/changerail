@@ -34,10 +34,24 @@ Expected contract:
 - Codex runtime/auth/session files under `.codex/` are not part of the public
   tracked surface except `.codex/config.toml` and repo-local skill symlinks.
 
+Generated consumers track `project_doc_max_bytes = 32768`. Static verifier
+measurement uses UTF-8 bytes: below 85 percent passes, 85 percent through the
+limit warns non-blocking, and over the limit fails blocking. A missing key in
+an older consumer uses the same compatibility default until migration.
+
+Opt-in runtime diagnostics currently support the `codex-cli 0.147.x`
+`doctor --json` schema version 1 and `debug prompt-input` JSON shape. Other
+versions or schemas are reported as unsupported/invalid rather than runtime
+success. Default `verify-project` never invokes Codex; explicit
+`--runtime-diagnostics` requires project-local `CODEX_HOME`, stores raw output
+under ignored `.runtime/changerail/diagnostics/` and emits only allowlisted
+statuses, role classes, counts and project-relative evidence location.
+
 Verification:
 
 ```bash
 python3 scripts/smoke-wiring-discovery.py
+python3 scripts/smoke-runtime-diagnostics.py
 ```
 
 ## MCP npm packages
@@ -511,6 +525,28 @@ Series `040-native-windows-implementation` owns the runtime implementation for
 this decision. The generated-copy implementation is present and has two-host
 live clean-clone evidence after the Windows lab hosts provided the documented
 Python runtime modules and npm/npx tooling.
+
+## Bootstrap Profile Compatibility
+
+New consumers use canonical `--profile generic|workspace-root|service`,
+`--surfaces all-surfaces|codex-only` and
+`--codex-policy safe-interactive|trusted-automation`. The public default changed
+from implicit unattended full access to explicit `safe-interactive`, which
+renders `on-request` and `workspace-write`. Existing automation that depends on
+the old authority must pass `--codex-policy trusted-automation`; existing
+generated consumers are not rewritten automatically.
+
+`--kind` remains a bounded alias for `--profile`. Matching values are accepted,
+while conflicting canonical and legacy values fail before target mutation.
+Consumers generated before canonical profile metadata remain supported through
+the strict all-surfaces verification path.
+
+POSIX greenfield consumers default to absolute symlink targets. Explicit
+`--wiring-path-mode relative` remains supported for a shared movable tree.
+Schema-valid `changerail.consumer-lock.v1` adds advisory or strict revision
+matching without changing frozen Windows generated-copy ownership semantics.
+Lockless consumers remain on the legacy wiring checks; missing lock alone is
+not a blocking failure.
 
 ## Release Gate Tooling
 

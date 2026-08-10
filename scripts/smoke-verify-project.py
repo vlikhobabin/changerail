@@ -22,6 +22,7 @@ SPECIAL_OUTPUTS = {
     Path("codex-config.toml.tpl"): Path(".codex/config.toml"),
 }
 EXPECTED_SCHEMAS = (
+    "schemas/changerail-consumer-lock.schema.json",
     "schemas/changerail-review-verdict.schema.json",
     "schemas/changerail-review-cycle-history.schema.json",
     "schemas/changerail-delivery-manifest.schema.json",
@@ -41,6 +42,7 @@ EXPECTED_MAINTENANCE_CHECKS = (
 MCP_FILES = (".mcp.json", ".codex/config.toml")
 OPTIONAL_BROWSER_MCP_NEEDLES = ("@playwright/mcp", "chrome-devtools-mcp")
 WIRING_MANIFEST = Path("openspec/changerail-wiring.json")
+CONSUMER_LOCK = Path("openspec/changerail-consumer-lock.json")
 
 
 @dataclass
@@ -75,6 +77,21 @@ def render_text(text: str, project: Path, changerail_root: Path) -> str:
         "{{PROJECT_ROOT_LABEL}}": "this repository",
         "{{PROJECT_NAME}}": "example-project",
         "{{PROJECT_KIND}}": "generic",
+        "{{PROJECT_PROFILE}}": "generic",
+        "{{SURFACES_PROFILE}}": "all-surfaces",
+        "{{CODEX_POLICY}}": "safe-interactive",
+        "{{CODEX_APPROVAL_POLICY}}": "on-request",
+        "{{CODEX_SANDBOX_MODE}}": "workspace-write",
+        "{{CODEX_SURFACE_STATE}}": "required",
+        "{{CLAUDE_SURFACE_STATE}}": "required",
+        "{{LEGACY_MCP_SURFACE_STATE}}": "required",
+        "{{LEGACY_ARTIFACTS_SURFACE_STATE}}": "forbidden",
+        "{{TOPOLOGY_GUIDANCE}}": (
+            "This repository uses neutral project ownership without domain-specific source generation."
+        ),
+        "{{CODEX_AUTHORITY_GUIDANCE}}": (
+            "safe-interactive requires approval for commands and limits writes to the workspace."
+        ),
         "{{CHANGERAIL_ROOT}}": str(changerail_root),
         "{{CHANGERAIL_ROOT_LABEL}}": "the linked ChangeRail source of truth",
         "{{CHANGERAIL_SHARED_SOURCE}}": "ChangeRail AGENTS.shared.md",
@@ -136,6 +153,8 @@ def create_fixture(project: Path, changerail_root: Path, *, with_maintenance: bo
         rel = source.relative_to(template_root)
         if rel.parts and rel.parts[0] == ".changerail" and not with_maintenance:
             continue
+        if rel.parts[:2] == (".github", "workflows"):
+            continue
         out_rel = output_path_for(rel)
         if out_rel is None:
             continue
@@ -168,8 +187,12 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
     env = {**os.environ, "OPENSPEC_TELEMETRY": "0"}
     if extra_env:
         env.update(extra_env)
+    effective_cmd = list(cmd)
+    if Path(effective_cmd[0]).name in {"bootstrap-project", "bootstrap-project.cmd"}:
+        if "--lock-enforcement" not in effective_cmd:
+            effective_cmd[2:2] = ["--lock-enforcement", "none"]
     return subprocess.run(
-        cmd,
+        effective_cmd,
         cwd=cwd,
         text=True,
         stdout=subprocess.PIPE,
@@ -177,6 +200,66 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
         env=env,
         timeout=180,
     )
+
+
+def write_consumer_lock(
+    project: Path,
+    changerail_root: Path,
+    *,
+    enforcement: str = "advisory",
+    revision: str | None = None,
+) -> None:
+    artifacts: list[dict[str, str]] = []
+    for path in sorted(project.rglob("*")):
+        if not path.is_symlink():
+            continue
+        try:
+            source = path.resolve(strict=False).relative_to(changerail_root).as_posix()
+        except ValueError:
+            continue
+        rel_path = path.relative_to(project).as_posix()
+        if rel_path.startswith(".codex/skills/"):
+            surface = "codex-skill"
+        elif rel_path == ".claude/skills":
+            surface = "claude-skills"
+        elif rel_path.startswith(".claude/commands/"):
+            surface = "claude-commands"
+        else:
+            surface = "helper"
+        artifacts.append(
+            {
+                "path": rel_path,
+                "source": source,
+                "kind": "symlink",
+                "surface": surface,
+            }
+        )
+    actual_revision = revision or run(
+        ["git", "rev-parse", "HEAD"],
+        changerail_root,
+    ).stdout.strip()
+    payload = {
+        "schema": "changerail.consumer-lock.v1",
+        "changerail": {
+            "version": (changerail_root / "VERSION").read_text(encoding="utf-8").strip(),
+            "revision": actual_revision,
+            "source": "https://github.com/example/changerail.git",
+        },
+        "wiring": {
+            "platform": "posix",
+            "backend": "symlink",
+            "path_mode": "absolute",
+            "artifacts": artifacts,
+        },
+        "profiles": {
+            "project": "generic",
+            "surfaces": "all-surfaces",
+            "codex_policy": "safe-interactive",
+        },
+        "enforcement": enforcement,
+    }
+    path = project / CONSUMER_LOCK
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def digest_file(path: Path) -> str:
@@ -577,7 +660,13 @@ def add_codex_mcp_server(project: Path, name: str, args: list[str]) -> None:
     )
 
 
-def set_verification_policy(project: Path, *, surfaces: dict[str, str] | None = None, targeted: str = "required") -> None:
+def set_verification_policy(
+    project: Path,
+    *,
+    surfaces: dict[str, str] | None = None,
+    targeted: str = "required",
+    profile: str = "smoke",
+) -> None:
     path = project / "openspec" / "config.yaml"
     text = path.read_text(encoding="utf-8")
     marker = "\nverification:\n"
@@ -594,7 +683,7 @@ def set_verification_policy(project: Path, *, surfaces: dict[str, str] | None = 
     policy = [
         "",
         "verification:",
-        "  profile: smoke",
+        f"  profile: {profile}",
         "  surfaces:",
     ]
     for name, state in surface_policy.items():
@@ -608,6 +697,27 @@ def set_verification_policy(project: Path, *, surfaces: dict[str, str] | None = 
         ]
     )
     path.write_text(text + "\n".join(policy), encoding="utf-8")
+
+
+def set_bootstrap_profiles(
+    project: Path,
+    *,
+    project_profile: str,
+    surfaces_profile: str,
+    codex_policy: str,
+) -> None:
+    path = project / "openspec" / "config.yaml"
+    text = path.read_text(encoding="utf-8")
+    marker = "\nbootstrap:\n"
+    if marker in text:
+        text = text.split(marker, 1)[0].rstrip() + "\n"
+    text += (
+        "\nbootstrap:\n"
+        f"  project_profile: {project_profile}\n"
+        f"  surfaces_profile: {surfaces_profile}\n"
+        f"  codex_policy: {codex_policy}\n"
+    )
+    path.write_text(text, encoding="utf-8")
 
 
 def remove_surface_path(path: Path) -> None:
@@ -729,10 +839,225 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             if verify.returncode == 0
             and "WARN delivery runner auth readiness" in verify.stdout
             and "codex-auth-for-delivery-runner" in verify.stdout
+            and str(changerail_root / "docs" / "consumer-adoption-runbook.md") in verify.stdout
+            and "--configure-existing --link-codex-auth AUTH_JSON" in verify.stdout
             else "fail",
             verify.stdout.strip(),
         )
     )
+
+    codex_only_project = run_dir / "profile-codex-only"
+    shutil.copytree(good_project, codex_only_project, symlinks=True)
+    remove_surface_path(codex_only_project / ".claude")
+    set_verification_policy(
+        codex_only_project,
+        surfaces={"claude": "optional", "legacy_mcp": "optional"},
+        profile="codex-only",
+    )
+    set_bootstrap_profiles(
+        codex_only_project,
+        project_profile="generic",
+        surfaces_profile="codex-only",
+        codex_policy="safe-interactive",
+    )
+    codex_only_verify, codex_only_data = verify_json(changerail_root, codex_only_project, fake_env)
+    checks.append(
+        Check(
+            "codex-only profile passes with optional diagnostics",
+            "pass"
+            if codex_only_verify.returncode == 0
+            and check_result(codex_only_data, name="bootstrap profile consistency", status="pass")
+            and check_result(codex_only_data, name=".claude/skills", status="fail", severity="non-blocking")
+            else "fail",
+            codex_only_verify.stdout.strip(),
+        )
+    )
+
+    unsafe_safe_project = run_dir / "bad-safe-profile-authority"
+    shutil.copytree(good_project, unsafe_safe_project, symlinks=True)
+    unsafe_codex_path = unsafe_safe_project / ".codex" / "config.toml"
+    unsafe_codex_text = unsafe_codex_path.read_text(encoding="utf-8")
+    unsafe_codex_text = unsafe_codex_text.replace(
+        'approval_policy = "on-request"',
+        'approval_policy = "never"',
+    ).replace(
+        'sandbox_mode = "workspace-write"',
+        'sandbox_mode = "danger-full-access"',
+    )
+    unsafe_codex_path.write_text(unsafe_codex_text, encoding="utf-8")
+    set_bootstrap_profiles(
+        unsafe_safe_project,
+        project_profile="generic",
+        surfaces_profile="all-surfaces",
+        codex_policy="safe-interactive",
+    )
+    unsafe_safe_verify, unsafe_safe_data = verify_json(changerail_root, unsafe_safe_project, fake_env)
+    checks.append(
+        Check(
+            "safe profile rejects full access",
+            "pass"
+            if unsafe_safe_verify.returncode != 0
+            and check_result(
+                unsafe_safe_data,
+                name="bootstrap profile consistency",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            unsafe_safe_verify.stdout.strip(),
+        )
+    )
+
+    legacy_profile_project = run_dir / "legacy-profile-project"
+    shutil.copytree(good_project, legacy_profile_project, symlinks=True)
+    legacy_profile_path = legacy_profile_project / "openspec" / "config.yaml"
+    legacy_profile_text = legacy_profile_path.read_text(encoding="utf-8")
+    if "\nbootstrap:\n" in legacy_profile_text:
+        legacy_profile_text = legacy_profile_text.split("\nbootstrap:\n", 1)[0].rstrip() + "\n"
+        legacy_profile_path.write_text(legacy_profile_text, encoding="utf-8")
+    legacy_profile_verify = run(
+        [str(changerail_root / "bin" / "verify-project"), str(legacy_profile_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "legacy profile compatibility passes",
+            "pass" if legacy_profile_verify.returncode == 0 else "fail",
+            legacy_profile_verify.stdout.strip(),
+        )
+    )
+
+    locked_project = run_dir / "locked-consumer-project"
+    shutil.copytree(good_project, locked_project, symlinks=True)
+    write_consumer_lock(locked_project, changerail_root)
+    locked_verify, locked_data = verify_json(changerail_root, locked_project, fake_env)
+    locked_checks = (
+        "consumer lock schema",
+        "consumer wiring validity",
+        "consumer source revision",
+    )
+    checks.append(
+        Check(
+            "matching consumer lock passes",
+            "pass"
+            if locked_verify.returncode == 0
+            and all(check_result(locked_data, name=name, status="pass") for name in locked_checks)
+            else "fail",
+            locked_verify.stdout.strip(),
+        )
+    )
+
+    advisory_drift_project = run_dir / "advisory-source-drift"
+    shutil.copytree(good_project, advisory_drift_project, symlinks=True)
+    write_consumer_lock(
+        advisory_drift_project,
+        changerail_root,
+        enforcement="advisory",
+        revision="0" * 40,
+    )
+    advisory_drift_verify, advisory_drift_data = verify_json(
+        changerail_root,
+        advisory_drift_project,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "advisory source drift is diagnostic",
+            "pass"
+            if advisory_drift_verify.returncode == 0
+            and check_result(
+                advisory_drift_data,
+                name="consumer source revision",
+                status="fail",
+                severity="non-blocking",
+            )
+            else "fail",
+            advisory_drift_verify.stdout.strip(),
+        )
+    )
+
+    strict_drift_project = run_dir / "strict-source-drift"
+    shutil.copytree(good_project, strict_drift_project, symlinks=True)
+    write_consumer_lock(
+        strict_drift_project,
+        changerail_root,
+        enforcement="strict",
+        revision="0" * 40,
+    )
+    strict_drift_verify, strict_drift_data = verify_json(
+        changerail_root,
+        strict_drift_project,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "strict source drift blocks",
+            "pass"
+            if strict_drift_verify.returncode != 0
+            and check_result(
+                strict_drift_data,
+                name="consumer source revision",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            strict_drift_verify.stdout.strip(),
+        )
+    )
+
+    broken_locked_project = run_dir / "broken-advisory-wiring"
+    shutil.copytree(good_project, broken_locked_project, symlinks=True)
+    write_consumer_lock(broken_locked_project, changerail_root, enforcement="advisory")
+    remove_surface_path(broken_locked_project / "bin" / "openspec")
+    broken_locked_verify, broken_locked_data = verify_json(
+        changerail_root,
+        broken_locked_project,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "broken advisory wiring blocks",
+            "pass"
+            if broken_locked_verify.returncode != 0
+            and check_result(
+                broken_locked_data,
+                name="consumer wiring validity",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            broken_locked_verify.stdout.strip(),
+        )
+    )
+
+    unsafe_lock_project = run_dir / "unsafe-consumer-lock"
+    shutil.copytree(good_project, unsafe_lock_project, symlinks=True)
+    write_consumer_lock(unsafe_lock_project, changerail_root)
+    unsafe_lock_path = unsafe_lock_project / CONSUMER_LOCK
+    unsafe_lock = json.loads(unsafe_lock_path.read_text(encoding="utf-8"))
+    unsafe_lock["changerail"]["source"] = "/opt/changerail"
+    unsafe_lock_path.write_text(
+        json.dumps(unsafe_lock, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    unsafe_lock_verify, unsafe_lock_data = verify_json(changerail_root, unsafe_lock_project, fake_env)
+    checks.append(
+        Check(
+            "unsafe consumer lock blocks",
+            "pass"
+            if unsafe_lock_verify.returncode != 0
+            and check_result(
+                unsafe_lock_data,
+                name="consumer lock schema",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            unsafe_lock_verify.stdout.strip(),
+        )
+    )
+
     missing_schema_checks = [schema for schema in EXPECTED_SCHEMAS if schema not in verify.stdout]
     checks.append(
         Check(
@@ -1323,6 +1648,27 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             and sentinel not in auth_marker.stdout
             else "fail",
             auth_marker.stdout.strip(),
+        )
+    )
+
+    auth_conflict_project = run_dir / "auth-conflict-project"
+    shutil.copytree(good_project, auth_conflict_project, symlinks=True)
+    os.symlink("../missing-auth.json", auth_conflict_project / ".codex" / "auth.json")
+    auth_conflict = run(
+        [str(changerail_root / "bin" / "verify-project"), str(auth_conflict_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "auth conflict requires owner review",
+            "pass"
+            if auth_conflict.returncode == 0
+            and "WARN delivery runner auth readiness" in auth_conflict.stdout
+            and "manual owner review" in auth_conflict.stdout
+            and "--configure-existing" not in auth_conflict.stdout
+            else "fail",
+            auth_conflict.stdout.strip(),
         )
     )
 

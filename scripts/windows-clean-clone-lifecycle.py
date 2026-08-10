@@ -478,6 +478,8 @@ try:
             "windows-clean-clone-consumer",
             "--kind",
             "generic",
+            "--lock-enforcement",
+            "none",
             "--wiring-platform",
             "windows",
             "--wiring-backend",

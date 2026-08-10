@@ -30,7 +30,9 @@ Project: PROJECT_PATH
 
 Сначала прочитай /opt/changerail/docs/consumer-adoption-runbook.md,
 /opt/changerail/docs/wiring-discovery.md и /opt/changerail/AGENTS.shared.md.
-Не запускай bootstrap-project поверх непустого существующего проекта.
+Не запускай обычную генерацию bootstrap-project поверх непустого существующего
+проекта. Для уже подключенного consumer допустим только explicit
+`--configure-existing` с allowlisted auth/wiring actions.
 Если в PROJECT_PATH грязное git-дерево или существующие .claude/.codex/bin
 файлы конфликтуют с ChangeRail wiring, остановись и покажи, что требует решения.
 
@@ -161,9 +163,11 @@ git -C /opt/changerail status --short
 
 ## Почему не bootstrap поверх существующего проекта
 
-`bin/bootstrap-project` предназначен для нового или пустого проекта. Для
-живого проекта он полезен как source of truth по templates, но migration нужно
-делать как аккуратный adoption:
+Обычный `bin/bootstrap-project` предназначен для нового или пустого проекта.
+Для живого проекта он полезен как source of truth по templates, но migration
+нужно делать как аккуратный adoption. Отдельный `--configure-existing` не
+рендерит templates и допускает только `--link-codex-auth` и
+`--refresh-wiring`:
 
 - сохранить существующие `AGENTS.md`, `CLAUDE.md`, `.mcp.json`,
   `.codex/config.toml`, `.gitignore` и локальные правила;
@@ -256,6 +260,52 @@ Default scheduler authority остается read-only. Любой write follow-
 - `.claude/commands/chrl` содержит ручную копию старых команд;
 - `.codex/skills/<skill>` является локальной копией, а не symlink-ом;
 - `bin/openspec` уже используется проектом для другого wrapper-а.
+
+### Consumer lock и POSIX repair
+
+Для нового POSIX consumer default bootstrap создает absolute symlink wiring и
+`openspec/changerail-consumer-lock.json` с `advisory` enforcement. Strict CI
+consumer должен выбрать `--lock-enforcement strict`. Lock генерируется только
+из clean tracked ChangeRail checkout с semantic `VERSION`, exact Git revision и
+public remote без credentials; machine-local source root не записывается.
+
+Existing lockless consumers продолжают проходить legacy verification. При
+плановой migration сначала создайте lock в отдельном clean/disposable checkout,
+просмотрите artifact inventory, затем используйте lock-owned repair. Не
+подменяйте project-owned files:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --changerail-root /opt/changerail \
+  --configure-existing --refresh-wiring --skip-verify
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+Advisory source drift дает visible diagnostic; strict drift и любое broken
+wiring блокируют verifier.
+
+### Pinned consumer CI
+
+Для нового consumer GitHub Actions workflow создается только explicit opt-in:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --profile generic \
+  --lock-enforcement strict \
+  --with-ci
+```
+
+Workflow получает только `contents: read`, читает exact revision из strict
+lock, устанавливает ChangeRail в runner temporary directory, repair-ит только
+lock-owned wiring и запускает static verifier/OpenSpec baseline. Он не запускает
+delivery, не требует Codex auth и не публикует изменения.
+
+Для другого CI provider сохраните тот же нейтральный sequence: schema/strict
+lock preflight, получение exact public revision, detached checkout в disposable
+path, `bootstrap-project --refresh-wiring --skip-verify`, `verify-project`,
+`bin/openspec validate --all --strict` и `git diff --check`. Недоступный revision,
+malformed/advisory lock или project-owned wiring conflict должны завершать job
+до verification.
 
 ## Native Windows Consumer
 
@@ -363,13 +413,52 @@ bootstrap, но только явным opt-in:
 ```bash
 /opt/changerail/bin/bootstrap-project /opt/example-project \
   --name example-project \
-  --kind generic \
+  --profile generic \
   --link-codex-auth "$HOME/.codex/auth.json"
 ```
 
 Если source auth file отсутствует, bootstrap должен остановиться без создания
 dangling auth marker. Default bootstrap не создает `.codex/auth.json` или
 `.codex/auth.toml`.
+
+Для уже созданного consumer используйте idempotent configure path. Placeholder
+`AUTH_JSON` в verifier output оператор заменяет локальным путем; helper не
+читает credential contents и не печатает source path:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --configure-existing \
+  --link-codex-auth "$HOME/.codex/auth.json"
+```
+
+Real file, undeclared/dangling link, symlink parent или unrelated Git dirty
+state считаются owner conflict: helper останавливается и ничего не заменяет.
+
+### README и локальный Git для greenfield
+
+Минимальный public-safe `README.md` создается только через `--with-readme` и
+никогда не заменяет существующий README. `--init-git` инициализирует только
+локальный repository; `--default-branch` и `--remote` требуют этот opt-in.
+Helper не выполняет `git add`, commit, push и не создает remote repository:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --profile service \
+  --with-readme \
+  --init-git --default-branch main \
+  --remote https://github.com/example/consumer.git
+```
+
+Remote URL проходит preflight до создания target; credentials, query и
+fragment запрещены, а URL не выводится в plan или completion output.
+
+Новые проекты получают `--profile generic`, `--surfaces all-surfaces` и
+`--codex-policy safe-interactive` по умолчанию. Это означает
+`approval_policy = "on-request"` и `sandbox_mode = "workspace-write"`.
+Automation, которой действительно нужен unattended full access, должна явно
+передать `--codex-policy trusted-automation`; bootstrap зафиксирует этот выбор
+в tracked config. `--kind` остается только compatibility alias для
+`--profile`, а конфликт двух флагов останавливает bootstrap до записи target.
 
 Если auth должен жить вне проекта, запускайте runner с explicit `CODEX_HOME`:
 
@@ -378,6 +467,31 @@ CODEX_HOME="$HOME/.codex" /opt/changerail/bin/changerail-delivery-runner preflig
   openspec/board/3.inprogress/example-card.md \
   --workspace /opt/example-project --json
 ```
+
+## Static verification и runtime evidence
+
+Default `verify-project` проверяет tracked config, trust declaration, MCP
+scope, wiring и instruction budget статически; этот PASS не является proof
+effective Codex process state. Generated `.codex/config.toml` задает
+`project_doc_max_bytes = 32768`. Размер `AGENTS.md` считается в UTF-8 bytes:
+ниже 85% - PASS, от 85% до limit - non-blocking warning, выше limit - blocking
+failure. Для legacy consumer без key временно действует тот же compatibility
+default.
+
+Runtime evidence запускается только opt-in и только с project-local
+`CODEX_HOME`:
+
+```bash
+CODEX_HOME=/opt/example-project/.codex \
+  /opt/changerail/bin/verify-project /opt/example-project \
+  --runtime-diagnostics
+```
+
+Адаптер поддерживает `codex-cli 0.147.x`, `doctor --json` schema version 1 и
+structured `debug prompt-input`. Другие version/schema получают
+unsupported/invalid, не runtime PASS. Raw doctor/prompt output остается только
+в ignored `.runtime/changerail/diagnostics/`; в card, report или docs допустим
+лишь allowlisted redacted summary без credential values и absolute local paths.
 
 Для queue plans сначала проверяйте readiness без live delivery:
 

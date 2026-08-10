@@ -195,6 +195,8 @@ generated or migrated consumer projects.
 ### Requirement: Delivery runner auth readiness advisory
 `verify-project` MUST report delivery runner Codex auth readiness as a
 non-fatal advisory while preserving existing mandatory verification gates.
+Missing-auth output MUST identify a real ChangeRail source runbook and provide a
+generic executable remediation command for existing-project configuration.
 
 #### Scenario: Consumer has project-local auth marker
 - **WHEN** `bin/verify-project /opt/example-project` finds a supported auth
@@ -215,8 +217,9 @@ non-fatal advisory while preserving existing mandatory verification gates.
 - **WHEN** required ChangeRail wiring passes but no supported auth marker or
   environment variable is present
 - **THEN** `verify-project` exits `0`
-- **AND** it reports a warning advisory with the next remediation step for
-  delivery runner readiness
+- **AND** it reports a warning advisory with a ChangeRail source runbook path
+- **AND** it prints a generic `--configure-existing --link-codex-auth` command
+  without embedding a local auth source path or credential value
 
 ### Requirement: Verify-project uses shared Python runtime
 `bin/verify-project` MUST execute through the shared ChangeRail Python runtime
@@ -538,3 +541,146 @@ when generated ownership metadata declares maintenance helper or schema wiring.
 - **WHEN** a generated-copy maintenance contract artifact is stale or replaced by project-owned content
 - **THEN** `verify-project` exits non-zero
 - **AND** diagnostics distinguish stale generated-copy drift from project-owned divergence without printing secret-like file contents
+
+### Requirement: Declared bootstrap profile verification
+`verify-project` MUST validate the canonical project, surface and Codex authority
+profiles recorded by bootstrap and MUST fail closed when generated configuration
+contradicts the declared profile. Legacy consumers without canonical fields MUST
+continue through the existing all-surfaces compatibility path.
+
+#### Scenario: Codex-only consumer is coherent
+- **WHEN** a consumer declares `codex-only` and contains valid Codex wiring but
+  omits optional Claude wiring
+- **THEN** verification reports the optional surface as a non-blocking
+  diagnostic
+- **AND** the profile consistency check passes
+
+#### Scenario: Safe profile contains full-access settings
+- **WHEN** a consumer declares `safe-interactive` but tracked Codex config uses
+  `never` or `danger-full-access`
+- **THEN** verification reports a blocking profile mismatch
+
+#### Scenario: Legacy consumer has no canonical profiles
+- **WHEN** an existing consumer has no new bootstrap profile metadata
+- **THEN** verification applies the existing strict all-surfaces behavior
+- **AND** does not infer trusted automation from absent metadata
+
+### Requirement: Profile matrix regression evidence
+ChangeRail MUST maintain deterministic smoke coverage for all supported project,
+surface and Codex authority selections and their invalid combinations.
+
+#### Scenario: Profile smoke runs
+- **WHEN** bootstrap and verify smoke execute
+- **THEN** default, codex-only, workspace-root, service and trusted-automation
+  fixtures are evaluated
+- **AND** invalid or conflicting values fail before target mutation
+
+### Requirement: Consumer lock and source drift verification
+`verify-project` MUST validate `changerail.consumer-lock.v1` separately from
+actual wiring and source revision checks. Broken wiring MUST always be blocking;
+source drift MUST be non-blocking for advisory enforcement and blocking for
+strict enforcement.
+
+#### Scenario: Locked source and wiring match
+- **WHEN** the consumer lock, actual symlinks and ChangeRail version/revision
+  match
+- **THEN** lock, wiring and source checks pass independently
+
+#### Scenario: Advisory source revision drifts
+- **WHEN** actual ChangeRail revision differs from an advisory lock while wiring
+  remains valid
+- **THEN** verification returns a visible non-blocking source-drift diagnostic
+
+#### Scenario: Strict source revision drifts
+- **WHEN** actual ChangeRail revision differs from a strict lock
+- **THEN** verification reports a blocking source-drift failure with lock refresh
+  remediation
+
+#### Scenario: Wiring is broken under advisory enforcement
+- **WHEN** an owned symlink is missing or resolves to an unexpected source
+- **THEN** verification fails regardless of advisory source enforcement
+
+### Requirement: Lockless consumer compatibility
+Existing consumers without `openspec/changerail-consumer-lock.json` MUST remain
+verifiable through the existing wiring contract and MUST receive an explicit
+lockless compatibility diagnostic rather than an inferred strict lock.
+
+#### Scenario: Existing consumer has no lock
+- **WHEN** verify-project inspects a valid legacy POSIX consumer
+- **THEN** existing wiring checks continue to apply
+- **AND** absence of the new lock alone is not a blocking failure
+
+### Requirement: Existing-project configuration diagnostics
+Verification MUST classify whether an auth or wiring remediation is safe for
+bounded existing-project configuration and MUST not recommend automatic repair
+for project-owned conflicts or unrelated dirty state.
+
+#### Scenario: Missing allowlisted auth marker is repairable
+- **WHEN** the ignored auth destination is absent and parent scope is valid
+- **THEN** the diagnostic may recommend the configure command
+
+#### Scenario: Destination is project-owned
+- **WHEN** the auth or wiring destination contains non-owned content
+- **THEN** the diagnostic reports manual owner review
+- **AND** it does not recommend automatic overwrite
+
+### Requirement: Consumer instruction budget verification
+`verify-project` MUST measure effective `AGENTS.md` as UTF-8 bytes against the
+tracked `project_doc_max_bytes` value. It MUST pass below 85 percent, emit a
+non-blocking warning from 85 percent through the configured limit, and fail
+blocking above the limit.
+
+#### Scenario: Instructions are below warning threshold
+- **WHEN** effective instructions use less than 85 percent of the tracked budget
+- **THEN** the instruction budget check passes with measured and allowed bytes
+
+#### Scenario: Instructions approach the limit
+- **WHEN** effective instructions use at least 85 percent but do not exceed the
+  tracked budget
+- **THEN** verification returns a non-blocking warning with remediation
+
+#### Scenario: Instructions exceed the limit
+- **WHEN** effective instructions exceed `project_doc_max_bytes`
+- **THEN** verification reports a blocking failure
+- **AND** it recommends reducing project/shared content or explicitly reviewing
+  a tracked budget change
+
+### Requirement: Static and runtime verification separation
+Default `verify-project` MUST describe Codex TOML, trust, MCP and instruction
+checks as static. Effective runtime diagnostics MUST run only after explicit
+operator opt-in and MUST never convert unavailable or invalid probe output into
+a successful runtime claim.
+
+#### Scenario: Default verifier runs
+- **WHEN** an operator invokes `verify-project` without runtime diagnostics
+- **THEN** no Codex runtime or network probe is launched
+- **AND** the result makes only static configuration claims
+
+#### Scenario: Runtime diagnostics are requested
+- **WHEN** an operator passes `--runtime-diagnostics` in a supported Codex
+  environment
+- **THEN** version-aware structured probes inspect loaded config/trust/MCP and
+  discovered instructions from the consumer context
+- **AND** runtime outcome is reported separately from static summary
+
+#### Scenario: Runtime probe is unavailable
+- **WHEN** the supported Codex command or expected structured output is absent
+- **THEN** runtime diagnostics report unsupported or invalid evidence
+- **AND** they do not report runtime readiness
+
+### Requirement: Runtime diagnostic evidence safety
+Raw runtime output MUST be stored only under ignored
+`.runtime/changerail/diagnostics/`. Machine-readable summaries MUST use an
+allowlist and redact absolute local paths, credential values and raw auth data.
+
+#### Scenario: Runtime probe contains local state
+- **WHEN** structured Codex output contains home paths, auth marker locations or
+  endpoint details
+- **THEN** raw data remains ignored
+- **AND** public-safe summary reports only classified status and redacted path
+  kinds
+
+#### Scenario: Public scan inspects diagnostic fixtures
+- **WHEN** current/history public-surface checks run
+- **THEN** no raw runtime report, private path or credential-like value is
+  tracked

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository is `{{PROJECT_NAME}}`, a `{{PROJECT_KIND}}` project bootstrapped
+This repository is `{{PROJECT_NAME}}`, a `{{PROJECT_PROFILE}}` project bootstrapped
 with ChangeRail from {{CHANGERAIL_ROOT_LABEL}}.
 
 Treat this repository as public by default unless local project owners document
@@ -13,7 +13,13 @@ traces, dumps, local databases or agent session state to tracked files.
 
 - Project root: {{PROJECT_ROOT_LABEL}}
 - ChangeRail source of truth: {{CHANGERAIL_ROOT_LABEL}}
-- Project kind: `{{PROJECT_KIND}}`
+- Project profile: `{{PROJECT_PROFILE}}`
+- Surface profile: `{{SURFACES_PROFILE}}`
+- Codex authority: `{{CODEX_POLICY}}`
+
+{{TOPOLOGY_GUIDANCE}}
+
+{{CODEX_AUTHORITY_GUIDANCE}}
 
 Project source code, project-specific OpenSpec board, project rules, runtime
 policy and domain verification belong in this repository. Reusable ChangeRail
@@ -55,12 +61,21 @@ git diff --check
 
 Add project-specific tests here as the project evolves.
 
-Generated verification policy lives in `openspec/config.yaml`. The default
-profile treats Codex, Claude and legacy MCP surfaces as `required`, and stale
-legacy artifacts as `forbidden`. Project owners may edit tracked policy to mark
-a surface `optional` only when that surface is intentionally unused; optional
-missing surfaces can produce `pass-with-diagnostics`, but targeted card-owned
-OpenSpec validation remains mandatory and cannot be downgraded.
+`bin/verify-project .` proves tracked static configuration, wiring and the
+`project_doc_max_bytes` instruction budget; it is not effective Codex runtime
+proof. Run `bin/verify-project . --runtime-diagnostics` only for explicit
+runtime evidence with project-local `CODEX_HOME`. Raw probe output remains
+ignored under `.runtime/changerail/diagnostics/`; share only its redacted
+allowlisted summary and never credential values or local paths.
+
+Generated verification policy lives in `openspec/config.yaml`. The selected
+`{{SURFACES_PROFILE}}` profile treats Codex as `{{CODEX_SURFACE_STATE}}`, Claude
+as `{{CLAUDE_SURFACE_STATE}}`, legacy MCP as `{{LEGACY_MCP_SURFACE_STATE}}`, and
+stale legacy artifacts as `{{LEGACY_ARTIFACTS_SURFACE_STATE}}`. Project owners
+may edit tracked policy to mark a surface `optional` only when that surface is
+intentionally unused; optional missing surfaces can produce
+`pass-with-diagnostics`, but targeted card-owned OpenSpec validation remains
+mandatory and cannot be downgraded.
 
 ## Pre-review Delivery Budgets
 

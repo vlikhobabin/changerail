@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -37,8 +38,12 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
+    effective_cmd = list(cmd)
+    if Path(effective_cmd[0]).name in {"bootstrap-project", "bootstrap-project.cmd"}:
+        if "--configure-existing" not in effective_cmd and "--lock-enforcement" not in effective_cmd:
+            effective_cmd[2:2] = ["--lock-enforcement", "none"]
     return subprocess.run(
-        cmd,
+        effective_cmd,
         cwd=cwd,
         text=True,
         stdout=subprocess.PIPE,
@@ -46,6 +51,47 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
         env=env,
         timeout=240,
     )
+
+
+def create_clean_changerail_fixture(changerail_root: Path, destination: Path) -> Path:
+    destination.mkdir(parents=True)
+    for rel_path in (
+        "AGENTS.shared.md",
+        "VERSION",
+        "mcp-npm-lock.json",
+        "templates",
+        "skills",
+        "claude",
+        "bin",
+        "schemas",
+        "scripts",
+    ):
+        source = changerail_root / rel_path
+        target = destination / rel_path
+        if source.is_dir():
+            shutil.copytree(source, target, symlinks=True)
+        else:
+            shutil.copy2(source, target)
+    commands = (
+        ["git", "init", "--initial-branch=main"],
+        ["git", "add", "."],
+        [
+            "git",
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=smoke@example.invalid",
+            "commit",
+            "-m",
+            "clean fixture",
+        ],
+        ["git", "remote", "add", "origin", "https://github.com/example/changerail.git"],
+    )
+    for command in commands:
+        result = run(command, destination)
+        if result.returncode != 0:
+            raise RuntimeError(result.stdout.strip())
+    return destination
 
 
 def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
@@ -88,7 +134,8 @@ def contains_placeholder(project: Path) -> list[str]:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if "{{" in text or "}}" in text:
+        template_text = re.sub(r"\$\{\{.*?\}\}", "", text)
+        if "{{" in template_text or "}}" in template_text:
             offenders.append(str(path.relative_to(project)))
     return offenders
 
@@ -210,6 +257,14 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
         return Check("bootstrap verification profile guidance", "fail", "; ".join(profile_missing))
     if (project / ".codex" / "auth.json").exists() or (project / ".codex" / "auth.json").is_symlink():
         return Check("bootstrap valid project", "fail", "default bootstrap created auth marker")
+    codex_config = (project / ".codex" / "config.toml").read_text(encoding="utf-8")
+    agents_size = len((project / "AGENTS.md").read_text(encoding="utf-8").encode("utf-8"))
+    if "project_doc_max_bytes = 32768" not in codex_config or agents_size * 100 >= 32768 * 85:
+        return Check(
+            "bootstrap valid project",
+            "fail",
+            f"instruction budget missing or default AGENTS.md too large: {agents_size}/32768 bytes",
+        )
     maintenance_paths = [
         ".changerail/KNOWLEDGE.md",
         ".changerail/knowledge.yaml",
@@ -229,6 +284,654 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
             "default bootstrap created maintenance opt-in paths: " + ", ".join(present),
         )
     return Check("bootstrap valid project", "pass", "project generated and verified")
+
+
+def check_profile_matrix(changerail_root: Path, run_dir: Path) -> Check:
+    cases = (
+        (
+            "default",
+            [],
+            {
+                ".codex/config.toml": ('approval_policy = "on-request"', 'sandbox_mode = "workspace-write"'),
+                "openspec/config.yaml": (
+                    "project_profile: generic",
+                    "surfaces_profile: all-surfaces",
+                    "codex_policy: safe-interactive",
+                ),
+            },
+        ),
+        (
+            "workspace-root",
+            ["--profile", "workspace-root"],
+            {"AGENTS.md": ("aggregator ownership", "independent child repositories")},
+        ),
+        (
+            "service",
+            ["--profile", "service"],
+            {"AGENTS.md": ("single-repository delivery ownership",)},
+        ),
+        (
+            "codex-only",
+            ["--surfaces", "codex-only"],
+            {"openspec/config.yaml": ("claude: optional", "legacy_mcp: optional")},
+        ),
+        (
+            "trusted-automation",
+            ["--codex-policy", "trusted-automation"],
+            {
+                ".codex/config.toml": ('approval_policy = "never"', 'sandbox_mode = "danger-full-access"'),
+                "AGENTS.md": ("trusted-automation", "explicit operator choice"),
+            },
+        ),
+    )
+    failures: list[str] = []
+    for name, args, expected in cases:
+        project = run_dir / f"profile-{name}"
+        result = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(project),
+                "--skip-verify",
+                *args,
+            ],
+            changerail_root,
+        )
+        if result.returncode != 0:
+            failures.append(f"{name}: {result.stdout.strip()}")
+            continue
+        if name == "codex-only" and (project / ".claude").exists():
+            failures.append("codex-only: optional Claude wiring was generated")
+        for rel_path, needles in expected.items():
+            path = project / rel_path
+            if not path.is_file():
+                failures.append(f"{name}: missing {rel_path}")
+                continue
+            text = path.read_text(encoding="utf-8")
+            missing = [needle for needle in needles if needle not in text]
+            if missing:
+                failures.append(f"{name}: {rel_path} missing {', '.join(missing)}")
+    if failures:
+        return Check("bootstrap profile matrix", "fail", "; ".join(failures))
+    return Check("bootstrap profile matrix", "pass", "all supported profile selections rendered coherently")
+
+
+def check_profile_fail_before_write(changerail_root: Path, run_dir: Path) -> Check:
+    cases = (
+        ("unknown", ["--profile", "unknown"]),
+        ("conflict", ["--kind", "generic", "--profile", "service"]),
+    )
+    failures: list[str] = []
+    for name, args in cases:
+        project = run_dir / f"bad-profile-{name}"
+        result = run(
+            [str(changerail_root / "bin" / "bootstrap-project"), str(project), *args],
+            changerail_root,
+        )
+        if result.returncode == 0:
+            failures.append(f"{name}: command unexpectedly passed")
+        if project.exists():
+            failures.append(f"{name}: target was mutated")
+
+    dry_run_project = run_dir / "profile-dry-run"
+    dry_run = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(dry_run_project),
+            "--codex-policy",
+            "trusted-automation",
+            "--dry-run",
+        ],
+        changerail_root,
+    )
+    if dry_run.returncode != 0 or "PLAN codex-policy trusted-automation" not in dry_run.stdout:
+        failures.append("dry-run: selected Codex authority was not reported")
+    if dry_run_project.exists():
+        failures.append("dry-run: target was mutated")
+
+    oversized_root = run_dir / "oversized-instruction-root"
+    shutil.copytree(changerail_root / "templates", oversized_root / "templates")
+    (oversized_root / "AGENTS.shared.md").write_text("x" * 33000, encoding="utf-8")
+    oversized_project = run_dir / "oversized-instruction-project"
+    oversized = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(oversized_project),
+            "--changerail-root",
+            str(oversized_root),
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if (
+        oversized.returncode == 0
+        or oversized_project.exists()
+        or "UTF-8 bytes" not in oversized.stdout
+        or "32768" not in oversized.stdout
+    ):
+        failures.append("oversized generated instructions did not fail before target mutation")
+
+    if failures:
+        return Check("profile validation before write", "fail", "; ".join(failures))
+    return Check("profile validation before write", "pass", "invalid profiles failed before target mutation")
+
+
+def check_consumer_lock_and_path_modes(
+    changerail_root: Path,
+    run_dir: Path,
+    extra_env: dict[str, str],
+) -> Check:
+    clean_root = create_clean_changerail_fixture(changerail_root, run_dir / "clean-changerail")
+    failures: list[str] = []
+    cases = (("absolute", []), ("relative", ["--wiring-path-mode", "relative"]))
+    for path_mode, extra_args in cases:
+        project = run_dir / f"locked-{path_mode}"
+        result = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(project),
+                "--changerail-root",
+                str(clean_root),
+                "--lock-enforcement",
+                "advisory",
+                "--skip-verify",
+                *extra_args,
+            ],
+            changerail_root,
+        )
+        if result.returncode != 0:
+            failures.append(f"{path_mode}: {result.stdout.strip()}")
+            continue
+        lock_path = project / "openspec" / "changerail-consumer-lock.json"
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            failures.append(f"{path_mode}: lock unreadable: {exc}")
+            continue
+        if lock.get("schema") != "changerail.consumer-lock.v1":
+            failures.append(f"{path_mode}: lock schema missing")
+        wiring = lock.get("wiring", {})
+        if wiring.get("path_mode") != path_mode:
+            failures.append(f"{path_mode}: lock path mode mismatch")
+        changerail = lock.get("changerail", {})
+        source = str(changerail.get("source", ""))
+        if not source.startswith("https://") or str(clean_root) in source or "@" in source:
+            failures.append(f"{path_mode}: unsafe source reference {source!r}")
+        link = project / "bin" / "openspec"
+        if not link.is_symlink():
+            failures.append(f"{path_mode}: bin/openspec is not a symlink")
+        elif Path(os.readlink(link)).is_absolute() != (path_mode == "absolute"):
+            failures.append(f"{path_mode}: raw symlink target contradicts path mode")
+
+    relative_project = run_dir / "locked-relative"
+    relative_link = relative_project / "bin" / "openspec"
+    relative_link.unlink()
+    refresh = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(relative_project),
+            "--changerail-root",
+            str(clean_root),
+            "--refresh-wiring",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if refresh.returncode != 0 or not relative_link.is_symlink():
+        failures.append("lock-owned refresh did not repair a missing symlink")
+    elif Path(os.readlink(relative_link)).is_absolute():
+        failures.append("lock-owned refresh did not preserve relative path mode")
+
+    configure_auth_source = run_dir / "configure-auth-source.json"
+    configure_auth_source.write_text("credential-sentinel-value\n", encoding="utf-8")
+    relative_link.unlink(missing_ok=True)
+    configure_command = [
+        str(changerail_root / "bin" / "bootstrap-project"),
+        str(relative_project),
+        "--changerail-root",
+        str(clean_root),
+        "--configure-existing",
+        "--refresh-wiring",
+        "--link-codex-auth",
+        str(configure_auth_source),
+        "--skip-verify",
+    ]
+    configured = run(configure_command, changerail_root)
+    repeated = run(configure_command, changerail_root)
+    configured_auth = relative_project / ".codex" / "auth.json"
+    if (
+        configured.returncode != 0
+        or repeated.returncode != 0
+        or not relative_link.is_symlink()
+        or not configured_auth.is_symlink()
+        or configured_auth.resolve() != configure_auth_source.resolve()
+    ):
+        failures.append("configure mode did not idempotently combine lock repair and auth")
+
+    relative_link.unlink()
+    relative_link.write_text("project-owned\n", encoding="utf-8")
+    owned_refresh = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(relative_project),
+            "--changerail-root",
+            str(clean_root),
+            "--refresh-wiring",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if owned_refresh.returncode == 0 or relative_link.read_text(encoding="utf-8") != "project-owned\n":
+        failures.append("refresh replaced project-owned non-symlink content")
+
+    absolute_project = run_dir / "locked-absolute"
+    git_commands = (
+        ["git", "init", "--initial-branch=main"],
+        ["git", "add", "."],
+        [
+            "git",
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=smoke@example.invalid",
+            "commit",
+            "-m",
+            "locked consumer fixture",
+        ],
+    )
+    for command in git_commands:
+        git_result = run(command, absolute_project)
+        if git_result.returncode != 0:
+            failures.append(f"clean-clone fixture Git setup failed: {git_result.stdout.strip()}")
+            break
+    else:
+        clone = run_dir / "non-sibling" / "layout" / "consumer-clone"
+        clone.parent.mkdir(parents=True)
+        clone_result = run(["git", "clone", str(absolute_project), str(clone)], run_dir)
+        if clone_result.returncode != 0:
+            failures.append(f"non-sibling clone failed: {clone_result.stdout.strip()}")
+        else:
+            clone_verify = run(
+                [
+                    str(changerail_root / "bin" / "verify-project"),
+                    str(clone),
+                    "--changerail-root",
+                    str(clean_root),
+                ],
+                changerail_root,
+                extra_env,
+            )
+            if clone_verify.returncode != 0 or "PASS consumer wiring validity" not in clone_verify.stdout:
+                failures.append(f"non-sibling clean clone did not verify: {clone_verify.stdout.strip()}")
+
+        dirty_owned_link = absolute_project / "bin" / "openspec"
+        dirty_owned_link.unlink()
+        agents_path = absolute_project / "AGENTS.md"
+        agents_path.write_text(
+            agents_path.read_text(encoding="utf-8") + "\nunrelated project change\n",
+            encoding="utf-8",
+        )
+        dirty_refresh = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(absolute_project),
+                "--changerail-root",
+                str(clean_root),
+                "--refresh-wiring",
+                "--skip-verify",
+            ],
+            changerail_root,
+        )
+        if dirty_refresh.returncode == 0 or dirty_owned_link.exists() or dirty_owned_link.is_symlink():
+            failures.append("refresh ignored unrelated consumer Git dirty state")
+
+    parent_project = run_dir / "locked-parent-escape"
+    parent_bootstrap = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(parent_project),
+            "--changerail-root",
+            str(clean_root),
+            "--lock-enforcement",
+            "advisory",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if parent_bootstrap.returncode == 0:
+        parent_lock_path = parent_project / "openspec" / "changerail-consumer-lock.json"
+        parent_lock = json.loads(parent_lock_path.read_text(encoding="utf-8"))
+        parent_lock["wiring"]["artifacts"][0]["path"] = "escaped/owned-link"
+        parent_lock_path.write_text(
+            json.dumps(parent_lock, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        outside = run_dir / "outside-parent"
+        outside.mkdir()
+        os.symlink(outside, parent_project / "escaped")
+        parent_refresh = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(parent_project),
+                "--changerail-root",
+                str(clean_root),
+                "--refresh-wiring",
+                "--skip-verify",
+            ],
+            changerail_root,
+        )
+        if parent_refresh.returncode == 0 or (outside / "owned-link").exists():
+            failures.append("refresh followed a symlink parent outside project scope")
+    else:
+        failures.append(f"parent escape fixture bootstrap failed: {parent_bootstrap.stdout.strip()}")
+
+    incompatible = run_dir / "bad-path-mode-backend"
+    incompatible_result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(incompatible),
+            "--wiring-platform",
+            "windows",
+            "--wiring-backend",
+            "generated-copy",
+            "--wiring-path-mode",
+            "relative",
+            "--lock-enforcement",
+            "none",
+        ],
+        changerail_root,
+    )
+    if incompatible_result.returncode == 0 or incompatible.exists():
+        failures.append("incompatible backend/path mode mutated target or passed")
+
+    (clean_root / "VERSION").write_text("0.4.0-dirty\n", encoding="utf-8")
+    dirty_target = run_dir / "bad-dirty-locked-source"
+    dirty_result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(dirty_target),
+            "--changerail-root",
+            str(clean_root),
+            "--lock-enforcement",
+            "strict",
+        ],
+        changerail_root,
+    )
+    if dirty_result.returncode == 0 or dirty_target.exists():
+        failures.append("dirty locked source mutated target or passed")
+
+    if failures:
+        return Check("consumer lock and POSIX path modes", "fail", "; ".join(failures))
+    return Check("consumer lock and POSIX path modes", "pass", "lock and path-mode contracts passed")
+
+
+def check_consumer_ci_opt_in(changerail_root: Path, run_dir: Path) -> Check:
+    clean_root = create_clean_changerail_fixture(changerail_root, run_dir / "ci-clean-changerail")
+    failures: list[str] = []
+
+    default_project = run_dir / "ci-default-omitted"
+    default_result = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(default_project),
+            "--lock-enforcement",
+            "none",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    workflow_rel = Path(".github/workflows/changerail-consumer-verify.yml")
+    if default_result.returncode != 0 or (default_project / workflow_rel).exists():
+        failures.append("default bootstrap generated consumer CI or failed")
+
+    advisory_target = run_dir / "bad-advisory-ci"
+    advisory = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(advisory_target),
+            "--changerail-root",
+            str(clean_root),
+            "--lock-enforcement",
+            "advisory",
+            "--with-ci",
+        ],
+        changerail_root,
+    )
+    if advisory.returncode == 0 or advisory_target.exists():
+        failures.append("advisory CI request passed or mutated target")
+
+    strict_target = run_dir / "strict-consumer-ci"
+    strict = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(strict_target),
+            "--changerail-root",
+            str(clean_root),
+            "--lock-enforcement",
+            "strict",
+            "--with-ci",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if strict.returncode != 0 or not (strict_target / workflow_rel).is_file():
+        failures.append(f"strict CI workflow was not generated: {strict.stdout.strip()}")
+
+    dry_target = run_dir / "strict-ci-dry-run"
+    dry_run = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(dry_target),
+            "--changerail-root",
+            str(clean_root),
+            "--lock-enforcement",
+            "strict",
+            "--with-ci",
+            "--dry-run",
+        ],
+        changerail_root,
+    )
+    if (
+        dry_run.returncode != 0
+        or str(workflow_rel) not in dry_run.stdout
+        or "PLAN lock-enforcement strict" not in dry_run.stdout
+        or dry_target.exists()
+    ):
+        failures.append("strict CI dry-run did not report workflow and exact lock requirement")
+
+    if failures:
+        return Check("consumer CI opt-in", "fail", "; ".join(failures))
+    return Check("consumer CI opt-in", "pass", "CI remained opt-in and required a strict lock")
+
+
+def check_post_bootstrap_configuration(changerail_root: Path, run_dir: Path) -> Check:
+    failures: list[str] = []
+    project = run_dir / "post-bootstrap-project"
+    initial = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--lock-enforcement",
+            "none",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    auth_source = run_dir / "auth-source.json"
+    sentinel = "credential-sentinel-value"
+    auth_source.write_text(sentinel + "\n", encoding="utf-8")
+    configure_command = [
+        str(changerail_root / "bin" / "bootstrap-project"),
+        str(project),
+        "--configure-existing",
+        "--link-codex-auth",
+        str(auth_source),
+        "--skip-verify",
+    ]
+    configured = run(configure_command, changerail_root)
+    repeated = run(configure_command, changerail_root)
+    auth_marker = project / ".codex" / "auth.json"
+    if initial.returncode != 0 or configured.returncode != 0 or repeated.returncode != 0:
+        failures.append("idempotent auth configuration failed")
+    if not auth_marker.is_symlink() or auth_marker.resolve() != auth_source.resolve():
+        failures.append("auth configuration did not create the desired symlink")
+    combined_output = configured.stdout + repeated.stdout
+    if sentinel in combined_output or str(auth_source) in combined_output:
+        failures.append("auth configuration output exposed credential content or source path")
+
+    auth_marker.unlink(missing_ok=True)
+    auth_marker.write_text("project-owned\n", encoding="utf-8")
+    conflict = run(configure_command, changerail_root)
+    if conflict.returncode == 0 or auth_marker.read_text(encoding="utf-8") != "project-owned\n":
+        failures.append("auth configuration replaced project-owned content")
+
+    mixed_project = run_dir / "post-bootstrap-mixed-flags"
+    mixed_project.mkdir()
+    mixed = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(mixed_project),
+            "--configure-existing",
+            "--link-codex-auth",
+            str(auth_source),
+            "--profile",
+            "service",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if mixed.returncode == 0 or (mixed_project / ".codex").exists():
+        failures.append("configure mode accepted template/profile flags")
+
+    readme_project = run_dir / "readme-project"
+    readme = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(readme_project),
+            "--name",
+            "readme-project",
+            "--profile",
+            "service",
+            "--with-readme",
+            "--lock-enforcement",
+            "none",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    readme_path = readme_project / "README.md"
+    if readme.returncode != 0 or not readme_path.is_file():
+        failures.append("README opt-in did not render")
+    else:
+        readme_text = readme_path.read_text(encoding="utf-8")
+        for needle in ("readme-project", "service", "bin/verify-project ."):
+            if needle not in readme_text:
+                failures.append(f"generated README missing {needle!r}")
+        if str(readme_project) in readme_text or str(changerail_root) in readme_text:
+            failures.append("generated README contains machine-local paths")
+
+    readme_conflict_project = run_dir / "readme-conflict"
+    readme_conflict_project.mkdir()
+    existing_readme = readme_conflict_project / "README.md"
+    existing_readme.write_text("project-owned README\n", encoding="utf-8")
+    readme_conflict = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(readme_conflict_project),
+            "--with-readme",
+            "--lock-enforcement",
+            "none",
+        ],
+        changerail_root,
+    )
+    if readme_conflict.returncode == 0 or existing_readme.read_text(encoding="utf-8") != "project-owned README\n":
+        failures.append("README conflict was overwritten or accepted")
+
+    git_project = run_dir / "git-init-project"
+    git_init = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(git_project),
+            "--init-git",
+            "--default-branch",
+            "trunk",
+            "--remote",
+            "https://github.com/example/consumer.git",
+            "--lock-enforcement",
+            "none",
+            "--skip-verify",
+        ],
+        changerail_root,
+    )
+    if git_init.returncode != 0 or not git_project.is_dir():
+        failures.append("Git init did not preserve no-stage/no-commit boundary")
+    else:
+        branch = run(["git", "symbolic-ref", "--short", "HEAD"], git_project)
+        remote = run(["git", "remote", "get-url", "origin"], git_project)
+        staged = run(["git", "diff", "--cached", "--quiet"], git_project)
+        commits = run(["git", "rev-parse", "HEAD"], git_project)
+        if (
+            branch.stdout.strip() != "trunk"
+            or remote.stdout.strip() != "https://github.com/example/consumer.git"
+            or staged.returncode != 0
+            or commits.returncode == 0
+        ):
+            failures.append("Git init did not preserve no-stage/no-commit boundary")
+        if "no files were staged, committed or pushed" not in git_init.stdout:
+            failures.append("Git init output omitted operator-owned publication boundary")
+        dirty_auth = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(git_project),
+                "--configure-existing",
+                "--link-codex-auth",
+                str(auth_source),
+                "--skip-verify",
+            ],
+            changerail_root,
+        )
+        dirty_marker = git_project / ".codex" / "auth.json"
+        if dirty_auth.returncode == 0 or dirty_marker.exists() or dirty_marker.is_symlink():
+            failures.append("auth configuration ignored unrelated Git dirty state")
+
+    bad_git_target = run_dir / "bad-git-options"
+    bad_git = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(bad_git_target),
+            "--default-branch",
+            "trunk",
+            "--lock-enforcement",
+            "none",
+        ],
+        changerail_root,
+    )
+    if bad_git.returncode == 0 or bad_git_target.exists():
+        failures.append("Git detail without --init-git mutated target or passed")
+
+    secret_remote_target = run_dir / "secret-remote"
+    credential_remote = "https://user:remote-secret@example.invalid/consumer.git"
+    bad_remote = run(
+        [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(secret_remote_target),
+            "--init-git",
+            "--remote",
+            credential_remote,
+            "--lock-enforcement",
+            "none",
+        ],
+        changerail_root,
+    )
+    if bad_remote.returncode == 0 or secret_remote_target.exists() or "remote-secret" in bad_remote.stdout:
+        failures.append("credential-bearing remote passed, mutated target or leaked credential")
+
+    if failures:
+        return Check("post-bootstrap configuration", "fail", "; ".join(failures))
+    return Check(
+        "post-bootstrap configuration",
+        "pass",
+        "auth, README and Git configuration remained idempotent and bounded",
+    )
 
 
 def check_dry_run(changerail_root: Path, run_dir: Path) -> Check:
@@ -1078,6 +1781,11 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
     fake_env = create_fake_npm(changerail_root, run_dir / "fake-bin")
     checks = [
         check_bootstrap_success(changerail_root, run_dir, fake_env),
+        check_profile_matrix(changerail_root, run_dir),
+        check_profile_fail_before_write(changerail_root, run_dir),
+        check_consumer_lock_and_path_modes(changerail_root, run_dir, fake_env),
+        check_consumer_ci_opt_in(changerail_root, run_dir),
+        check_post_bootstrap_configuration(changerail_root, run_dir),
         check_dry_run(changerail_root, run_dir),
         check_maintenance_bootstrap(changerail_root, run_dir, fake_env),
         check_maintenance_dry_run(changerail_root, run_dir),

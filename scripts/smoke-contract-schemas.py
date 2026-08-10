@@ -139,6 +139,36 @@ def delivery_manifest() -> dict[str, Any]:
     }
 
 
+def consumer_lock() -> dict[str, Any]:
+    return {
+        "schema": "changerail.consumer-lock.v1",
+        "changerail": {
+            "version": "0.4.0",
+            "revision": "0" * 40,
+            "source": "https://github.com/example/changerail.git",
+        },
+        "wiring": {
+            "platform": "posix",
+            "backend": "symlink",
+            "path_mode": "absolute",
+            "artifacts": [
+                {
+                    "path": "bin/openspec",
+                    "source": "bin/openspec",
+                    "kind": "symlink",
+                    "surface": "helper",
+                }
+            ],
+        },
+        "profiles": {
+            "project": "generic",
+            "surfaces": "all-surfaces",
+            "codex_policy": "safe-interactive",
+        },
+        "enforcement": "advisory",
+    }
+
+
 def delivery_run_minimal() -> dict[str, Any]:
     return {
         "schema": "changerail.delivery-run.v1",
@@ -764,6 +794,10 @@ def validate_delivery_plan_status(payload: Any) -> list[str]:
 
 
 FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
+    "changerail-consumer-lock.schema.json": (
+        consumer_lock,
+        schema_validator("changerail-consumer-lock.schema.json"),
+    ),
     "changerail-review-verdict.schema.json": (review_verdict, _validate_verdict),
     "changerail-delivery-manifest.schema.json": (delivery_manifest, validate_manifest),
     "changerail-delivery-run.schema.json": (delivery_run, schema_validator("changerail-delivery-run.schema.json")),
@@ -887,6 +921,16 @@ def main() -> int:
             invalid_alias["status"] = "BLOCKED"
             if not validator(invalid_alias):
                 failures.append(f"{name}: duplicate top-level status alias unexpectedly passed")
+        if name == "changerail-consumer-lock.schema.json":
+            unsafe_source = consumer_lock()
+            unsafe_source["changerail"]["source"] = "https://user:secret@example.invalid/changerail.git"
+            expect_invalid(failures, f"{name} credential source", validator, unsafe_source, "source")
+            absolute_source = consumer_lock()
+            absolute_source["changerail"]["source"] = "/opt/changerail"
+            expect_invalid(failures, f"{name} absolute source", validator, absolute_source, "source")
+            incomplete_revision = consumer_lock()
+            incomplete_revision["changerail"]["revision"] = "abc123"
+            expect_invalid(failures, f"{name} incomplete revision", validator, incomplete_revision, "revision")
         if name == "changerail-review-cycle-history.schema.json":
             legacy_history = review_cycle_history()
             legacy_history.pop("rescue_budget")

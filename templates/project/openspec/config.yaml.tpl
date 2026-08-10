@@ -3,7 +3,7 @@ schema: spec-driven
 context: |
   Repository: {{PROJECT_ROOT_LABEL}}
   Project: {{PROJECT_NAME}}
-  Kind: {{PROJECT_KIND}}
+  Profile: {{PROJECT_PROFILE}}
 
   This project is a ChangeRail consumer. Reusable ChangeRail methodology, skills, command
   wrappers, schemas and helper wrappers are sourced from
@@ -28,12 +28,17 @@ rules:
     - Include public-safety scans when files could expose local data.
 
 verification:
-  profile: all-surfaces
+  profile: {{SURFACES_PROFILE}}
   surfaces:
-    codex: required
-    claude: required
-    legacy_mcp: required
-    legacy_artifacts: forbidden
+    codex: {{CODEX_SURFACE_STATE}}
+    claude: {{CLAUDE_SURFACE_STATE}}
+    legacy_mcp: {{LEGACY_MCP_SURFACE_STATE}}
+    legacy_artifacts: {{LEGACY_ARTIFACTS_SURFACE_STATE}}
   mandatory:
     targeted_openspec_validation: required
   baseline_debt: []
+
+bootstrap:
+  project_profile: {{PROJECT_PROFILE}}
+  surfaces_profile: {{SURFACES_PROFILE}}
+  codex_policy: {{CODEX_POLICY}}

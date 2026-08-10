@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -92,6 +93,17 @@ class Check:
     message: str
     mode: str
     surface: str
+
+
+@dataclass
+class WiringClassification:
+    backend: str
+    path_mode: str
+    lock_state: str
+    enforcement: str
+    source_status: str
+    wiring_status: str
+    topology: str
 
 
 def repo_root_from_script() -> Path:
@@ -340,6 +352,138 @@ def symlink_force(target: Path, link_path: Path) -> None:
     os.symlink(target, link_path)
 
 
+def consumer_lock_payload(project: Path, changerail_root: Path, *, path_mode: str) -> dict[str, object]:
+    revision = subprocess.run(
+        ["git", "-C", str(changerail_root), "rev-parse", "HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    ).stdout.strip()
+    artifacts: list[dict[str, str]] = []
+    for path in sorted(project.rglob("*")):
+        if not path.is_symlink():
+            continue
+        rel_path = path.relative_to(project).as_posix()
+        source = path.resolve(strict=False).relative_to(changerail_root).as_posix()
+        if rel_path.startswith(".codex/skills/"):
+            surface = "codex-skill"
+        elif rel_path == ".claude/skills":
+            surface = "claude-skills"
+        else:
+            surface = "claude-commands"
+        artifacts.append(
+            {
+                "path": rel_path,
+                "source": source,
+                "kind": "symlink",
+                "surface": surface,
+            }
+        )
+    return {
+        "schema": "changerail.consumer-lock.v1",
+        "changerail": {
+            "version": (changerail_root / "VERSION").read_text(encoding="utf-8").strip(),
+            "revision": revision,
+            "source": "https://github.com/example/changerail.git",
+        },
+        "wiring": {
+            "platform": "posix",
+            "backend": "symlink",
+            "path_mode": path_mode,
+            "artifacts": artifacts,
+        },
+        "profiles": {
+            "project": "generic",
+            "surfaces": "all-surfaces",
+            "codex_policy": "safe-interactive",
+        },
+        "enforcement": "advisory",
+    }
+
+
+def write_consumer_lock(project: Path, changerail_root: Path, *, path_mode: str = "absolute") -> None:
+    path = project / "openspec" / "changerail-consumer-lock.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            consumer_lock_payload(project, changerail_root, path_mode=path_mode),
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def classify_consumer_wiring(project: Path, changerail_root: Path) -> WiringClassification:
+    lock_path = project / "openspec" / "changerail-consumer-lock.json"
+    if not lock_path.is_file():
+        return WiringClassification(
+            backend="symlink",
+            path_mode="lockless",
+            lock_state="absent",
+            enforcement="none",
+            source_status="unknown",
+            wiring_status="legacy",
+            topology="legacy compatibility",
+        )
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        wiring = lock["wiring"]
+        metadata = lock["changerail"]
+        artifacts = wiring["artifacts"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return WiringClassification(
+            backend="unknown",
+            path_mode="unknown",
+            lock_state="invalid",
+            enforcement="unknown",
+            source_status="unknown",
+            wiring_status="broken",
+            topology="unknown",
+        )
+    failures = False
+    path_mode = str(wiring.get("path_mode", "unknown"))
+    for entry in artifacts:
+        path = project / str(entry.get("path", ""))
+        source = changerail_root / str(entry.get("source", ""))
+        if not path.is_symlink():
+            failures = True
+            continue
+        raw_target = os.readlink(path)
+        if path_mode == "absolute" and not Path(raw_target).is_absolute():
+            failures = True
+        if path_mode == "relative" and Path(raw_target).is_absolute():
+            failures = True
+        if path.resolve(strict=False) != source.resolve(strict=False):
+            failures = True
+    revision = subprocess.run(
+        ["git", "-C", str(changerail_root), "rev-parse", "HEAD"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    ).stdout.strip()
+    version = (changerail_root / "VERSION").read_text(encoding="utf-8").strip()
+    source_status = (
+        "match"
+        if revision == metadata.get("revision") and version == metadata.get("version")
+        else "drift"
+    )
+    topology = "shared tree required" if path_mode == "relative" else "independent consumer"
+    return WiringClassification(
+        backend=str(wiring.get("backend", "unknown")),
+        path_mode=path_mode,
+        lock_state="valid",
+        enforcement=str(lock.get("enforcement", "unknown")),
+        source_status=source_status,
+        wiring_status="broken" if failures else "valid",
+        topology=topology,
+    )
+
+
 def create_consumer_example(run_dir: Path, changerail_root: Path) -> Path:
     project = run_dir / "example-project"
     if project.exists():
@@ -351,6 +495,7 @@ def create_consumer_example(run_dir: Path, changerail_root: Path) -> Path:
     symlink_force(changerail_root / "claude" / "commands" / "chrl", project / ".claude" / "commands" / "chrl")
     for skill in SKILLS:
         symlink_force(changerail_root / "skills" / skill, project / ".codex" / "skills" / skill)
+    write_consumer_lock(project, changerail_root)
     return project
 
 
@@ -457,6 +602,102 @@ def summarize(checks: Iterable[Check]) -> dict[str, int | str]:
     }
 
 
+def classification_check(
+    name: str,
+    classification: WiringClassification,
+    changerail_root: Path,
+    *,
+    expected_path_mode: str,
+    expected_wiring_status: str = "valid",
+) -> Check:
+    public_payload = json.dumps(asdict(classification), ensure_ascii=True, sort_keys=True)
+    failures: list[str] = []
+    if classification.lock_state != "valid":
+        failures.append(f"lock_state={classification.lock_state}")
+    if classification.path_mode != expected_path_mode:
+        failures.append(f"path_mode={classification.path_mode}")
+    if classification.source_status != "match":
+        failures.append(f"source_status={classification.source_status}")
+    if classification.wiring_status != expected_wiring_status:
+        failures.append(f"wiring_status={classification.wiring_status}")
+    if str(changerail_root) in public_payload:
+        failures.append("classification exposed resolved ChangeRail root")
+    return Check(
+        name=name,
+        path="openspec/changerail-consumer-lock.json",
+        expected_target=f"{expected_path_mode}/{expected_wiring_status}",
+        resolved_target="",
+        status="fail" if failures else "pass",
+        message="; ".join(failures) if failures else public_payload,
+        mode="consumer-example",
+        surface="wiring",
+    )
+
+
+def lock_classification_checks(
+    consumer: Path,
+    changerail_root: Path,
+    run_dir: Path,
+) -> tuple[list[Check], dict[str, object]]:
+    checks: list[Check] = []
+    absolute = classify_consumer_wiring(consumer, changerail_root)
+    checks.append(
+        classification_check(
+            "consumer absolute lock classification",
+            absolute,
+            changerail_root,
+            expected_path_mode="absolute",
+        )
+    )
+
+    relative_project = run_dir / "relative-consumer"
+    shutil.copytree(consumer, relative_project, symlinks=True)
+    relative_lock_path = relative_project / "openspec" / "changerail-consumer-lock.json"
+    relative_lock = json.loads(relative_lock_path.read_text(encoding="utf-8"))
+    relative_lock["wiring"]["path_mode"] = "relative"
+    for entry in relative_lock["wiring"]["artifacts"]:
+        path = relative_project / entry["path"]
+        source = changerail_root / entry["source"]
+        path.unlink()
+        os.symlink(os.path.relpath(source, start=path.parent), path)
+    relative_lock_path.write_text(
+        json.dumps(relative_lock, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    relative = classify_consumer_wiring(relative_project, changerail_root)
+    checks.append(
+        classification_check(
+            "consumer relative lock classification",
+            relative,
+            changerail_root,
+            expected_path_mode="relative",
+        )
+    )
+
+    broken_project = run_dir / "broken-consumer"
+    shutil.copytree(consumer, broken_project, symlinks=True)
+    broken_lock = json.loads(
+        (broken_project / "openspec" / "changerail-consumer-lock.json").read_text(encoding="utf-8")
+    )
+    broken_path = broken_project / broken_lock["wiring"]["artifacts"][0]["path"]
+    broken_path.unlink()
+    broken = classify_consumer_wiring(broken_project, changerail_root)
+    checks.append(
+        classification_check(
+            "consumer broken lock classification",
+            broken,
+            changerail_root,
+            expected_path_mode="absolute",
+            expected_wiring_status="broken",
+        )
+    )
+    return checks, {
+        "absolute": asdict(absolute),
+        "relative": asdict(relative),
+        "broken": asdict(broken),
+    }
+
+
 def build_report(run_id: str, changerail_root: Path, run_dir: Path, modes: list[str], surfaces: list[str]) -> dict[str, object]:
     runs: list[dict[str, object]] = []
     all_checks: list[Check] = []
@@ -489,6 +730,23 @@ def build_report(run_id: str, changerail_root: Path, run_dir: Path, modes: list[
                 }
             )
 
+    classifications: dict[str, object] = {}
+    if consumer_base is not None:
+        classification_checks, classifications = lock_classification_checks(
+            consumer_base,
+            changerail_root,
+            run_dir,
+        )
+        all_checks.extend(classification_checks)
+        runs.append(
+            {
+                "mode": "consumer-example",
+                "surface": "wiring",
+                "summary": summarize(classification_checks),
+                "checks": [asdict(check) for check in classification_checks],
+            }
+        )
+
     return {
         "schema": SCHEMA,
         "run_id": run_id,
@@ -496,6 +754,7 @@ def build_report(run_id: str, changerail_root: Path, run_dir: Path, modes: list[
         "report_kind": "aggregate",
         "modes": modes,
         "surfaces": surfaces,
+        "consumer_wiring": classifications,
         "summary": summarize(all_checks),
         "runs": runs,
         "checks": [asdict(check) for check in all_checks],

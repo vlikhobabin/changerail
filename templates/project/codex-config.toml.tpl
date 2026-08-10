@@ -1,6 +1,7 @@
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
+approval_policy = "{{CODEX_APPROVAL_POLICY}}"
+sandbox_mode = "{{CODEX_SANDBOX_MODE}}"
 project_doc_fallback_filenames = ["AGENTS.md"]
+project_doc_max_bytes = 32768
 
 [features]
 apps = true

@@ -59,7 +59,7 @@ wiring и не коммитятся.
 
 ## Consumer wiring
 
-### POSIX and current consumer wiring
+### POSIX consumer wiring
 
 Потребительский проект подключает ChangeRail source of truth из своего репозитория:
 
@@ -89,6 +89,43 @@ bin/verify-project              -> /opt/changerail/bin/verify-project
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
 bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
 ```
+
+Greenfield POSIX bootstrap по умолчанию создает absolute symlink targets и
+tracked `openspec/changerail-consumer-lock.json`. Lock хранит только canonical
+public source, version/revision, relative artifact inventory и выбранный
+`path_mode`; resolved machine root в него не попадает. Для workspace, который
+перемещает ChangeRail и consumer одним деревом, нужен explicit
+`--wiring-path-mode relative`.
+
+`--lock-enforcement advisory` оставляет source revision drift non-blocking,
+`strict` делает его blocking, а broken/missing symlink остается blocking в обоих
+режимах. `--lock-enforcement none` предназначен для explicit development
+fixtures и сохраняет lockless compatibility. Lock-owned POSIX wiring можно
+repair-ить командой:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --changerail-root /opt/changerail \
+  --refresh-wiring --skip-verify
+```
+
+Refresh не меняет lock, требует совпадающий revision и отказывается заменять
+real files/directories, проходить через symlink parent, выходить из project
+scope или работать при unrelated Git dirty state.
+
+Для уже подключенного consumer repair можно объединить с ignored auth-link в
+bounded configure mode без повторного template rendering:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --changerail-root /opt/changerail \
+  --configure-existing --refresh-wiring \
+  --link-codex-auth AUTH_JSON
+```
+
+Все actions проходят preflight до первой мутации. Повторный запуск подтверждает
+уже совпадающие symlink-и; project-owned destinations и undeclared links не
+заменяются.
 
 При opt-in maintenance (`bin/bootstrap-project --with-maintenance` или
 эквивалентная ручная migration) дополнительно появляются:

@@ -57,8 +57,12 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
     env = {**os.environ, "OPENSPEC_TELEMETRY": "0"}
     if extra_env:
         env.update(extra_env)
+    effective_cmd = list(cmd)
+    if Path(effective_cmd[0]).name in {"bootstrap-project", "bootstrap-project.cmd"}:
+        if "--lock-enforcement" not in effective_cmd:
+            effective_cmd[2:2] = ["--lock-enforcement", "none"]
     return subprocess.run(
-        cmd,
+        effective_cmd,
         cwd=cwd,
         text=True,
         stdout=subprocess.PIPE,
