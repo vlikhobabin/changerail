@@ -1,13 +1,13 @@
 # Добавить scoped maintenance fix mode
 
 ## Status
-1.backlog
+5.canceled
 
 ## Owner
 ChangeRail core
 
 ## OpenSpec Stage
-story
+canceled
 
 ## Series
 `060-repository-knowledge-maintenance`
@@ -16,8 +16,9 @@ story
 `06`
 
 ## Planning State
-deferred after explicit negative entry-gate decision; audit/triage value is
-delivered, but fix authority is not supported by real proposal evidence
+canceled after explicit negative entry-gate decision and board scope review;
+audit/triage value is delivered, but fix authority is not supported by real
+proposal evidence
 
 ## Source
 - `060-00-repository-knowledge-maintenance-program-epic.md`
@@ -53,6 +54,9 @@ ChangeRail review/publish flow. Карточка намеренно не вхо�
 - Decision: do not admit this card to `2.todo` and do not run `$chrl-deliver`
   for it. The current read-only audit/triage/feedback/quality surface remains the
   supported product boundary.
+- Closure decision: do not retain an indefinitely actionable write-capable
+  backlog item without evidence or authority. A future fix-mode proposal must
+  start as a new linked card after the same entry conditions are met.
 
 ## Acceptance
 - `fix` никогда не является default skill или scheduled mode и требует explicit
@@ -95,7 +99,7 @@ ChangeRail review/publish flow. Карточка намеренно не вхо�
 - Independent review/publish handoff smoke without performing publish in helper.
 
 ## Related
-- `openspec/board/1.backlog/060-00-repository-knowledge-maintenance-program-epic.md`
+- `openspec/board/4.done/060-00-repository-knowledge-maintenance-program-epic.md`
 - `openspec/board/4.done/060-05-connect-feedback-and-quality-rollup.md`
 - `skills/changerail-review/SKILL.md`
 - `skills/changerail-pub/SKILL.md`
@@ -122,17 +126,13 @@ and standard ChangeRail review/publish handoff.
 - `openspec/changes/add-scoped-maintenance-fix-mode/`
 
 ## Result
-Not started by design. The 2026-08-09 readiness gate was evaluated and returned
-negative because real accepted/rejected proposal and operator-approval evidence
-does not exist.
+Canceled without implementation. The readiness gate returned negative because
+real accepted/rejected proposal evidence, retained parity evidence and explicit
+operator allowlist/deletion authority do not exist.
 
 ## Next
-- Keep in backlog. Re-evaluate only after real maintenance findings produce
-  schema-valid accepted and rejected decisions for a named candidate
-  transformation class, retained scope/parity evidence exists, and the operator
-  explicitly accepts the allowlist, parity contract and deletion policy.
-- Do not count test fixtures, a clean zero-finding scan or a single agent verdict
-  as fix-mode authority.
+- If operational evidence later satisfies the gate, create a new linked backlog
+  card for a named transformation class. Do not revive this card automatically.
 
 ## Log
 - `2026-08-09T12:35:25Z` — fix mode separated from MVP and given an explicit
@@ -145,3 +145,7 @@ does not exist.
   the quality rollup returned proposal, triage-time and resolution metrics as
   `unknown`; no real proposal decisions or operator allowlist approval exist,
   so the story remains in `1.backlog` and was not sent to `$chrl-deliver`.
+- `2026-08-10T08:00:00Z` — operator board review closed the speculative
+  write-capable story without implementation. Future work requires a new
+  evidence-backed card and explicit authority rather than indefinite backlog
+  retention.

@@ -1,7 +1,7 @@
 # Программа 000: Release hardening и native Windows support
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 ChangeRail core + operator
@@ -80,16 +80,17 @@ Windows hosts.
 - `openspec/board/4.done/010-00-core-release-contracts-epic.md`
 - `openspec/board/4.done/020-00-one-command-delivery-experience-epic.md`
 - `openspec/board/4.done/030-00-native-windows-discovery-epic.md`
-- `openspec/board/1.backlog/040-00-native-windows-implementation-epic.md`
+- `openspec/board/4.done/040-00-native-windows-implementation-epic.md`
 - `bin/changerail-delivery-runner`
 - `skills/chrl-deliver/SKILL.md`
 
 ## Result
-series `010`..`030` complete; series `040` ready for package runner
+Program exit passed. Series `010`..`040` are published, Linux release baseline
+is green, and native Windows generated-copy support has retained two-host
+clean-clone evidence. This coordination epic has no remaining executable work.
 
 ## Next
-- Запустить tracked runner plan `040-native-windows-implementation` и после
-  exit audit закрыть program epic.
+- done
 
 ## Log
 - 2026-08-01T15:34:23Z program epic создана для orchestration серий `010`-`040`.
@@ -104,3 +105,8 @@ series `010`..`030` complete; series `040` ready for package runner
   `030-01`..`030-03` delivered, workspace clean, `HEAD == origin/main`.
 - 2026-08-02T08:24:42Z exit audit после `030` прошел release baseline 27/27;
   series `040` перепланирована и готовится к package runner.
+- 2026-08-10T08:00:00Z board audit подтвердил, что `040-01`..`040-05`
+  опубликованы, two-host support proof записан, а stale runner handoff больше не
+  актуален; program epic закрыта как выполненная.
+- 2026-08-10T08:11:52Z post-closure release baseline прошел 31/31; current и
+  reachable-history public-surface scans прошли без findings.

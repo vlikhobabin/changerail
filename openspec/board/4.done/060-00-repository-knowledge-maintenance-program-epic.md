@@ -1,7 +1,7 @@
 # Серия 060: Repository knowledge и maintenance harness
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 ChangeRail core
@@ -154,7 +154,7 @@ delivery runner или consumer-owned repository policy.
 - `docs/changerail-source-of-truth-architecture.md`
 - `openspec/specs/changerail-drift-gate/spec.md`
 - `openspec/specs/changerail-delivery-observability/spec.md`
-- `openspec/board/1.backlog/050-harden-greenfield-consumer-bootstrap.md`
+- card `050-harden-greenfield-consumer-bootstrap`
 
 ## Result
 Program exit passed. Repository knowledge, deterministic scan, lifecycle,
@@ -164,9 +164,7 @@ fix mode is intentionally deferred because operational proposal evidence and
 operator approval are absent.
 
 ## Next
-- Current series delivery is complete. Keep `060-06` in backlog and re-evaluate
-  only when real accepted/rejected proposal decisions, retained parity evidence
-  and explicit operator allowlist approval satisfy its recorded resume gate.
+- done
 
 ## Log
 - `2026-08-09T11:41:01Z` — создана исходная broad implementation card по
@@ -200,3 +198,7 @@ operator approval are absent.
   rollup. `060-06` не допущена: accepted/rejected proposal, triage-time,
   resolution trend и operator allowlist evidence отсутствуют; optional fix mode
   остается backlog story по заранее определенной ветке exit gate.
+- `2026-08-10T08:00:00Z` — после доставки consumer readiness карточкой `061`
+  board audit закрыл coordination epic как выполненную. Не допущенный fix mode
+  закрыт отдельно в `5.canceled`; новый write-capable proposal потребует новой
+  evidence-backed карточки и explicit operator authority.

@@ -1,7 +1,7 @@
 # Серия 040: Реализация native Windows support
 
 ## Status
-1.backlog
+4.done
 
 ## Owner
 ChangeRail core + operator
@@ -16,7 +16,7 @@ epic
 `00`
 
 ## Planning State
-readiness passed after `030` exit audit; executable cards moved to `2.todo`
+completed; executable cards `040-01`..`040-05` published in `4.done`
 
 ## Delivery Mode
 coordination-only; не запускать `$chrl-deliver` для этой epic-карточки
@@ -80,11 +80,12 @@ safety, automated two-host smoke and final clean-clone end-to-end proof.
 - `openspec/specs/changerail-windows-native-architecture/spec.md`
 
 ## Result
-ready for tracked runner plan
+Series exit passed. Native Windows entrypoints, generated-copy wiring,
+verification/Git safety, automated smoke and two-host clean-clone proof are
+published. This coordination epic has no remaining executable work.
 
 ## Next
-- Запустить tracked runner plan `040-native-windows-implementation` для
-  `040-01`..`040-05`.
+- done
 
 ## Log
 - 2026-08-01T15:07:29Z provisional epic создана отдельно от discovery series.
@@ -93,3 +94,6 @@ ready for tracked runner plan
   remain in `1.backlog`.
 - 2026-08-02T08:24:42Z exit audit `030` green; story cards `040-01`..`040-05`
   переведены в `2.todo`, порядок сохранен, tracked runner plan подготовлен.
+- 2026-08-10T08:00:00Z board audit подтвердил публикацию всех five story cards
+  и retained two-host clean-clone result; stale readiness state заменен
+  completion state, epic закрыта как выполненная.
