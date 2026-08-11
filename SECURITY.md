@@ -3,7 +3,7 @@
 ## Supported Versions
 
 ChangeRail is pre-1.0. Security fixes are supported for the current `main`
-branch and the latest published `0.1.x` release line.
+branch and the latest published `0.5.x` release line.
 
 ## Reporting A Vulnerability
 

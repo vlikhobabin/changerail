@@ -46,6 +46,19 @@ notes and compatibility notes.
   version
 - **AND** they MUST not imply that MCP, Codex, Claude or OpenSpec pins changed
 
+### Requirement: Versioned release metadata
+Before publishing a ChangeRail release, release metadata MUST name the release
+version, summarize user-facing changes since the previous release, include
+operator migration notes and pass the local release baseline.
+
+#### Scenario: Release metadata is ready
+- **WHEN** a maintainer publishes a ChangeRail release
+- **THEN** `VERSION`, `CHANGELOG.md`, compatibility notes and migration guide
+  all identify the release version
+- **AND** `CHANGELOG.md` has an empty `Unreleased` section for future work
+- **AND** the release card records the verification commands and observed
+  outcomes used before publish
+
 ### Requirement: Tool compatibility notes
 ChangeRail MUST document compatibility expectations for Codex CLI, Claude Code and
 OpenSpec CLI.

@@ -9,18 +9,18 @@ notes, migration guide и проверки.
 Current ChangeRail version:
 
 ```text
-0.4.0
+0.5.0
 ```
 
 Source: root `VERSION`.
 
-`0.4.0` formalizes the shared Python runtime selector, adds native Windows
-`.cmd` entrypoints and generated-copy wiring, publishes two-host clean-clone
-Windows evidence for prepared operator-managed hosts, and hardens delivery
-review, publish, evidence and CI smoke contracts. It does not change Codex CLI,
-Claude Code, OpenSpec CLI or MCP npm package pins. Existing consumers should
-install runtime dependencies, run project-local verification and restart active
-agent sessions after updating.
+`0.5.0` adds the repository knowledge and maintenance surface, hardens
+consumer bootstrap/verification through explicit profiles, consumer locks,
+generated-owned refresh and runtime diagnostics, and expands release CI with
+maintenance, repository-knowledge and generated consumer-CI smokes. It does not
+change Codex CLI, Claude Code, OpenSpec CLI or MCP npm package pins. Existing
+consumers should install refreshed runtime dependencies, run project-local
+verification and restart active agent sessions after updating.
 
 ## Codex CLI
 
@@ -224,6 +224,37 @@ python3 scripts/smoke-delivery-metrics.py
 python3 scripts/smoke-review-verdict-validation.py
 python3 scripts/smoke-review-fingerprint.py
 python3 scripts/smoke-contract-schemas.py
+python3 scripts/smoke-maintenance-runner.py
+python3 scripts/smoke-repository-knowledge.py
+```
+
+## ChangeRail Maintenance
+
+Status: supported as a read-only/default repository maintenance lifecycle with
+explicit local write flags only.
+
+Expected contract:
+
+- `bin/changerail-maintenance` validates repository knowledge catalogs,
+  renders deterministic indexes, scans active knowledge, builds lifecycle
+  reports, validates triage annotations, previews cards and computes feedback
+  and quality rollups;
+- default audit/report/triage/card-preview operations write only ignored
+  runtime state or no state at all;
+- tracked writes require explicit operator flags such as `render-index --write`,
+  `accept-baseline --write` or `cards --write`;
+- maintenance does not commit, push, publish, open pull requests, write issues
+  or mutate external systems;
+- consumer opt-in through `bootstrap-project --with-maintenance` creates a
+  first-run-green starter catalog, policy and generated index.
+
+Verification:
+
+```bash
+bin/changerail-maintenance validate-catalog --json
+bin/changerail-maintenance report --json
+python3 scripts/smoke-maintenance-runner.py
+python3 scripts/smoke-repository-knowledge.py
 ```
 
 ## Native Windows Lab
@@ -511,6 +542,8 @@ Implemented native runtime entrypoint surface:
 - `bin/changerail-evidence.cmd`
 - `bin/changerail-delivery-runner.cmd`
 - `bin/changerail-delivery-metrics.cmd`
+- `bin/changerail-maintenance.cmd`
+- `bin/changerail-maintenance-runner.cmd`
 
 Python-backed `.cmd` wrappers launch through `changerail-python.cmd`, which
 uses the same Python `3.11+` and `requirements-runtime.txt` contract as the
@@ -530,11 +563,12 @@ Python runtime modules and npm/npx tooling.
 
 New consumers use canonical `--profile generic|workspace-root|service`,
 `--surfaces all-surfaces|codex-only` and
-`--codex-policy safe-interactive|trusted-automation`. The public default changed
-from implicit unattended full access to explicit `safe-interactive`, which
-renders `on-request` and `workspace-write`. Existing automation that depends on
-the old authority must pass `--codex-policy trusted-automation`; existing
-generated consumers are not rewritten automatically.
+`--codex-policy safe-interactive|trusted-automation`. In `0.5.0`, the public
+default changed from implicit unattended full access to explicit
+`safe-interactive`, which renders `on-request` and `workspace-write`. Existing
+automation that depends on the old authority must pass
+`--codex-policy trusted-automation`; existing generated consumers are not
+rewritten automatically.
 
 `--kind` remains a bounded alias for `--profile`. Matching values are accepted,
 while conflicting canonical and legacy values fail before target mutation.

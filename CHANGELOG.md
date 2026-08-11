@@ -19,6 +19,55 @@ changes помечаются префиксом `BREAKING:`.
 ### Breaking
 - none
 
+## 0.5.0 - 2026-08-11
+
+### Added
+- Added tracked repository knowledge and maintenance contracts: catalog,
+  generated index, policy, deterministic scan/report/triage, baseline/waiver,
+  card preview/deduplication, feedback normalization and quality rollup.
+- Added `bin/changerail-maintenance`, `bin/changerail-maintenance-runner`,
+  native `.cmd` wrappers, `changerail-maintain`/`chrl-maintain` Codex skills
+  and Claude command wrappers for read-only audit and bounded triage.
+- Added maintenance opt-in bootstrap templates, public scheduler examples and
+  an end-to-end maintenance operations runbook for consumer repositories.
+- Added `changerail.consumer-lock.v1`, bootstrap topology/profile controls,
+  opt-in generated consumer CI and greenfield README/Git initialization
+  support.
+- Added static Codex instruction-budget checks and opt-in runtime diagnostics
+  smoke coverage.
+
+### Changed
+- `bootstrap-project` now uses canonical profile/surface/Codex policy options,
+  defaults new POSIX wiring to absolute symlink targets, can write advisory or
+  strict consumer locks, and limits `--configure-existing` to explicit
+  allowlisted actions.
+- `verify-project` now validates consumer locks, generated wiring ownership,
+  maintenance opt-in contracts, maintenance schemas, instruction budgets and
+  optional runtime diagnostics more explicitly.
+- The release baseline and CI contract now include repository-knowledge,
+  maintenance-runner, runtime-diagnostics, consumer-CI and expanded schema
+  coverage.
+- Compatibility, migration, adoption, wiring and contract docs now cover the
+  maintenance surface and portable consumer bootstrap model.
+
+### Fixed
+- Fixed maintenance opt-in bootstrap so a fresh `--with-maintenance` consumer
+  passes `validate-catalog`, `render-index --check` and `scan --json` without
+  manual catalog/index edits.
+- Fixed greenfield bootstrap safety around existing projects, generated-owned
+  refresh, project-owned files, local Git initialization and no implicit
+  stage/commit/push behavior.
+- Fixed consumer verification gaps for missing or stale maintenance quality and
+  proposal-decision schemas.
+- Fixed release/public-surface fixtures so generated docs and clean-clone
+  smokes stay public-safe and deterministic.
+
+### Breaking
+- BREAKING: New consumer bootstrap defaults now render Codex
+  `safe-interactive` authority instead of implicit trusted automation.
+  Unattended automation must pass `--codex-policy trusted-automation`
+  explicitly.
+
 ## 0.4.0 - 2026-08-02
 
 ### Added

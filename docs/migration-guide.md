@@ -6,6 +6,22 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
+- none
+
+## 0.4.0 -> 0.5.0
+
+### What Changed
+
+- ChangeRail now has a tracked repository knowledge catalog and maintenance
+  lifecycle: deterministic generated index, policy, scan, report, triage,
+  baseline/waiver, card preview/deduplication, feedback and quality rollup.
+- Operators can run read-only maintenance audits through
+  `bin/changerail-maintenance report --json`, `$changerail-maintain audit` or
+  `$chrl-maintain audit`. Write-capable maintenance fix mode remains outside
+  the supported surface.
+- Consumer bootstrap can opt into maintenance with `--with-maintenance`; the
+  generated starter catalog, policy and index are first-run green for
+  `validate-catalog`, `render-index --check` and `scan --json`.
 - POSIX bootstrap defaults to absolute symlink targets and can write
   `changerail.consumer-lock.v1` with advisory or strict source enforcement.
 - Existing lockless consumers remain supported. Development fixtures that
@@ -25,6 +41,68 @@ credentials, traces или machine-local inventory.
   Runtime proof is separate and opt-in through `verify-project
   --runtime-diagnostics`; default verification remains static and does not
   invoke Codex.
+- **BREAKING** for new unattended bootstrap automation: default generated Codex
+  policy is now `safe-interactive`. Automation that requires unattended full
+  repository authority must pass `--codex-policy trusted-automation`
+  explicitly.
+
+### Required Actions
+
+For operators maintaining the source checkout:
+
+```bash
+cd /opt/changerail
+git pull --ff-only
+python3 -m pip install --disable-pip-version-check -r requirements-runtime.txt
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+Restart active Codex/Claude sessions after updating so loaded skill and
+workflow-contract text is refreshed.
+
+For consumers using copied ChangeRail helpers, generated wiring copies or
+local copied runbooks, refresh from the ChangeRail source of truth and rerun
+verification:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project --refresh-wiring --skip-verify
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+For projects that opt into maintenance:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project --with-maintenance --skip-verify
+cd /opt/example-project
+bin/changerail-maintenance validate-catalog --json
+bin/changerail-maintenance render-index --check --json
+bin/changerail-maintenance scan --json
+```
+
+If an existing consumer keeps a customized catalog or policy, review the
+generated diff before accepting refresh. Maintenance runtime reports,
+annotations, previews, locks and raw logs must remain under ignored
+`.runtime/changerail/maintenance/`.
+
+If bootstrap automation relied on the old default trusted Codex authority, add
+the explicit policy:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --profile generic \
+  --codex-policy trusted-automation
+```
+
+### Rollback
+
+Return `/opt/changerail` to `v0.4.0`, refresh generated-owned wiring if the
+consumer was already updated to `0.5.0`, and rerun project verification:
+
+```bash
+git -C /opt/changerail checkout v0.4.0
+/opt/changerail/bin/bootstrap-project /opt/example-project --refresh-wiring --skip-verify
+/opt/changerail/bin/verify-project /opt/example-project
+```
 
 ## 0.3.0 -> 0.4.0
 
