@@ -953,9 +953,11 @@ declare exact `investigation_card`, `investigation_id`, `successor_card`,
 `allow_new_authority_or_wire_protocol` values. Preflight MUST verify the
 current successor path/id, a readable published `4.done` investigation path/id,
 the successor's `Depends On` reference, the investigation's `Blocks` reference
-and the authorization source's `Depends On` reference. The authorization
-ceiling MUST be an integer from 301 through 500, and the preflight result MUST
-retain its machine-verifiable state.
+and the authorization source's `Depends On` reference. A relation reference
+MUST match its exact card id as bare `<id>`, `<id>.md`, or canonical
+`openspec/board/<lane>/<id>.md`; other stems, paths and ambiguous values MUST
+not match. The authorization ceiling MUST be an integer from 301 through 500,
+and the preflight result MUST retain its machine-verifiable state.
 
 #### Scenario: Published investigation authorizes its exact successor
 - **WHEN** an ordinary successor references a valid published authorization
@@ -963,6 +965,12 @@ retain its machine-verifiable state.
   production LOC and its published investigation has the exact card links
 - **THEN** preflight permits the bounded LOC and declared protocol
 - **AND** returns `ready-for-llm-review` with the ordinary `high` route
+
+#### Scenario: Published card uses a filename reference
+- **WHEN** the investigation `Blocks` relation uses exact `<successor-id>.md`
+  or canonical board path ending in that filename
+- **THEN** preflight treats it as the exact successor id
+- **AND** a different stem or noncanonical path does not match
 
 #### Scenario: Authorization is missing or stale
 - **WHEN** added production LOC exceeds the default ceiling or a protocol is

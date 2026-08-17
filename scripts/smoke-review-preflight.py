@@ -74,7 +74,7 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
               executable_lines: int = 0, executable_path: str = "bin/new-helper", go_test_lines: int = 0,
               authorization: bool = False, authorization_protocol: bool = False, authorization_ceiling: int = 500,
               mismatched_blocks: bool = False, investigation_status: str = "4.done",
-              self_authorize_reference: bool = False) -> tuple[Path, Path]:
+              self_authorize_reference: bool = False, investigation_block_reference: str = "example-card") -> tuple[Path, Path]:
     repo = root / f"repo-{risk}-{production_lines}-{int(protocol)}"
     while repo.exists():
         repo = repo.with_name(repo.name + "-next")
@@ -88,7 +88,7 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
     if authorization:
         write(
             repo / "openspec" / "board" / "4.done" / "published-investigation.md",
-            f"# Published investigation\n\n## Status\n{investigation_status}\n\n## Blocks\n- `example-card`\n",
+            f"# Published investigation\n\n## Status\n{investigation_status}\n\n## Blocks\n- `{investigation_block_reference}`\n",
         )
         source_authorization = json.dumps({
             "investigation_card": "openspec/board/4.done/published-investigation.md",
@@ -222,6 +222,32 @@ def main() -> int:
         assert data["complexity_guard"]["added_production_loc"] == 444
         assert data["complexity_guard"]["limit"] == 500
         assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=444, authorization=True,
+                                   investigation_block_reference="example-card.md")
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "published investigation filename reference")
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=444, authorization=True,
+                                   investigation_block_reference="openspec/board/3.inprogress/example-card.md")
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "published investigation board-path reference")
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=444, authorization=True,
+                                   investigation_block_reference="other-card.md")
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=444, authorization=True,
+                                   investigation_block_reference="docs/example-card.md")
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
 
         repo, manifest = workspace(root, "ordinary", production_lines=444, protocol=True)
         result, data = preflight(repo, manifest, "--normalize")

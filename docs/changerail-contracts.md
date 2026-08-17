@@ -109,6 +109,8 @@ card/id, ceiling `301..500` и protocol allowance. Preflight также пров
 `investigation Blocks successor`, `successor Depends On investigation` и
 `authorization source Depends On investigation`; отсутствие или mismatch
 остаётся `investigation-required`.
+Relation принимает только exact bare id, `<id>.md` или canonical
+`openspec/board/<lane>/<id>.md`; foreign stem и non-board path не совпадают.
 
 ## Review Verdict
 

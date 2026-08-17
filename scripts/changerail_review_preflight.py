@@ -21,6 +21,10 @@ DEFAULT_PRODUCTION_LOC_LIMIT = 300
 MAX_AUTHORIZED_PRODUCTION_LOC_LIMIT = 500
 AUTHORIZATION_FIELD = "Published investigation authorization"
 AUTHORIZATION_SOURCE_FIELD = "Investigation authorization"
+CARD_ID_RE = r"[a-z0-9][a-z0-9-]*"
+BOARD_CARD_REFERENCE_RE = re.compile(rf"^openspec/board/[1-5]\.(?:backlog|todo|inprogress|done|canceled)/({CARD_ID_RE})\.md$")
+CARD_FILENAME_RE = re.compile(rf"^({CARD_ID_RE})\.md$")
+BARE_CARD_ID_RE = re.compile(rf"^{CARD_ID_RE}$")
 
 
 def _field(text: str, name: str) -> str | None:
@@ -87,7 +91,19 @@ def _production_path(workspace: Path, path: str) -> bool:
 
 
 def _reference_matches(text: str, heading: str, expected: str) -> bool:
-    return expected in re.findall(r"`([^`\n]+)`", dm.section_body(text, heading))
+    references = re.findall(r"`([^`\n]+)`", dm.section_body(text, heading))
+    normalized: set[str] = set()
+    for reference in references:
+        if BARE_CARD_ID_RE.fullmatch(reference):
+            normalized.add(reference)
+            continue
+        filename = CARD_FILENAME_RE.fullmatch(reference)
+        board_path = BOARD_CARD_REFERENCE_RE.fullmatch(reference)
+        if filename:
+            normalized.add(filename.group(1))
+        elif board_path:
+            normalized.add(board_path.group(1))
+    return expected in normalized
 
 
 def _tracked_at_head(workspace: Path, path: str) -> bool:
