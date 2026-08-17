@@ -23,6 +23,12 @@ story
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
+- Published investigation authorization: `none`
+
+`Published investigation authorization` может быть только inline JSON reference
+`{"authorization_card":"openspec/board/4.done/...","authorization_id":"..."}`.
+Ceiling и protocol allowance объявляет чистый tracked `4.done` source, не
+successor card.
 
 ## Acceptance
 - <observable outcome 1>

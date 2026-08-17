@@ -93,15 +93,63 @@
         "limit",
         "new_authority_or_wire_protocol",
         "repeated_defect_class",
+        "published_investigation_authorization",
         "stop_required",
         "reasons"
       ],
       "additionalProperties": false,
       "properties": {
         "added_production_loc": {"type": "integer", "minimum": 0},
-        "limit": {"const": 300},
+        "limit": {"type": "integer", "minimum": 300, "maximum": 500},
         "new_authority_or_wire_protocol": {"type": "boolean"},
         "repeated_defect_class": {"type": "boolean"},
+        "published_investigation_authorization": {
+          "type": "object",
+          "required": ["status", "detail"],
+          "additionalProperties": false,
+          "properties": {
+            "status": {"enum": ["not-declared", "valid", "invalid"]},
+            "detail": {"type": "string", "minLength": 1},
+            "reference": {
+              "type": "object",
+              "required": ["authorization_card", "authorization_id"],
+              "additionalProperties": false,
+              "properties": {
+                "authorization_card": {"type": "string", "minLength": 1},
+                "authorization_id": {"type": "string", "minLength": 1}
+              }
+            },
+            "authorization": {
+              "type": "object",
+              "required": [
+                "investigation_card",
+                "investigation_id",
+                "successor_card",
+                "successor_id",
+                "production_loc_ceiling",
+                "allow_new_authority_or_wire_protocol"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "investigation_card": {"type": "string", "minLength": 1},
+                "investigation_id": {"type": "string", "minLength": 1},
+                "successor_card": {"type": "string", "minLength": 1},
+                "successor_id": {"type": "string", "minLength": 1},
+                "production_loc_ceiling": {"type": "integer", "minimum": 301, "maximum": 500},
+                "allow_new_authority_or_wire_protocol": {"type": "boolean"}
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"status": {"const": "valid"}},
+                "required": ["status"]
+              },
+              "then": {"required": ["reference", "authorization"]}
+            }
+          ]
+        },
         "stop_required": {"type": "boolean"},
         "reasons": {
           "type": "array",

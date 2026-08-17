@@ -236,7 +236,9 @@ Every publish gets one risk-appropriate payload review. A second broad
 clean-HEAD LLM audit is allowed at most once when the card explicitly declares
 that milestone; never launch it after each micro-rescue or manifest-only
 correction. More than 300 added production LOC, a new authority/wire protocol
-or a repeated defect class is a typed `investigation-required` stop.
+or a repeated defect class is a typed `investigation-required` stop unless
+preflight validates the exact bounded authorization source declared by the
+successor card.
 
 When the default same-card rescue budget is exhausted and the latest review
 still returns `no-go`, autonomous delivery MUST NOT ask for manual exceptional

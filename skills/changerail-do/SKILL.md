@@ -189,7 +189,9 @@ Manifest, board, archive, scope or locally available strict-check failures are
 preflight/process defects and must be fixed before model launch; they are not
 independent `NO-GO` cycles. A typed `investigation-required` outcome (more than
 300 added production LOC, a new authority/wire protocol or repeated defect
-class) stops implementation rescue for investigation/simplification.
+class) stops implementation rescue for investigation/simplification unless
+preflight validates the exact bounded authorization source declared by the
+successor card.
 
 For added or changed tests, record why the test observes the intended behavior
 source and would fail if the claimed regression were present. For docs-only,

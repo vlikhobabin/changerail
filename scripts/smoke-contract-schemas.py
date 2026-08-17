@@ -416,6 +416,10 @@ def review_preflight_result() -> dict[str, Any]:
             "limit": 300,
             "new_authority_or_wire_protocol": False,
             "repeated_defect_class": False,
+            "published_investigation_authorization": {
+                "status": "not-declared",
+                "detail": "no published investigation authorization is declared",
+            },
             "stop_required": False,
             "reasons": [],
         },

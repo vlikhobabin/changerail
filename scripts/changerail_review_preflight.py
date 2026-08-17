@@ -17,6 +17,10 @@ SCHEMA_ID = "changerail.review-preflight-result.v1"
 SCHEMA_FILE = "changerail-review-preflight-result.schema.json"
 PRODUCTION_SUFFIXES = {".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".sh", ".ts", ".tsx"}
 NON_PRODUCTION_PARTS = {"docs", "examples", "fixtures", "openspec", "schemas", "templates", "test", "tests"}
+DEFAULT_PRODUCTION_LOC_LIMIT = 300
+MAX_AUTHORIZED_PRODUCTION_LOC_LIMIT = 500
+AUTHORIZATION_FIELD = "Published investigation authorization"
+AUTHORIZATION_SOURCE_FIELD = "Investigation authorization"
 
 
 def _field(text: str, name: str) -> str | None:
@@ -30,6 +34,16 @@ def _boolean(value: str | None, name: str) -> bool:
     if value in ("yes", "true"):
         return True
     raise ValueError(f"{name} must be yes or no")
+
+
+def _raw_field(text: str, name: str) -> str | None:
+    match = re.search(rf"^-\s*{re.escape(name)}:\s*(.+?)\s*$", text, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    if value.startswith("`") and value.endswith("`"):
+        value = value[1:-1]
+    return value
 
 
 def _risk(text: str, override: str | None) -> dict[str, Any]:
@@ -68,8 +82,78 @@ def _production_path(workspace: Path, path: str) -> bool:
     lowered = {part.lower() for part in candidate.parts}
     name = candidate.name.lower()
     executable = candidate.parts[:1] == ("bin",) and not candidate.suffix and (workspace / candidate).is_file() and bool((workspace / candidate).stat().st_mode & 0o111)
-    return ((candidate.suffix.lower() in PRODUCTION_SUFFIXES or executable) and not (lowered & NON_PRODUCTION_PARTS)
+    return ((candidate.suffix.lower() in PRODUCTION_SUFFIXES or executable) and not name.endswith("_test.go") and not (lowered & NON_PRODUCTION_PARTS)
             and not name.startswith(("test_", "smoke-", "smoke_")))
+
+
+def _reference_matches(text: str, heading: str, expected: str) -> bool:
+    return expected in re.findall(r"`([^`\n]+)`", dm.section_body(text, heading))
+
+
+def _tracked_at_head(workspace: Path, path: str) -> bool:
+    for command in (("cat-file", "-e", f"HEAD:{path}"), ("diff", "--quiet", "HEAD", "--", path)):
+        result = subprocess.run(["git", "-C", str(workspace), *command], capture_output=True, text=True, check=False)
+        if result.returncode:
+            return False
+    return True
+
+
+def _published_investigation_authorization(review_text: str, card_text: str, card: dict[str, Any], workspace: Path) -> dict[str, Any]:
+    raw = _raw_field(review_text, AUTHORIZATION_FIELD)
+    state: dict[str, Any] = {"status": "not-declared", "detail": "no published investigation authorization is declared"}
+    if raw is None or raw.lower() == "none":
+        return state
+    try:
+        reference = json.loads(raw)
+        if not isinstance(reference, dict) or set(reference) != {"authorization_card", "authorization_id"}:
+            raise ValueError("authorization reference must contain exactly authorization_card and authorization_id")
+        if not all(isinstance(reference[field], str) and reference[field] for field in reference):
+            raise ValueError("authorization reference values must be non-empty strings")
+        source_path = (workspace / reference["authorization_card"]).resolve(strict=False)
+        if not source_path.is_relative_to(workspace) or not source_path.is_file():
+            raise ValueError("authorization source card cannot be read")
+        source_text, source = dm.read_card(source_path, workspace)
+        if not source["path"].startswith("openspec/board/4.done/") or source["status"] != "4.done":
+            raise ValueError("authorization source card is not published in 4.done")
+        if reference["authorization_card"] != source["path"] or reference["authorization_id"] != source["id"]:
+            raise ValueError("authorization source path/id does not match the published card")
+        if not _tracked_at_head(workspace, source["path"]):
+            raise ValueError("authorization source card is not an unchanged tracked HEAD artifact")
+        authorization_raw = _raw_field(source_text, AUTHORIZATION_SOURCE_FIELD)
+        authorization = json.loads(authorization_raw or "")
+        expected_fields = {"investigation_card", "investigation_id", "successor_card", "successor_id", "production_loc_ceiling", "allow_new_authority_or_wire_protocol"}
+        if not isinstance(authorization, dict) or set(authorization) != expected_fields:
+            raise ValueError("authorization source must contain exactly the required fields")
+        string_fields = expected_fields - {"production_loc_ceiling", "allow_new_authority_or_wire_protocol"}
+        if not all(isinstance(authorization[field], str) and authorization[field] for field in string_fields):
+            raise ValueError("authorization source card paths and ids must be non-empty strings")
+        ceiling = authorization["production_loc_ceiling"]
+        if isinstance(ceiling, bool) or not isinstance(ceiling, int) or not DEFAULT_PRODUCTION_LOC_LIMIT < ceiling <= MAX_AUTHORIZED_PRODUCTION_LOC_LIMIT:
+            raise ValueError(f"production_loc_ceiling must be an integer from {DEFAULT_PRODUCTION_LOC_LIMIT + 1} through {MAX_AUTHORIZED_PRODUCTION_LOC_LIMIT}")
+        if not isinstance(authorization["allow_new_authority_or_wire_protocol"], bool):
+            raise ValueError("allow_new_authority_or_wire_protocol must be a boolean")
+        if authorization["successor_card"] != card["path"] or authorization["successor_id"] != card["id"]:
+            raise ValueError("authorization source successor path/id does not match the target card")
+        investigation_path = (workspace / authorization["investigation_card"]).resolve(strict=False)
+        if not investigation_path.is_relative_to(workspace) or not investigation_path.is_file():
+            raise ValueError("authorization source investigation card cannot be read")
+        investigation_text, investigation = dm.read_card(investigation_path, workspace)
+        if not investigation["path"].startswith("openspec/board/4.done/") or investigation["status"] != "4.done":
+            raise ValueError("authorization source investigation card is not published in 4.done")
+        if authorization["investigation_card"] != investigation["path"] or authorization["investigation_id"] != investigation["id"]:
+            raise ValueError("authorization source investigation path/id does not match the published card")
+        if not _tracked_at_head(workspace, investigation["path"]):
+            raise ValueError("authorization investigation card is not an unchanged tracked HEAD artifact")
+        if not _reference_matches(card_text, "Depends On", investigation["id"]):
+            raise ValueError("successor Depends On does not reference the investigation id")
+        if not _reference_matches(investigation_text, "Blocks", card["id"]):
+            raise ValueError("published investigation Blocks does not reference the target card id")
+        if not _reference_matches(source_text, "Depends On", investigation["id"]):
+            raise ValueError("authorization source Depends On does not reference the investigation id")
+        return {"status": "valid", "detail": "published authorization source binds the exact successor", "reference": reference, "authorization": authorization}
+    except (json.JSONDecodeError, ValueError, dm.ManifestError) as exc:
+        state.update({"status": "invalid", "detail": str(exc)})
+        return state
 
 
 def _added_loc(workspace: Path, entries: dict[str, dict[str, Any]]) -> int:
@@ -199,11 +283,18 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
     critical_boundary = _boolean(_field(review_text, "Credential or mutation authority"), "Credential or mutation authority")
     milestone = _boolean(_field(review_text, "Milestone audit"), "Milestone audit")
     risk.update({"milestone_audit": milestone, "critical_boundary": critical_boundary, "live_admission": live, "final_certification": final})
+    authorization = _published_investigation_authorization(review_text, card_text, card, workspace)
+    authorized = authorization["status"] == "valid"
+    authorization_values = authorization.get("authorization", {})
+    loc_limit = authorization_values.get("production_loc_ceiling", DEFAULT_PRODUCTION_LOC_LIMIT) if authorized else DEFAULT_PRODUCTION_LOC_LIMIT
+    protocol_allowed = bool(authorization_values.get("allow_new_authority_or_wire_protocol")) if authorized else False
     complexity_reasons = []
-    if added_loc > 300:
-        complexity_reasons.append(f"added production LOC {added_loc} exceeds 300")
-    if new_protocol:
-        complexity_reasons.append("new authority or wire protocol requires investigation")
+    if authorization["status"] == "invalid":
+        complexity_reasons.append(f"published investigation authorization is invalid: {authorization['detail']}")
+    if added_loc > loc_limit:
+        complexity_reasons.append(f"added production LOC {added_loc} exceeds {loc_limit}")
+    if new_protocol and not protocol_allowed:
+        complexity_reasons.append("new authority or wire protocol requires published investigation authorization")
     if repeated:
         complexity_reasons.append("repeated defect class requires simplification")
     if risk["tier"] == "deterministic" and added_loc:
@@ -254,8 +345,9 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         "card": {"id": card["id"], "path": card["path"], "status": card["status"]},
         "manifest": manifest_state, "risk": risk,
         "complexity_guard": {
-            "added_production_loc": added_loc, "limit": 300, "new_authority_or_wire_protocol": new_protocol,
-            "repeated_defect_class": repeated, "stop_required": stop, "reasons": complexity_reasons,
+            "added_production_loc": added_loc, "limit": loc_limit, "new_authority_or_wire_protocol": new_protocol,
+            "repeated_defect_class": repeated, "published_investigation_authorization": authorization,
+            "stop_required": stop, "reasons": complexity_reasons,
         },
         "checks": checks, "llm_review": {"required": llm_required, "reason": reason},
     }

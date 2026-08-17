@@ -284,7 +284,9 @@ independent `no-go`, когда implementing session исправляет scoped
 Default - два same-card rescue и один payload review; extra clean-HEAD LLM audit
 допустим один раз на declared milestone. Hash-bound suite evidence reusable до
 обязательного rerun перед live/final publish. `>300` production LOC, новая
-authority/wire protocol или repeated defect class => investigation. Если budget
+authority/wire protocol или repeated defect class => investigation; exception
+только для validated `4.done` authorization source (exact link, `301..500`,
+protocol). Иначе investigation-required. Если budget
 исчерпан и latest review всё ещё
 `no-go`, agent не публикует dirty payload и не self-authorizes следующий
 same-card rescue. Он создает linked rescue/replacement карточку с source card,

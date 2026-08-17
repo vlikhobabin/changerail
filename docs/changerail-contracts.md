@@ -95,6 +95,21 @@ budget. `machine-reviewed` является payload gate для явно determi
 scope без added production code; `ready-for-llm-review` выбирает `high` для
 ordinary или `xhigh` для critical review.
 
+Default complexity guard останавливает payload больше 300 production LOC и
+новый authority/wire protocol. Bounded exception требует, чтобы successor
+содержал только reference:
+
+```json
+{"authorization_card":"openspec/board/4.done/example-authorization.md","authorization_id":"example-authorization"}
+```
+
+Referenced `4.done` card должен быть unchanged tracked `HEAD` artifact и сам
+содержать `Investigation authorization` JSON с exact investigation/successor
+card/id, ceiling `301..500` и protocol allowance. Preflight также проверяет
+`investigation Blocks successor`, `successor Depends On investigation` и
+`authorization source Depends On investigation`; отсутствие или mismatch
+остаётся `investigation-required`.
+
 ## Review Verdict
 
 Review verdict является runtime-файлом:

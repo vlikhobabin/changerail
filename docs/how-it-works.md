@@ -287,6 +287,11 @@ milestone. Focused re-review может переиспользовать full-su
 при неизменном hash-bound payload; перед live admission или final publish suite
 выполняется заново. Более 300 added production LOC, новая authority/wire
 protocol или повтор того же defect class требуют investigation/simplification.
+Единственное bounded exception -- successor card ссылается через JSON только на
+чистый tracked `4.done` authorization source; source хранит exact investigation
+и successor binding, ceiling `301..500` и protocol allowance. Отсутствующий,
+stale или mismatched source, а также LOC выше его ceiling, всё равно требуют
+investigation.
 
 ## Supervised-модель: оркестратор, воркер и независимый review
 
