@@ -85,6 +85,10 @@ after independent `NO-GO`. A `fix_budget_exhausted` handoff is non-delivered:
 classify it as a bounded same-card micro-fix, a linked rescue/replacement card
 before downstream work, or an external `BLOCKED`/`NOT-VERIFIABLE` condition.
 Exceptional manual budget is not the default continuation.
+Default bounds are two fix cycles and two semantic same-card rescue cycles.
+Run `bin/changerail-review-verdict preflight <card> --workspace . --normalize
+--json` before model launch; planning/preflight/live counters never consume the
+implementation review budget.
 
 <!-- CHANGERAIL_SHARED_AGENTS_BEGIN source="{{CHANGERAIL_SHARED_SOURCE}}" -->
 {{CHANGERAIL_SHARED_AGENTS}}

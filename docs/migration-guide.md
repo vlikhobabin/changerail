@@ -322,7 +322,7 @@ to interpret with the newer runner.
   contract schema smoke, inventory-based Python compile checks, public-surface
   scans and a single local release baseline command.
 - **BREAKING**: autonomous repeated `NO-GO` policy changed. Default
-  `changerail-deliver` same-card rescue budget is now five bounded rescue/review
+  `changerail-deliver` same-card rescue budget is now two bounded rescue/review
   cycles. When the budget is exhausted, the autonomous path is linked
   rescue/replacement or investigation card escalation, not manual exceptional
   authorization.

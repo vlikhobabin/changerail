@@ -65,8 +65,8 @@ SHORT_COMMANDS = {
 }
 FORBIDDEN_CONSUMER_ROOT_SKILLS = re.compile(r"(^|[\s`'\"])(\./)?skills/")
 DELIVER_REVIEW_CYCLE_CONTRACT = (
-    "$changerail-deliver <path> --max-review-cycles 5",
-    "Default `--max-review-cycles` is `5`",
+    "$changerail-deliver <path> --max-review-cycles 2",
+    "Default `--max-review-cycles` is `2`",
     "rescue/replacement card",
     "same_card_rescue_attempt: 0",
     "rescue_budget",

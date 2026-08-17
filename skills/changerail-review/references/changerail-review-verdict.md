@@ -28,6 +28,13 @@ Review-cycle history may be retained as separate ignored runtime evidence:
 This history does not replace the canonical verdict. Publish validates only the
 latest `.runtime/changerail/reviews/<card-id>.json` verdict.
 
+Before launching an ordinary or critical reviewer, the orchestrator runs
+`bin/changerail-review-verdict preflight <card> --workspace . --normalize
+--json`. A schema-valid `machine-reviewed` preflight result is the payload gate
+for an explicitly deterministic/process card with no added production code.
+Ordinary and critical cards still require this independent verdict; process
+preflight failures never become verdict findings or review cycles.
+
 ## Producing And Validating
 
 Only a fresh reviewer context may write a verdict. The implementing session

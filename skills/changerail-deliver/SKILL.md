@@ -55,7 +55,7 @@ $changerail-deliver <path> --max-cards 3
 $changerail-deliver <path> --no-push
 $changerail-deliver <path> --max-fix-cycles 5
 $changerail-deliver <path> --no-review
-$changerail-deliver <path> --max-review-cycles 5
+$changerail-deliver <path> --max-review-cycles 2
 ```
 
 Accept legacy prompt forms such as `/changerail:deliver`, `changerail:deliver`,
@@ -171,7 +171,27 @@ independent-review `NO-GO`.
 Skip only when `--no-review` is supplied and record the operator rationale in
 the card `Log`.
 
-Otherwise obtain a valid, fresh `result: go` verdict at:
+Before launching a reviewer, run the deterministic gate from the orchestrator
+context:
+
+```bash
+bin/changerail-review-verdict preflight "<card-path>" --workspace . \
+  --normalize --output ".runtime/changerail/review-preflights/<card-id>.json" --json
+```
+
+Handle its outcome before any model launch:
+
+- `blocked`: return the process findings to delivery; do not create a review
+  cycle or consume implementation rescue budget;
+- `investigation-required`: stop the patch staircase and create/continue an
+  investigation or simplification card;
+- `machine-reviewed`: the explicitly deterministic/process payload has its one
+  required machine review; do not launch an LLM;
+- `already-reviewed`: validate the existing exact-payload verdict;
+- `ready-for-llm-review`: launch one semantic reviewer with `high` for ordinary
+  risk or `xhigh` for critical risk.
+
+For ordinary or critical risk, obtain a valid, fresh `result: go` verdict at:
 
 ```text
 .runtime/changerail/reviews/<card-id>.json
@@ -193,9 +213,10 @@ Preferred order:
    ```
 
 On `no-go`, fix blocker findings in card scope using `changerail-do`, then
-request a fresh re-review. Default `--max-review-cycles` is `5`, allowing five
-bounded same-card rescue attempts after the first `no-go`; each rescue attempt
-still requires a fresh independent re-review before publish.
+request a focused fresh re-review. Default `--max-review-cycles` is `2`, allowing
+two bounded same-card rescue attempts after the first `no-go`. Reuse unchanged
+full-suite evidence only when it is bound to the same payload hash; rerun the
+full suite before live admission or final publish.
 
 Treat review cycles and same-card rescue attempts as distinct counters. The
 initial independent review is `review_cycle: 1` and does not consume a rescue
@@ -205,6 +226,17 @@ fixes scoped blocker findings in the same card; the following fresh review is a
 re-review cycle. When review history supports `rescue_budget`, record or
 preserve `limit`, `used`, `remaining` and `exhausted`; legacy history without
 those optional fields is `unknown`, not inferred from prose.
+
+Keep optional `phase_counters.planning_cycles`, `delivery_fix_cycles`,
+`implementation_review_cycles` and `live_admission_reviews` separate. Only an
+actual semantic payload verdict increments implementation review or consumes a
+same-card rescue; preflight, planning and manifest corrections never do.
+
+Every publish gets one risk-appropriate payload review. A second broad
+clean-HEAD LLM audit is allowed at most once when the card explicitly declares
+that milestone; never launch it after each micro-rescue or manifest-only
+correction. More than 300 added production LOC, a new authority/wire protocol
+or a repeated defect class is a typed `investigation-required` stop.
 
 When the default same-card rescue budget is exhausted and the latest review
 still returns `no-go`, autonomous delivery MUST NOT ask for manual exceptional
@@ -261,6 +293,10 @@ Boundaries:
   and full working-tree diff for the manifest scope.
 - Audit acceptance criteria, evidence claims, mandatory verification, test
   adequacy, scope and public-safety risks.
+- Use the preflight risk route: ordinary defaults to `high`; credential,
+  mutation, live-admission or final-certification risk uses `xhigh`.
+- Do one payload review. On a focused re-review, reuse only unchanged evidence
+  bound to the same payload hash; do not invent another clean-HEAD milestone.
 - Write only .runtime/changerail/reviews/<card-id>.json and optional ignored
   review history.
 - Include reviewer.independence with fresh_context true,
@@ -282,7 +318,8 @@ bin/changerail-review-verdict validate \
 ### 4. Publish
 
 Run `changerail-pub` for the re-resolved card. Pass `--no-push` when supplied. Do not
-publish without a fresh valid `go` verdict unless the operator explicitly
+publish without a fresh risk-appropriate `machine-reviewed` receipt or valid
+`go` verdict unless the operator explicitly
 invoked standalone publish and the publish skill permits that exception.
 
 ## Safety Stops
@@ -291,7 +328,7 @@ Stop and report clearly when:
 
 - card discovery is empty or ambiguous;
 - a phase skill stops;
-- external review is required but no valid verdict is present;
+- semantic review is required but no valid verdict is present;
 - a verdict is stale, invalid or `no-go` beyond allowed same-card review cycles
   and autonomous linked-card escalation cannot be created safely;
 - publish scope would include unrelated files;

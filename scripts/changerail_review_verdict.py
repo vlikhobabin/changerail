@@ -14,7 +14,9 @@ current working tree. This helper provides:
   `git status --porcelain`, `git diff HEAD` and untracked non-ignored file
   content, plus the Git tree SHA that would be committed for that reviewed
   working tree, shared by the reviewer that embeds it and every consumer that
-  re-checks it.
+  re-checks it;
+- `preflight <card>`: deterministic manifest, board, scope, strict-check,
+  risk-route and rescue-complexity gate before any LLM payload review.
 
 Exit codes follow the shared ChangeRail helper convention: 0 valid, 1 validation
 failed, 2 input error.
@@ -309,6 +311,22 @@ def _cmd_fingerprint(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_preflight(args: argparse.Namespace) -> int:
+    from changerail_delivery_manifest import ManifestError
+    from changerail_review_preflight import run_preflight
+
+    try:
+        code, payload = run_preflight(
+            card_path=args.card, workspace=Path(args.workspace), manifest_path=args.manifest,
+            normalize=args.normalize, risk_override=args.risk_tier, output=args.output,
+            fingerprint_fn=compute_fingerprint, validate_verdict=_validate_verdict,
+        )
+    except (ManifestError, ValueError, RuntimeError) as exc:
+        raise VerdictError(str(exc), exit_code=1) from exc
+    print(json.dumps(payload, ensure_ascii=False))
+    return code
+
+
 def _print_json_diagnostic(message: str, command: str, code: str) -> None:
     diagnostic = {
         "kind": "changerail_review_verdict",
@@ -353,6 +371,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="workspace root to fingerprint (default: current directory)",
     )
     fingerprint.set_defaults(func=_cmd_fingerprint)
+
+    preflight = subparsers.add_parser("preflight", help="run deterministic gates before payload review")
+    preflight.add_argument("card", type=Path)
+    preflight.add_argument("--workspace", default=".")
+    preflight.add_argument("--manifest", type=Path)
+    preflight.add_argument("--normalize", action="store_true")
+    preflight.add_argument("--risk-tier", choices=["process", "deterministic", "ordinary", "critical"])
+    preflight.add_argument("--output", type=Path)
+    preflight.add_argument("--json", action="store_true", help="accepted for CLI symmetry; output is always JSON")
+    preflight.set_defaults(func=_cmd_preflight)
     return parser
 
 

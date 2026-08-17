@@ -115,6 +115,7 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - `bin/openspec` с pin версии OpenSpec CLI;
 - `bin/changerail-python` как shared runtime selector для Python helpers;
 - schemas `changerail.review-verdict.v1`,
+  `changerail.review-preflight-result.v1`,
   `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
   `changerail.delivery-run.v1`, `changerail.evidence-index.v1`,
   repository knowledge и maintenance contracts, включая quality/proposal

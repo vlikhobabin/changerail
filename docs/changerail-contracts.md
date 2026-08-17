@@ -7,6 +7,7 @@
 Новые публичные wire contracts ChangeRail используют namespace `changerail.*`:
 
 - `changerail.review-verdict.v1`
+- `changerail.review-preflight-result.v1`
 - `changerail.delivery-manifest.v1`
 - `changerail.evidence-index.v1`
 - `changerail.delivery-run.v1`
@@ -30,6 +31,7 @@ Schemas находятся в `schemas/`:
 
 ```text
 schemas/changerail-review-verdict.schema.json
+schemas/changerail-review-preflight-result.schema.json
 schemas/changerail-delivery-manifest.schema.json
 schemas/changerail-evidence-index.schema.json
 schemas/changerail-delivery-run.schema.json
@@ -72,6 +74,26 @@ Lock не хранит resolved ChangeRail root. Для POSIX symlink wiring art
 использует только project-relative `path` и ChangeRail-relative `source`.
 `openspec/changerail-wiring.json` остается отдельным frozen ownership manifest
 для generated Windows copies и не заменяется consumer lock.
+
+## Review Preflight
+
+Перед model payload review existing helper выполняет deterministic preflight:
+
+```bash
+bin/changerail-review-verdict preflight \
+  openspec/board/3.inprogress/example.md --workspace . --normalize \
+  --output .runtime/changerail/review-preflights/example.json --json
+```
+
+Результат `changerail.review-preflight-result.v1` содержит exact workspace
+fingerprint, manifest/board/scope state, risk route, reasoning effort,
+complexity guard и per-check outcomes. Safe normalization обновляет card/change
+metadata и operation details только когда comparable path set не меняется;
+missing/extra paths остаются blockers. `blocked` и
+`investigation-required` не запускают LLM и не расходуют implementation review
+budget. `machine-reviewed` является payload gate для явно deterministic/process
+scope без added production code; `ready-for-llm-review` выбирает `high` для
+ordinary или `xhigh` для critical review.
 
 ## Review Verdict
 
@@ -926,9 +948,9 @@ Known rescue-budget history добавляет optional top-level object:
 
 ```json
 "rescue_budget": {
-  "limit": 5,
+  "limit": 2,
   "used": 1,
-  "remaining": 4,
+  "remaining": 1,
   "exhausted": false
 }
 ```
@@ -938,6 +960,20 @@ post-review rescue attempt counter: initial review is `review_cycle: 1` and
 `same_card_rescue_attempt: 0`; re-review after one scoped same-card rescue uses
 `review_cycle: 2` and `same_card_rescue_attempt: 1`. Legacy history без этих
 optional fields остается valid и отображается как `unknown`.
+
+Новый writer также может хранить независимые counters:
+
+```json
+"phase_counters": {
+  "planning_cycles": 1,
+  "delivery_fix_cycles": 2,
+  "implementation_review_cycles": 1,
+  "live_admission_reviews": 0
+}
+```
+
+Planning, deterministic preflight и live-admission review не увеличивают
+`implementation_review_cycles` и не расходуют same-card rescue budget.
 
 Metrics helper:
 

@@ -173,9 +173,9 @@ def missing_workflow_guidance(project: Path) -> list[str]:
         ],
         "openspec/board/README.md": [
             "explore -> ff -> do -> review -> pub",
-            "fresh independent `go` verdict",
+            "fresh machine receipt или independent `go` verdict",
             "`3.inprogress -> 4.done`",
-            "`review` должен быть fresh context",
+            "До model launch выполняется deterministic preflight",
         ],
     }
     missing: list[str] = []

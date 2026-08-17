@@ -52,9 +52,28 @@
     },
     "rescue_budget": {
       "$ref": "#/$defs/rescueBudget"
+    },
+    "phase_counters": {
+      "$ref": "#/$defs/phaseCounters"
     }
   },
   "$defs": {
+    "phaseCounters": {
+      "type": "object",
+      "required": [
+        "planning_cycles",
+        "delivery_fix_cycles",
+        "implementation_review_cycles",
+        "live_admission_reviews"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "planning_cycles": {"type": "integer", "minimum": 0},
+        "delivery_fix_cycles": {"type": "integer", "minimum": 0},
+        "implementation_review_cycles": {"type": "integer", "minimum": 0},
+        "live_admission_reviews": {"type": "integer", "minimum": 0}
+      }
+    },
     "rescueBudget": {
       "type": "object",
       "required": ["limit", "used", "remaining", "exhausted"],

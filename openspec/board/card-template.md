@@ -21,6 +21,15 @@ story
 ## Summary
 Кратко опишите, что должно измениться и зачем.
 
+## Review
+- Risk tier: `ordinary`
+- Milestone audit: `no`
+- New authority or wire protocol: `no`
+- Credential or mutation authority: `no`
+- Repeated defect class: `no`
+- Live admission: `no`
+- Final certification: `no`
+
 ## Acceptance
 - <observable outcome 1>
 - <observable outcome 2>

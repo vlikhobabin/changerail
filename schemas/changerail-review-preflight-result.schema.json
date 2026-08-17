@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-review-preflight-result.schema.json",
+  "title": "ChangeRail review preflight result",
+  "type": "object",
+  "required": [
+    "schema",
+    "checked_at",
+    "ok",
+    "outcome",
+    "workspace",
+    "card",
+    "manifest",
+    "risk",
+    "complexity_guard",
+    "checks",
+    "llm_review"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "changerail.review-preflight-result.v1"},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "ok": {"type": "boolean"},
+    "outcome": {
+      "enum": [
+        "blocked",
+        "investigation-required",
+        "machine-reviewed",
+        "ready-for-llm-review",
+        "already-reviewed"
+      ]
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["root", "head_commit", "tree_sha", "diff_fingerprint"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {"type": "string", "minLength": 1},
+        "head_commit": {"type": "string", "minLength": 1},
+        "tree_sha": {"type": "string", "minLength": 1},
+        "diff_fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "card": {
+      "type": "object",
+      "required": ["id", "path", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "minLength": 1}
+      }
+    },
+    "manifest": {
+      "type": "object",
+      "required": ["path", "valid", "normalized", "scope_ok"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "valid": {"type": "boolean"},
+        "normalized": {"type": "boolean"},
+        "scope_ok": {"type": "boolean"}
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": [
+        "tier",
+        "source",
+        "review_mode",
+        "reasoning_effort",
+        "milestone_audit",
+        "critical_boundary",
+        "live_admission",
+        "final_certification"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tier": {"enum": ["deterministic", "ordinary", "critical"]},
+        "source": {"enum": ["card", "cli", "legacy-default"]},
+        "review_mode": {"enum": ["machine-only", "llm"]},
+        "reasoning_effort": {"enum": ["none", "high", "xhigh"]},
+        "milestone_audit": {"type": "boolean"},
+        "critical_boundary": {"type": "boolean"},
+        "live_admission": {"type": "boolean"},
+        "final_certification": {"type": "boolean"}
+      }
+    },
+    "complexity_guard": {
+      "type": "object",
+      "required": [
+        "added_production_loc",
+        "limit",
+        "new_authority_or_wire_protocol",
+        "repeated_defect_class",
+        "stop_required",
+        "reasons"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "added_production_loc": {"type": "integer", "minimum": 0},
+        "limit": {"const": 300},
+        "new_authority_or_wire_protocol": {"type": "boolean"},
+        "repeated_defect_class": {"type": "boolean"},
+        "stop_required": {"type": "boolean"},
+        "reasons": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "status", "detail"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "status": {"enum": ["pass", "fail", "skipped"]},
+          "detail": {"type": "string", "minLength": 1},
+          "command": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "llm_review": {
+      "type": "object",
+      "required": ["required", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "required": {"type": "boolean"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -101,7 +101,24 @@ Accept legacy prompt forms such as `/changerail:review <card>` and
 
 ## Workflow
 
-### 1. Resolve Scope And Fingerprint
+### 1. Require Deterministic Preflight
+
+The orchestrator must run this before launching the reviewer context:
+
+```bash
+bin/changerail-review-verdict preflight "<card-path>" --workspace . \
+  --normalize --output ".runtime/changerail/review-preflights/<card-id>.json" --json
+```
+
+The fresh reviewer reads that ignored result and may rerun preflight without
+`--normalize`. Stop before payload analysis when it returns `blocked` or
+`investigation-required`; those are process/complexity outcomes, not review
+findings and do not increment `review_cycle`. Return immediately without an LLM
+verdict on `machine-reviewed`. For `ready-for-llm-review`, use `high` for
+ordinary risk and `xhigh` only for critical credential, mutation-authority,
+live-admission or final-certification scope. Risk understatement is a blocker.
+
+### 2. Resolve Scope And Fingerprint
 
 Run:
 
@@ -129,7 +146,7 @@ canonical verdict and optional ignored review-cycle history; orchestrator or
 publish handoff may copy concise review summary data into the manifest after
 the verdict is validated.
 
-### 2. Evidence Audit
+### 3. Evidence Audit
 
 For every verification claim in the card, archived tasks and manifest:
 
@@ -148,7 +165,7 @@ evidence finding. Formatter, strict typing and environment-matrix checks are
 mandatory only when those sources declare them or the changed surface makes
 them necessary.
 
-### 3. Diff Review
+### 4. Diff Review
 
 Read the full working-tree diff for the claimed publish scope:
 
@@ -160,7 +177,7 @@ Also inspect untracked committable files listed by `git status --short`. Check
 correctness against the card, scope boundaries, tests, docs, schemas, error
 handling and public-safety risks.
 
-### 4. Test Adequacy Critique
+### 5. Test Adequacy Critique
 
 For added or changed tests, answer whether they would fail if the behavior were
 broken. Flag missing coverage, tautological assertions, weakened tests and
@@ -168,7 +185,7 @@ missing RED evidence where the project required test-first work. Treat an
 explicit docs-only/config-only RED-not-applicable note as evidence to audit,
 not as an automatic failure.
 
-### 5. Write And Validate Verdict
+### 6. Write And Validate Verdict
 
 Assign findings `R1..Rn`:
 
@@ -188,12 +205,18 @@ bin/changerail-review-verdict validate \
 When the workspace provides a review-cycle history contract, append or update a
 runtime history summary for the cycle without editing the reviewed payload. Keep
 previous `no-go` cycles available for metrics even after a later `go`.
+Keep planning, delivery-fix, implementation-review and live-admission counters
+separate when `phase_counters` is supported. A focused re-review may reuse
+unchanged full-suite evidence only when it is bound to the same payload hash;
+the full suite is rerun before live admission or final publish. Perform at most
+one extra clean-HEAD LLM audit, and only at a card-declared milestone.
 
 ## Safety Stops
 
 Stop without writing a verdict when:
 
 - this session implemented or planned the card;
+- deterministic preflight is absent, blocked or requires investigation;
 - card-owned changes are not archived;
 - neither a manifest nor a reconstructable publish scope exists;
 - the workspace is not a git repository or the fingerprint cannot be computed;

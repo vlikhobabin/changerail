@@ -96,6 +96,7 @@ on a manually maintained incomplete file list.
 ### Requirement: Release CI focused smoke inventory
 ChangeRail release CI MUST run the focused smoke scripts that protect delivery
 runner, delivery metrics, review fingerprint, review verdict validation,
+review preflight,
 manifest derivation, bootstrap, verify, wiring discovery, archive diagnostics,
 release workflow contract and drift fixture behavior.
 

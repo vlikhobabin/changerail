@@ -1,13 +1,13 @@
 ---
 name: changerail-pub
-description: "Run the final ChangeRail publish loop for a reviewed board card: validate review verdict, confirm reviewed docs, create a scoped commit and push unless disabled."
+description: "Run the final ChangeRail publish loop for a reviewed board card: validate its risk-appropriate gate, confirm reviewed docs, create a scoped commit and push unless disabled."
 ---
 
 # ChangeRail Pub
 
 ## Purpose
 
-Finalize a delivered and independently reviewed ChangeRail board card:
+Finalize a delivered and risk-appropriately reviewed ChangeRail board card:
 
 ```text
 $changerail-review <card-path>  # fresh-context go/no-go verdict
@@ -63,14 +63,23 @@ Accept legacy prompt forms such as `/changerail:pub <card>`, `changerail:pub <ca
 Read `../changerail-review/references/changerail-review-verdict.md` before publishing.
 
 At the start of publish, before documentation edits change the working tree,
-validate the verdict:
+rerun deterministic preflight without normalization:
+
+```bash
+bin/changerail-review-verdict preflight "<card-path>" --workspace . \
+  --output ".runtime/changerail/review-preflights/<card-id>.json" --json
+```
+
+For an explicitly deterministic/process payload, fresh `machine-reviewed` is
+the required payload gate and no LLM verdict exists. For ordinary or critical
+risk, validate the verdict:
 
 ```bash
 bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
 ```
 
-If the verdict is absent, stale, invalid or not `result: go`, stop before
+For ordinary or critical risk, if the verdict is absent, stale, invalid or not `result: go`, stop before
 staging. A verdict whose reviewed `workspace.tree_sha` is missing or differs
 from the current publish tree is stale for review-gated publish and requires a
 fresh review. Never stage the verdict file.
@@ -127,6 +136,11 @@ openspec validate --all --strict
 ```
 
 Also run focused checks required by tasks, project config or affected code.
+Rerun the complete project-declared verification suite immediately before final
+publish (and separately before live admission when applicable); focused
+re-review may reuse prior suite evidence only while its payload hash is
+unchanged. Do not add a clean-HEAD LLM audit here unless this is the single
+milestone explicitly declared by the card.
 Do not commit while final verification is failing unless the operator
 explicitly requests publishing a known failing state and the card records the
 residual risk.
@@ -228,7 +242,8 @@ Never stage the ignored manifest.
 
 Stop when:
 
-- the review verdict is absent, stale, invalid or `no-go`;
+- the risk-appropriate machine receipt or semantic review verdict is absent,
+  stale, invalid or negative;
 - planned card-owned changes are not archived and `--allow-unarchived` is not
   present;
 - final verification fails;

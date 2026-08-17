@@ -237,7 +237,7 @@ fresh reviewer пишет go/no-go verdict
 ```
 
 Если review вернул `no-go`, worker исправляет только scoped blocker, затем
-нужен fresh re-review. Дефолтный autonomous `deliver` допускает пять bounded
+нужен focused fresh re-review. Дефолтный autonomous `deliver` допускает два bounded
 same-card rescue-подходов после первого `no-go`; каждый из них требует fresh
 independent re-review. После исчерпания budget dirty payload не публикуется:
 оркестратор создает linked rescue/replacement карточку с полной историей

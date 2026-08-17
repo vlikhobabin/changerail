@@ -157,6 +157,7 @@ contract schemas:
 
 ```text
 schemas/changerail-review-verdict.schema.json
+schemas/changerail-review-preflight-result.schema.json
 schemas/changerail-review-cycle-history.schema.json
 schemas/changerail-delivery-manifest.schema.json
 schemas/changerail-delivery-run.schema.json

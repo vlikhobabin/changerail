@@ -93,6 +93,24 @@ preflight и продолжит только при доказанном publish
   --status-path /opt/example-workspace/service-a/.runtime/changerail/delivery-runs/<run-id>/status.json
 ```
 
+Непосредственно перед запуском независимого payload reviewer выполните
+детерминированный review preflight через уже wired helper:
+
+```bash
+bin/changerail-review-verdict preflight \
+  openspec/board/3.inprogress/example-card.md --workspace . --normalize \
+  --output .runtime/changerail/review-preflights/example-card.json --json
+```
+
+`blocked` означает process correction без model launch и без расхода semantic
+review budget; `investigation-required` требует simplification/design вместо
+очередного patch. `machine-reviewed` завершает deterministic/process review,
+ordinary `ready-for-llm-review` использует `high`, а critical
+credential/mutation/live/final boundary - `xhigh`. Перед live admission или
+final publish полный project verification suite выполняется заново; hash-bound
+evidence можно переиспользовать только внутри focused re-review неизменного
+payload.
+
 Для dependency-ordered очереди через несколько child repos используйте
 consumer-owned JSON plan с workspace aliases и relative paths:
 

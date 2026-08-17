@@ -247,6 +247,11 @@ blocker остается `BLOCKED`/`NOT-VERIFIABLE` с evidence и resume condit
 Exceptional manual budget не является default continuation, а fix-budget stop
 не считается review `NO-GO`.
 
+До LLM запускайте deterministic preflight из lifecycle skills: он не расширяет
+manifest scope, а process failure не расходует semantic review budget.
+Risk tiers: `deterministic` = machine-only, `ordinary` = `high`, critical
+credential/mutation/live/final boundary = `xhigh`. Phase counters независимы.
+
 ## Review Gate
 
 Review gate независим от implementation session. Он аудитит:
@@ -276,9 +281,11 @@ independent `no-go`, когда implementing session исправляет scoped
 `review_cycle`. Runtime history хранит structured `rescue_budget` с
 `limit`, `used`, `remaining` и `exhausted`; legacy history без этих optional
 полей читается как `unknown`, а не как вычисленный из prose budget.
-Дефолтный autonomous `deliver` допускает пять bounded same-card
-rescue-подходов после первого `no-go`; каждый подход требует fresh independent
-re-review перед publish. Если budget исчерпан и latest review всё ещё
+Default - два same-card rescue и один payload review; extra clean-HEAD LLM audit
+допустим один раз на declared milestone. Hash-bound suite evidence reusable до
+обязательного rerun перед live/final publish. `>300` production LOC, новая
+authority/wire protocol или repeated defect class => investigation. Если budget
+исчерпан и latest review всё ещё
 `no-go`, agent не публикует dirty payload и не self-authorizes следующий
 same-card rescue. Он создает linked rescue/replacement карточку с source card,
 последним safe published reference, prior blocker findings, rescue attempts,

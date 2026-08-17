@@ -22,14 +22,16 @@
 - Если readiness diagnostic используется, он должен назвать missing scope,
   owner, acceptance, ordered plan, dependency или handoff criteria.
 - `Related` содержит project-local paths или generic public examples.
+- `Review` объявляет `deterministic|ordinary|critical` risk и complexity flags;
+  legacy card без секции считается `ordinary`.
 - Runtime evidence may be referenced, but raw runtime state stays ignored.
 
 ## Gates
 
 - `1.backlog -> 2.todo`: scope истории принят к проработке.
 - `2.todo -> 3.inprogress`: ordered change plan и OpenSpec artifacts готовы.
-- `3.inprogress -> 4.done`: fresh independent `go` verdict получен, scoped
-  publish завершен, и карточка финализирована post-publish metadata.
+- `3.inprogress -> 4.done`: fresh machine receipt или independent `go` verdict
+  получен, scoped publish завершен, и карточка финализирована post-publish metadata.
 - `* -> 5.canceled`: принято явное решение не продолжать.
 
 ## Agent Workflow
@@ -46,8 +48,10 @@ operator handoff - `$chrl-deliver <card>` или canonical
 `$changerail-deliver <card>`; `ff/do/review/pub` остаются internal phases и
 explicit repair/debug/manual-resume commands. `do` реализует, проверяет,
 синхронизирует specs и архивирует changes, оставляя review-gated карточку в
-`3.inprogress`. `review` должен быть fresh context, который не планировал и не
-реализовывал payload. `pub` публикует только после fresh valid `go` verdict.
+`3.inprogress`. До model launch выполняется deterministic preflight; ordinary
+и critical review должен быть fresh context, который не планировал и не
+реализовывал payload. `pub` принимает fresh machine-only receipt для
+deterministic payload либо fresh valid `go` verdict.
 
 Практический guide по доскам и двум агентам находится в ChangeRail docs из
 {{CHANGERAIL_ROOT_LABEL}}; reusable agent contract встроен в project `AGENTS.md`

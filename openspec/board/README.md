@@ -21,8 +21,9 @@
 
 - `1.backlog -> 2.todo`: scope истории принят к проработке.
 - `2.todo -> 3.inprogress`: ordered change plan и OpenSpec artifacts готовы.
-- `3.inprogress -> 4.done`: independent review вернул fresh `go`, publish
-  опубликовал scoped payload, и карточка финализирована post-publish metadata.
+- `3.inprogress -> 4.done`: risk-appropriate payload review дал fresh machine
+  receipt или independent `go`, publish опубликовал scoped payload, и карточка
+  финализирована post-publish metadata.
 - `* -> 5.canceled`: принято явное решение не продолжать.
 
 ## Card Rules
@@ -53,6 +54,8 @@
   owner, acceptance, ordered plan, dependency или handoff criteria.
 - В `Related` указываются только публичные пути внутри ChangeRail или generic
   example-пути.
+- `Review` объявляет `deterministic|ordinary|critical` risk и complexity flags;
+  legacy card без секции считается `ordinary`.
 
 ## Agent Workflow
 
@@ -63,9 +66,10 @@
 3. Когда artifacts готовы, перенести карточку в `3.inprogress/`.
 4. Реализовать changes через ChangeRail/OpenSpec flow, записать результат, проверки
    и archive paths, оставив review-gated карточку в `3.inprogress/`.
-5. Провести independent review; на `no-go` исправлять только scoped blocker и
-   запрашивать свежий review.
-6. После fresh `go` выполнить publish и перенести карточку в `4.done/` только
+5. До model launch выполнить deterministic preflight. Для process-only payload
+   принять `machine-reviewed`; для ordinary/critical провести один independent
+   review и на `no-go` исправлять только scoped blocker.
+6. После fresh machine receipt или `go` выполнить publish и перенести карточку в `4.done/` только
    как deterministic post-publish finalization.
 
 Для series сначала прочитайте epic `00`, проверьте entry/refresh gate и только

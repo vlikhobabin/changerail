@@ -94,6 +94,7 @@ jobs:
         run: |
           python3 scripts/smoke-review-verdict-validation.py
           python3 scripts/smoke-review-fingerprint.py
+          python3 scripts/smoke-review-preflight.py
 
       - name: Delivery contract smoke
         run: |

@@ -90,11 +90,14 @@ card and MUST write only an ignored runtime verdict file.
 - **THEN** `changerail-review` stops before writing a verdict
 
 ### Requirement: Publish skill requires review gate by default
-`changerail-pub` MUST fail closed for review-gated cards when a fresh valid `go`
-verdict is absent or stale.
+`changerail-pub` MUST fail closed for review-gated cards when a fresh
+risk-appropriate payload gate is absent or stale. Deterministic/process payloads
+may use a fresh `machine-reviewed` preflight receipt; ordinary and critical
+payloads require a fresh valid `go` verdict.
 
-#### Scenario: Publish runs without a valid review verdict
-- **WHEN** publish is invoked for a delivered card without a fresh `go` verdict
+#### Scenario: Publish runs without a valid review gate
+- **WHEN** publish is invoked for a delivered card without its risk-appropriate
+  fresh machine receipt or `go` verdict
 - **THEN** publish stops before staging, committing or pushing files
 
 ### Requirement: Deliver skill orchestrates the lifecycle
@@ -109,7 +112,7 @@ repeated-`NO-GO` escalation.
 
 #### Scenario: Deliver uses the default review rescue budget
 - **WHEN** `changerail-deliver` receives consecutive `no-go` review verdicts
-- **THEN** the default autonomous policy allows five bounded same-card rescue
+- **THEN** the default autonomous policy allows two bounded same-card rescue
   attempts after the first `no-go`
 - **AND** each rescue attempt still requires a fresh independent re-review
   before publish
@@ -423,3 +426,19 @@ delivery until an explicit fix mode is delivered.
   --write`
 - **AND** it still does not commit, push or publish the resulting board change
   without the normal delivery/review/publish flow
+
+### Requirement: Review skill runs deterministic preflight first
+The canonical review and deliver skills MUST run deterministic review preflight
+before launching an independent LLM payload reviewer.
+
+#### Scenario: Preflight returns a process blocker
+- **WHEN** preflight reports a manifest, board, archive, scope, freshness or
+  locally available strict-check defect
+- **THEN** the lifecycle returns the machine blocker to delivery
+- **AND** it does not launch an LLM or consume implementation review budget
+
+#### Scenario: Preflight routes semantic review
+- **WHEN** machine gates pass and semantic payload review is required
+- **THEN** the lifecycle uses `high` for ordinary risk or `xhigh` for critical
+  risk
+- **AND** no generic model-launch layer is required

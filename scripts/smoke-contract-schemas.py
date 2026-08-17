@@ -257,7 +257,7 @@ def delivery_run() -> dict[str, Any]:
             "first_review_latency_seconds": 10.0,
             "time_to_final_go_seconds": 10.0,
             "cycles": [{"review_cycle": 1, "result": "go", "reviewed_at": DATE, "latency_seconds": 10.0}],
-            "rescue_budget": {"limit": 5, "used": 0, "remaining": 5, "exhausted": False},
+            "rescue_budget": {"limit": 2, "used": 0, "remaining": 2, "exhausted": False},
         },
         "publish": {"latency_seconds": 2.0, "pushed_at": DATE},
     }
@@ -356,7 +356,13 @@ def review_cycle_history() -> dict[str, Any]:
         "updated_at": DATE,
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
-        "rescue_budget": {"limit": 5, "used": 0, "remaining": 5, "exhausted": False},
+        "rescue_budget": {"limit": 2, "used": 0, "remaining": 2, "exhausted": False},
+        "phase_counters": {
+            "planning_cycles": 1,
+            "delivery_fix_cycles": 1,
+            "implementation_review_cycles": 1,
+            "live_admission_reviews": 0,
+        },
         "cycles": [
             {
                 "review_cycle": 1,
@@ -369,6 +375,52 @@ def review_cycle_history() -> dict[str, Any]:
                 "acceptance": {"pass": 1, "fail": 0, "unverifiable": 0, "not_applicable": 0},
             }
         ],
+    }
+
+
+def review_preflight_result() -> dict[str, Any]:
+    return {
+        "schema": "changerail.review-preflight-result.v1",
+        "checked_at": DATE,
+        "ok": True,
+        "outcome": "ready-for-llm-review",
+        "workspace": {
+            "root": "/opt/changerail",
+            "head_commit": "abc123",
+            "tree_sha": TREE,
+            "diff_fingerprint": SHA,
+        },
+        "card": {
+            "id": "example-card",
+            "path": "openspec/board/3.inprogress/example-card.md",
+            "status": "3.inprogress",
+        },
+        "manifest": {
+            "path": ".runtime/changerail/delivery-manifests/example-card.json",
+            "valid": True,
+            "normalized": False,
+            "scope_ok": True,
+        },
+        "risk": {
+            "tier": "ordinary",
+            "source": "card",
+            "review_mode": "llm",
+            "reasoning_effort": "high",
+            "milestone_audit": False,
+            "critical_boundary": False,
+            "live_admission": False,
+            "final_certification": False,
+        },
+        "complexity_guard": {
+            "added_production_loc": 20,
+            "limit": 300,
+            "new_authority_or_wire_protocol": False,
+            "repeated_defect_class": False,
+            "stop_required": False,
+            "reasons": [],
+        },
+        "checks": [{"id": "scope", "status": "pass", "detail": "exact scope"}],
+        "llm_review": {"required": True, "reason": "ordinary semantic payload review"},
     }
 
 
@@ -799,6 +851,10 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         schema_validator("changerail-consumer-lock.schema.json"),
     ),
     "changerail-review-verdict.schema.json": (review_verdict, _validate_verdict),
+    "changerail-review-preflight-result.schema.json": (
+        review_preflight_result,
+        schema_validator("changerail-review-preflight-result.schema.json"),
+    ),
     "changerail-delivery-manifest.schema.json": (delivery_manifest, validate_manifest),
     "changerail-delivery-run.schema.json": (delivery_run, schema_validator("changerail-delivery-run.schema.json")),
     "changerail-delivery-plan.schema.json": (delivery_plan, validate_delivery_plan),
@@ -934,6 +990,7 @@ def main() -> int:
         if name == "changerail-review-cycle-history.schema.json":
             legacy_history = review_cycle_history()
             legacy_history.pop("rescue_budget")
+            legacy_history.pop("phase_counters")
             for cycle in legacy_history["cycles"]:
                 cycle.pop("same_card_rescue_attempt", None)
             legacy_errors = validator(legacy_history)

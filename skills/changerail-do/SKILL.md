@@ -178,6 +178,19 @@ bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
   --target working-tree --json
 ```
 
+Before handing off to any reviewer, the delivery/orchestrator context runs:
+
+```bash
+bin/changerail-review-verdict preflight "<card-path>" --workspace . \
+  --normalize --output ".runtime/changerail/review-preflights/<card-id>.json" --json
+```
+
+Manifest, board, archive, scope or locally available strict-check failures are
+preflight/process defects and must be fixed before model launch; they are not
+independent `NO-GO` cycles. A typed `investigation-required` outcome (more than
+300 added production LOC, a new authority/wire protocol or repeated defect
+class) stops implementation rescue for investigation/simplification.
+
 For added or changed tests, record why the test observes the intended behavior
 source and would fail if the claimed regression were present. For docs-only,
 config-only or otherwise non-test-firstable work, record why RED evidence is

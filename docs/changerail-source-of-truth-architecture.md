@@ -141,6 +141,7 @@ bootstrap-процессом:
 │           └── explore.md
 ├── schemas/
 │   ├── changerail-review-verdict.schema.json
+│   ├── changerail-review-preflight-result.schema.json
 │   ├── changerail-delivery-manifest.schema.json
 │   └── changerail-evidence-index.schema.json
 ├── bin/

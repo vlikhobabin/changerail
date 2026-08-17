@@ -59,6 +59,7 @@ FORBIDDEN_TRACKED_EXACT = {
 SCHEMAS = (
     "changerail-consumer-lock.schema.json",
     "changerail-review-verdict.schema.json",
+    "changerail-review-preflight-result.schema.json",
     "changerail-review-cycle-history.schema.json",
     "changerail-delivery-manifest.schema.json",
     "changerail-delivery-run.schema.json",

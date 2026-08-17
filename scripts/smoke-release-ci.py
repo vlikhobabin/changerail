@@ -47,6 +47,7 @@ REQUIRED_COMMANDS = {
     "consumer CI smoke": "python3 scripts/smoke-consumer-ci.py",
     "review verdict validation smoke": "python3 scripts/smoke-review-verdict-validation.py",
     "review fingerprint smoke": "python3 scripts/smoke-review-fingerprint.py",
+    "review preflight smoke": "python3 scripts/smoke-review-preflight.py",
     "delivery manifest smoke": "python3 scripts/smoke-delivery-manifest.py",
     "delivery manifest derive smoke": "python3 scripts/smoke-delivery-manifest-derive.py",
     "delivery runner smoke": "python3 scripts/smoke-delivery-runner.py",

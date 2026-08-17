@@ -381,8 +381,8 @@ def write_verdict(card_path, result, reviewed_path, evidence_index=None, raw_out
 def write_history(card_path, result, verdict_path, exhausted):
     cid = card_id(card_path)
     cycle = {
-        "review_cycle": 1 if result == "go" else 6,
-        "same_card_rescue_attempt": 0 if result == "go" else 5,
+        "review_cycle": 1 if result == "go" else 3,
+        "same_card_rescue_attempt": 0 if result == "go" else 2,
         "result": result,
         "reviewed_at": NOW,
         "verdict_path": verdict_path,
@@ -404,9 +404,9 @@ def write_history(card_path, result, verdict_path, exhausted):
         "workspace": {"root": str(WORKSPACE), "head_commit": git("rev-parse", "HEAD")},
         "cycles": [cycle],
         "rescue_budget": {
-            "limit": 5,
-            "used": 0 if result == "go" else 5,
-            "remaining": 5 if result == "go" else 0,
+            "limit": 2,
+            "used": 0 if result == "go" else 2,
+            "remaining": 2 if result == "go" else 0,
             "exhausted": exhausted,
         },
     }
@@ -1281,7 +1281,7 @@ def check_one_command_delivery_review_budget_no_go(tmp: Path) -> None:
         raise AssertionError("exhausted review budget scenario moved the card despite NO-GO")
     history_path = workspace / ".runtime" / "changerail" / "reviews" / "one-command-delivery-smoke.history.json"
     history = json.loads(history_path.read_text(encoding="utf-8"))
-    if history.get("rescue_budget") != {"limit": 5, "used": 5, "remaining": 0, "exhausted": True}:
+    if history.get("rescue_budget") != {"limit": 2, "used": 2, "remaining": 0, "exhausted": True}:
         raise AssertionError(f"review budget exhaustion was not recorded: {history}")
     verdict_path = workspace / ".runtime" / "changerail" / "reviews" / "one-command-delivery-smoke.json"
     validate = run(

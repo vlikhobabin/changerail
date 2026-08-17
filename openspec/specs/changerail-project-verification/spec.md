@@ -39,8 +39,8 @@ public ChangeRail contract schema, tracked в source repository.
 
 #### Scenario: Все public schemas существуют
 - **WHEN** `bin/verify-project <path>` запускается для consumer project
-- **THEN** он проверяет review verdict, review cycle history, delivery manifest,
-  delivery run и evidence index schema files
+- **THEN** он проверяет review verdict, review preflight result, review cycle
+  history, delivery manifest, delivery run и evidence index schema files
 
 #### Scenario: Public schema отсутствует
 - **WHEN** любой public ChangeRail contract schema file отсутствует в

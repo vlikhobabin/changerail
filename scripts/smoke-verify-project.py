@@ -24,6 +24,7 @@ SPECIAL_OUTPUTS = {
 EXPECTED_SCHEMAS = (
     "schemas/changerail-consumer-lock.schema.json",
     "schemas/changerail-review-verdict.schema.json",
+    "schemas/changerail-review-preflight-result.schema.json",
     "schemas/changerail-review-cycle-history.schema.json",
     "schemas/changerail-delivery-manifest.schema.json",
     "schemas/changerail-delivery-run.schema.json",

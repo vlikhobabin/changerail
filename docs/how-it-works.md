@@ -202,7 +202,7 @@ JSON; runtime logs остаются ignored state. Если status показы�
 
 `changerail-do --max-fix-cycles` (default `2`) ограничивает pre-review
 implement/verify attempts. Это другой budget, чем
-`changerail-deliver --max-review-cycles` (default `5`), который считает
+`changerail-deliver --max-review-cycles` (default `2`), который считает
 same-card rescue/re-review после independent `NO-GO`.
 
 Если fix budget исчерпан, worker не просит ручное увеличение counter как
@@ -224,6 +224,20 @@ verification target. Оркестратор классифицирует про�
 
 ## No-go rescue loop и метрики
 
+До model launch оркестратор запускает единый machine gate:
+
+```bash
+bin/changerail-review-verdict preflight "<card-path>" --workspace . \
+  --normalize --output ".runtime/changerail/review-preflights/<card-id>.json" --json
+```
+
+Он безопасно нормализует только same-path manifest metadata, проверяет
+board/archive/exact scope и запускает доступные strict OpenSpec, diff и public
+checks. `blocked` исправляется без LLM и не считается review-cycle;
+`investigation-required` останавливает patch staircase. `deterministic` payload
+без production code получает machine-only review, ordinary semantic review
+использует `high`, critical credential/mutation/live/final boundary - `xhigh`.
+
 Типовой operational flow:
 
 ```text
@@ -241,7 +255,7 @@ attempts уже использовано перед этим review.
 Если review находит over-claim, missing evidence или out-of-scope файл,
 reviewer пишет `no-go` с blocker finding. Implementing session исправляет
 только scoped blocker, обновляет evidence и снова передает карточку на свежий
-review. Дефолтный autonomous `deliver` допускает пять bounded same-card
+review. Дефолтный autonomous `deliver` допускает два bounded same-card
 rescue-подходов после первого `no-go`; каждый из них требует fresh independent
 re-review. Когда re-review возвращает `go`, publish может продолжать.
 Предыдущий `no-go` сохраняется в review-cycle history, а latest canonical
@@ -265,6 +279,14 @@ same-card rescue budget (`limit`, `used`, `remaining`, `exhausted`), findings
 по severity, acceptance outcomes, wall-time и доступный token usage.
 CSV mode предназначен для внешней аналитики; отсутствующие optional поля
 отображаются как `unknown`.
+
+Planning, delivery-fix, implementation-review и live-admission counters
+раздельны. Каждый publish получает один risk-appropriate payload review.
+Дополнительный clean-HEAD LLM audit возможен один раз на явно объявленном
+milestone. Focused re-review может переиспользовать full-suite evidence только
+при неизменном hash-bound payload; перед live admission или final publish suite
+выполняется заново. Более 300 added production LOC, новая authority/wire
+protocol или повтор того же defect class требуют investigation/simplification.
 
 ## Supervised-модель: оркестратор, воркер и независимый review
 

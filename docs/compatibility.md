@@ -211,8 +211,10 @@ Expected contract:
 - `bin/changerail-delivery-metrics` reads delivery run records and review-cycle
   history plus aggregate queue status and renders missing optional values as
   `unknown`;
-- review verdict and delivery manifest helpers validate payloads against
-  tracked Draft 2020-12 schemas before applying semantic checks.
+- review verdict/preflight and delivery manifest helpers validate payloads
+  against tracked Draft 2020-12 schemas before applying semantic checks;
+  deterministic preflight blocks manifest/board/scope/strict-check defects
+  before an LLM payload review is launched.
 
 Verification:
 
@@ -223,6 +225,7 @@ python3 scripts/smoke-delivery-runner.py
 python3 scripts/smoke-delivery-metrics.py
 python3 scripts/smoke-review-verdict-validation.py
 python3 scripts/smoke-review-fingerprint.py
+python3 scripts/smoke-review-preflight.py
 python3 scripts/smoke-contract-schemas.py
 python3 scripts/smoke-maintenance-runner.py
 python3 scripts/smoke-repository-knowledge.py
