@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1451,6 +1452,7 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
         Check("launcher executable", "pass" if os.access(launcher, os.X_OK) else "fail", str(launcher)),
         Check("CODEX_HOME", "pass" if codex_home.exists() else "fail", str(codex_home)),
         Check("CODEX config", "pass" if config.is_file() else "skip", str(config)),
+        codex_automation_authority_state(config),
         auth_state(codex_home, env),
         Check(
             "CODEX_HOME symlinks",
@@ -1469,6 +1471,32 @@ def check_preflight(args: argparse.Namespace) -> list[Check]:
     else:
         checks.append(Check("connectivity", "skip", "no connectivity URL provided"))
     return checks
+
+
+def codex_automation_authority_state(config: Path) -> Check:
+    expected = 'approval_policy="never" and sandbox_mode="danger-full-access"'
+    if not config.is_file():
+        return Check(
+            "Codex automation authority",
+            "fail",
+            f"effective config.toml is missing; unattended delivery requires {expected}",
+        )
+    try:
+        with config.open("rb") as handle:
+            payload = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return Check(
+            "Codex automation authority",
+            "fail",
+            f"effective config.toml cannot be parsed; unattended delivery requires {expected}",
+        )
+    if payload.get("approval_policy") == "never" and payload.get("sandbox_mode") == "danger-full-access":
+        return Check("Codex automation authority", "pass", expected)
+    return Check(
+        "Codex automation authority",
+        "fail",
+        f"effective config.toml does not grant unattended delivery authority; expected {expected}",
+    )
 
 
 def build_command(args: argparse.Namespace) -> list[str]:

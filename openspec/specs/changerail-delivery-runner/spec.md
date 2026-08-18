@@ -243,6 +243,16 @@ executable permissions and optional connectivity URL.
 Delivery runner preflight MUST sanitize connectivity diagnostics before writing
 structured runtime status.
 
+The runner MUST fail closed before launching a delivery child unless the
+effective `CODEX_HOME/config.toml` grants unattended mutation authority with
+`approval_policy = "never"` and `sandbox_mode = "danger-full-access"`.
+
+#### Scenario: Effective Codex authority is insufficient
+- **WHEN** preflight reads an effective Codex config with missing or different
+  approval/sandbox values
+- **THEN** preflight reports a blocking `Codex automation authority` check
+- **AND** no delivery child is launched
+
 #### Scenario: Connectivity check is requested
 - **WHEN** an operator supplies a connectivity URL for preflight
 - **THEN** the runner performs an actual connection attempt and records pass or

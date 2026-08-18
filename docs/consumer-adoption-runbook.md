@@ -389,7 +389,10 @@ tracked explicit blocker в ChangeRail compatibility notes.
 ## Codex Auth For Delivery Runner
 
 `verify-project` проверяет wiring и ignore policy, но unattended delivery runner
-нуждается еще и в effective Codex auth source. Это относится к single-card
+нуждается еще и в effective Codex auth source и trusted automation authority.
+Effective `CODEX_HOME/config.toml` должен содержать
+`approval_policy = "never"` и `sandbox_mode = "danger-full-access"`; иначе
+runner preflight останавливается до запуска child. Это относится к single-card
 команде `changerail-delivery-runner run` и к plan-oriented командам
 `preflight-plan`, `run-plan` и `resume-plan`: без auth preflight должен
 остановиться fail-closed до запуска delivery child.

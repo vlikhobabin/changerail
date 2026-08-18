@@ -95,7 +95,11 @@ def create_workspace(root: Path, name: str, *, publish_ready: bool = True) -> Pa
     workspace = root / name
     workspace.mkdir()
     (workspace / ".codex").mkdir()
-    (workspace / ".codex" / "config.toml").write_text("# smoke config\n", encoding="utf-8")
+    (workspace / ".codex" / "config.toml").write_text(
+        'approval_policy = "never"\n'
+        'sandbox_mode = "danger-full-access"\n',
+        encoding="utf-8",
+    )
     (workspace / ".codex" / "auth.json").write_text("{}\n", encoding="utf-8")
     (workspace / "README.md").write_text("smoke workspace\n", encoding="utf-8")
     (workspace / ".gitignore").write_text(".runtime/\n.codex/\n", encoding="utf-8")
@@ -1830,6 +1834,43 @@ def check_preflight(tmp: Path) -> None:
         server.shutdown()
 
 
+def check_preflight_rejects_insufficient_automation_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "preflight-insufficient-authority")
+    (workspace / ".codex" / "config.toml").write_text(
+        'approval_policy = "on-request"\n'
+        'sandbox_mode = "workspace-write"\n',
+        encoding="utf-8",
+    )
+    launcher = tmp / "fake-codex-insufficient-authority"
+    runtime = tmp / "runtime-insufficient-authority"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "insufficient-authority",
+            "--launcher",
+            str(launcher),
+            "--json",
+        ]
+    )
+    if result.returncode == 0:
+        raise AssertionError("preflight accepted insufficient Codex automation authority")
+    payload = json.loads(result.stdout)
+    checks = {check["name"]: check for check in payload["preflight"]["checks"]}
+    authority = checks.get("Codex automation authority")
+    if not authority or authority["status"] != "fail":
+        raise AssertionError(f"preflight did not report the authority failure: {checks}")
+    if "never" not in authority["message"] or "danger-full-access" not in authority["message"]:
+        raise AssertionError(f"authority remediation is incomplete: {authority}")
+
+
 def check_custom_launcher_without_path_codex(tmp: Path) -> None:
     workspace = create_workspace(tmp, "custom-launcher-no-path-codex")
     launcher = tmp / "fake-codex-without-path-codex"
@@ -2172,6 +2213,11 @@ def check_explicit_codex_home_preflight(tmp: Path) -> None:
     sentinel = "fake-secret-sentinel"
     external_home.mkdir()
     (external_home / "auth.json").write_text(sentinel + "\n", encoding="utf-8")
+    (external_home / "config.toml").write_text(
+        'approval_policy = "never"\n'
+        'sandbox_mode = "danger-full-access"\n',
+        encoding="utf-8",
+    )
     (workspace / ".codex" / "auth.json").unlink()
     write_fake_launcher(launcher)
     result = run(
@@ -3233,6 +3279,7 @@ def main() -> int:
         check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
+        check_preflight_rejects_insufficient_automation_authority(workspace)
         check_custom_launcher_without_path_codex(workspace)
         check_default_launcher_requires_path_codex(workspace)
         check_publish_target_preflight(workspace)
