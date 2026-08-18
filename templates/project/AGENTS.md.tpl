@@ -21,14 +21,12 @@ traces, dumps, local databases or agent session state to tracked files.
 
 {{CODEX_AUTHORITY_GUIDANCE}}
 
-Project source code, project-specific OpenSpec board, project rules, runtime
-policy and domain verification belong in this repository. Reusable ChangeRail
-methodology, skills, commands, schemas and helper wrappers belong in
-the linked ChangeRail source of truth.
+Project source, board, rules, runtime policy and domain verification belong in
+this repository. Reusable ChangeRail methodology and tooling belong in the
+linked ChangeRail source of truth.
 
-Practical board and two-agent workflow guidance lives in
-the linked ChangeRail `docs/board-and-two-agent-feature-flow.md`; the generated
-methodology section below is the reusable agent contract.
+Board workflow guidance lives in ChangeRail
+`docs/board-and-two-agent-feature-flow.md`; the reusable contract follows.
 
 ## Codex Setup
 
