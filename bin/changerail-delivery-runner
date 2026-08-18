@@ -1631,7 +1631,8 @@ def terminal_signal_from_marker_lines(text: str) -> TerminalSignal:
         if line.startswith("terminal_outcome: "):
             signal.outcome = normalize_terminal_value(line.removeprefix("terminal_outcome: "))
         elif line.startswith("terminal_reason: "):
-            signal.reason = normalize_terminal_reason(line.removeprefix("terminal_reason: "))
+            raw_reason = line.removeprefix("terminal_reason: ")
+            signal.reason = normalize_terminal_reason(raw_reason) or "malformed_terminal_reason"
     if signal.outcome is None:
         signal.reason = None
     return signal
@@ -1658,15 +1659,15 @@ def event_terminal_signal(event: Any) -> TerminalSignal:
     for key in TERMINAL_REASON_KEYS:
         value = event.get(key)
         if isinstance(value, str):
-            reason = normalize_terminal_reason(value)
-            if reason:
-                signal.reason = reason
-                break
+            signal.reason = normalize_terminal_reason(value) or "malformed_terminal_reason"
+            break
     marker = agent_message_text(event)
     if marker:
         marker_signal = terminal_signal_from_marker_lines(marker)
         if marker_signal.outcome:
             signal = marker_signal
+    if signal.outcome is None:
+        signal.reason = None
     return signal
 
 

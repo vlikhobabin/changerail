@@ -141,6 +141,13 @@ reasons.
 - **THEN** runner записывает и печатает оба machine-readable значения
 - **AND** завершает wrapper non-zero
 
+#### Scenario: Authoritative terminal reason is malformed
+- **WHEN** authoritative terminal event содержит reason, который не является
+  lowercase snake-case code
+- **THEN** runner сохраняет terminal outcome
+- **AND** записывает `terminal_reason: malformed_terminal_reason` вместо
+  молчаливого удаления или принятия некорректного classifier
+
 #### Scenario: Authoritative no-go event
 - **WHEN** Codex JSONL содержит documented structured no-go event
 - **THEN** runner записывает и печатает terminal outcome `NO-GO`

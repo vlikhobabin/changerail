@@ -796,6 +796,9 @@ signals являются preferred source of truth; если их нет, fallba
 `terminal_reason: unpublished_card`. `fix_budget_exhausted`,
 `external_blocker` и другие stable reasons сохраняются в status как
 `terminal_reason`; ignored raw logs не являются источником этих reasons.
+Malformed reason из authoritative terminal event не принимается как classifier:
+runner записывает стабильный `terminal_reason: malformed_terminal_reason` для
+operator diagnostics.
 Если preflight возвращает `CODEX auth: fail` или `CODEX_HOME symlinks: fail`,
 оператор должен использовать remediation из
 `docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`: ignored

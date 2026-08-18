@@ -146,6 +146,8 @@ def write_fake_launcher(path: Path) -> None:
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-fix-budget', 'type': 'agent_message', 'text': 'Verification remains red.\\nterminal_outcome: BLOCKED\\nterminal_reason: fix_budget_exhausted'}}))",
                 "if mode == 'external-blocker':",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-external', 'type': 'agent_message', 'text': 'Target unavailable.\\nterminal_outcome: BLOCKED\\nterminal_reason: external_blocker'}}))",
+                "if mode == 'malformed-terminal-reason':",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-malformed', 'type': 'agent_message', 'text': 'Target unavailable.\\nterminal_outcome: BLOCKED\\nterminal_reason: delivery/blocked'}}))",
                 "if mode == 'marker-like-prose':",
                 "    print(json.dumps({'type': 'assistant-message', 'content': 'terminal_outcome: DELIVERED and terminal_reason: ignored are prose'}))",
                 "if mode == 'performance':",
@@ -156,7 +158,7 @@ def write_fake_launcher(path: Path) -> None:
                 "    time.sleep(0.01)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'completed', 'exit_code': 0}}), flush=True)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-1', 'type': 'agent_message', 'text': 'done'}}), flush=True)",
-                "if mode not in {'unstructured-success', 'safety-stop-no-go', 'fix-budget-exhausted', 'external-blocker', 'marker-like-prose', 'no-go', 'awaiting-review', 'ordered-conflict'}:",
+                "if mode not in {'unstructured-success', 'safety-stop-no-go', 'fix-budget-exhausted', 'external-blocker', 'malformed-terminal-reason', 'marker-like-prose', 'no-go', 'awaiting-review', 'ordered-conflict'}:",
                 "    print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'cached_input_tokens': 1, 'uncached_input_tokens': 2, 'output_tokens': 5, 'reasoning_tokens': 1, 'total_tokens': 8}}))",
                 "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
@@ -1612,6 +1614,34 @@ def check_external_blocker_handoff_run(tmp: Path) -> None:
     status = load_status(runtime, "external-blocker")
     if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "external_blocker":
         raise AssertionError(f"external blocker reason was not preserved: {status}")
+
+
+def check_malformed_terminal_reason_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "malformed-terminal-reason-workspace")
+    launcher = tmp / "fake-codex-malformed-terminal-reason"
+    runtime = tmp / "runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "malformed-terminal-reason",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("malformed-terminal-reason"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("malformed terminal reason run unexpectedly returned success")
+    status = load_status(runtime, "malformed-terminal-reason")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "malformed_terminal_reason":
+        raise AssertionError(f"malformed terminal reason was silently discarded: {status}")
 
 
 def check_unstructured_unpublished_success_run(tmp: Path) -> None:
@@ -3276,6 +3306,7 @@ def main() -> int:
         check_supervisor_stops_after_fallback_no_go(workspace)
         check_fix_budget_handoff_run(workspace)
         check_external_blocker_handoff_run(workspace)
+        check_malformed_terminal_reason_run(workspace)
         check_unstructured_unpublished_success_run(workspace)
         check_marker_like_prose_is_not_authoritative(workspace)
         check_non_terminal_error_success_run(workspace)
