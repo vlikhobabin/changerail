@@ -28,8 +28,13 @@ BARE_CARD_ID_RE = re.compile(rf"^{CARD_ID_RE}$")
 
 
 def _field(text: str, name: str) -> str | None:
-    match = re.search(rf"^-\s*{re.escape(name)}:\s*`?([^`\n]+)`?\s*$", text, re.MULTILINE | re.IGNORECASE)
-    return match.group(1).strip().lower() if match else None
+    match = re.search(rf"^-\s*{re.escape(name)}:\s*(.*?)\s*$", text, re.MULTILINE | re.IGNORECASE)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    if value.startswith("`") and value.endswith("`"):
+        value = value[1:-1]
+    return value.strip().lower()
 
 
 def _boolean(value: str | None, name: str) -> bool:

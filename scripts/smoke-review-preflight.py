@@ -318,6 +318,34 @@ def main() -> int:
         assert data["outcome"] == "investigation-required"
         assert data["complexity_guard"]["new_authority_or_wire_protocol"] is True
 
+        repo, manifest = workspace(root, "ordinary")
+        card = repo / "openspec" / "board" / "3.inprogress" / "example-card.md"
+        write(
+            card,
+            card.read_text(encoding="utf-8").replace(
+                "- New authority or wire protocol: `no`",
+                "- New authority or wire protocol: `yes`; explanation",
+            ),
+        )
+        result = run(
+            [
+                str(HELPER),
+                "preflight",
+                "openspec/board/3.inprogress/example-card.md",
+                "--workspace",
+                str(repo),
+                "--manifest",
+                str(manifest),
+                "--normalize",
+                "--json",
+            ],
+            repo,
+        )
+        assert result.returncode == 1
+        diagnostic = json.loads(result.stderr)
+        assert diagnostic["diagnostic"]["code"] == "validation_failed"
+        assert "New authority or wire protocol must be yes or no" in diagnostic["diagnostic"]["message"]
+
     print("review preflight smoke: PASS")
     return 0
 
