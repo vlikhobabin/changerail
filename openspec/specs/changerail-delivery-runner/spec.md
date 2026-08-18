@@ -18,6 +18,15 @@ delivery run for a single board card without private workspace assumptions.
   requested workspace
 - **AND** absent an explicit operator `CODEX_HOME`, the child uses
   `<workspace>/.codex`
+- **AND** the child receives `CHANGERAIL_ACTIVE_RUN_ID` and
+  `CHANGERAIL_ACTIVE_RUN_DIR` identifying parent-owned active runtime evidence
+
+#### Scenario: Child explores delivery context
+- **WHEN** a runner-launched child searches the workspace during delivery
+- **THEN** the active runner directory is identifiable and excluded from child
+  reads
+- **AND** the child cannot recursively ingest its own growing JSONL log as
+  task context
 
 ### Requirement: Closed stdin execution
 The runner MUST close stdin for the child process it launches.

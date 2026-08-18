@@ -203,6 +203,8 @@ def child_environment(args: argparse.Namespace) -> dict[str, str]:
     env = os.environ.copy()
     env["CODEX_WORKDIR"] = str(root)
     env["CODEX_HOME"] = str(effective_codex_home(args))
+    env["CHANGERAIL_ACTIVE_RUN_ID"] = args.run_id
+    env["CHANGERAIL_ACTIVE_RUN_DIR"] = str((args.runtime_root / args.run_id).resolve(strict=False))
     return env
 
 

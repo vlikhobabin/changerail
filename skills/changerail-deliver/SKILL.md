@@ -79,6 +79,10 @@ If no path is provided and it cannot be inferred, ask for it.
   with safety stop `awaiting external review`.
 - Preserve phase safety stops, manifest handling, evidence expectations and
   scoped publish rules.
+- When `CHANGERAIL_ACTIVE_RUN_DIR` is set, treat that directory as parent-owned
+  write-only runtime evidence until the child exits. Do not read, search, tail
+  or summarize its `status.json`, `stdout.jsonl` or `stderr.log`; exclude the
+  active run directory from repository-wide discovery commands.
 - Never run `git add .`, `git commit -a`, force-push, reset or checkout
   commands that discard changes.
 - Stop on the first safety stop.

@@ -129,7 +129,7 @@ def write_fake_launcher(path: Path) -> None:
                 "    with open(call_log, 'a', encoding='utf-8') as handle:",
                 "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
                 "stdin = sys.stdin.read()",
-                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME')}))",
+                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR')}))",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
                 "if mode == 'non-terminal-error':",
                 "    print(json.dumps({'type': 'tool/result', 'data': {'status': 'failed', 'message': 'error'}}))",
@@ -1352,6 +1352,10 @@ def check_success_run(tmp: Path) -> None:
         raise AssertionError(f"CODEX_WORKDIR did not honor --workspace: {first}")
     if first.get("CODEX_HOME") != str(workspace / ".codex"):
         raise AssertionError(f"CODEX_HOME did not default to workspace .codex: {first}")
+    if first.get("CHANGERAIL_ACTIVE_RUN_ID") != "success":
+        raise AssertionError(f"active runner id was not passed to the child: {first}")
+    if first.get("CHANGERAIL_ACTIVE_RUN_DIR") != str(runtime / "success"):
+        raise AssertionError(f"active runner directory was not passed to the child: {first}")
     if "terminal_outcome: DELIVERED" not in result.stdout:
         raise AssertionError(f"terminal outcome was not printed: {result.stdout}")
 
