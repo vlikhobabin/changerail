@@ -22,7 +22,8 @@ The project is currently in bootstrap stage. The tracked public surface is:
 - Claude command wrappers under `claude/commands/changerail/`;
 - ChangeRail contract schemas under `schemas/`;
 - helper wrappers `bin/openspec`, `bin/changerail-python`,
-  `bin/changerail-review-verdict`, `bin/changerail-evidence`,
+  `bin/changerail-delivery-manifest`, `bin/changerail-review-verdict`,
+  `bin/changerail-evidence`,
   `bin/bootstrap-project`, `bin/verify-project`,
   `bin/changerail-delivery-runner`, `bin/changerail-delivery-metrics`,
   `bin/changerail-maintenance` and `bin/changerail-maintenance-runner`;

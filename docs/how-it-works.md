@@ -95,7 +95,7 @@ tracked файлы ссылаются только на evidence id/path и кр
 Для card-level handoff manifest можно строить helper-ом:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py derive \
+bin/changerail-delivery-manifest derive \
   openspec/board/3.inprogress/example.md --write --json
 ```
 

@@ -1782,6 +1782,13 @@ def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_ro
     checks = [
         check_symlink(
             project,
+            "bin/changerail-delivery-manifest",
+            changerail_root / "bin" / "changerail-delivery-manifest",
+            changerail_root,
+            aggregator_root,
+        ),
+        check_symlink(
+            project,
             "bin/changerail-review-verdict",
             changerail_root / "bin" / "changerail-review-verdict",
             changerail_root,
@@ -1808,6 +1815,14 @@ def check_schemas_and_helper_with_wiring(
     manifest: dict[str, object] | None,
 ) -> list[Check]:
     checks = [
+        check_wiring_path(
+            project,
+            "bin/changerail-delivery-manifest",
+            changerail_root / "bin" / "changerail-delivery-manifest",
+            changerail_root,
+            aggregator_root,
+            manifest,
+        ),
         check_wiring_path(
             project,
             "bin/changerail-review-verdict",

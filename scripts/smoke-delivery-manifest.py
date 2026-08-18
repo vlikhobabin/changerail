@@ -14,6 +14,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
+WRAPPER = ROOT / "bin" / "changerail-delivery-manifest"
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -131,6 +132,7 @@ def main() -> int:
         path.write_text(json.dumps(manifest_payload(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         require_ok(run([sys.executable, str(HELPER), "validate", str(path), "--json"]), "validate")
+        require_ok(run([str(WRAPPER), "validate", str(path), "--json"]), "wrapper validate")
         result = run([sys.executable, str(HELPER), "staging-plan", str(path), "--json"])
         require_ok(result, "staging-plan")
         payload = json.loads(result.stdout)

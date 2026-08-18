@@ -188,12 +188,12 @@ that compares manifest `committable_paths` with actual Git scope for the
 working tree, the staged index or both targets.
 
 #### Scenario: Working-tree scope matches manifest
-- **WHEN** `scripts/changerail_delivery_manifest.py scope-check --target working-tree --json` checks a manifest whose committable operations match the current non-ignored working-tree status
+- **WHEN** `bin/changerail-delivery-manifest scope-check --target working-tree --json` checks a manifest whose committable operations match the current non-ignored working-tree status
 - **THEN** the helper exits zero
 - **AND** the JSON result reports `ok: true` for the working-tree target
 
 #### Scenario: Staged scope matches manifest
-- **WHEN** `scripts/changerail_delivery_manifest.py scope-check --target staged --json` checks a manifest whose committable operations match the staged index
+- **WHEN** `bin/changerail-delivery-manifest scope-check --target staged --json` checks a manifest whose committable operations match the staged index
 - **THEN** the helper exits zero
 - **AND** the JSON result reports `ok: true` for the staged target
 
@@ -206,6 +206,17 @@ working tree, the staged index or both targets.
 - **WHEN** ignored runtime manifest, verdict or review-history paths exist during scope reconciliation
 - **THEN** the helper excludes those paths from actual committable scope
 - **AND** it does not require runtime paths to appear in `committable_paths`
+
+### Requirement: Delivery manifest helper has a consumer-stable wrapper
+ChangeRail MUST expose delivery manifest operations through the tracked
+`bin/changerail-delivery-manifest` wrapper and bootstrap that wrapper into
+consumer repositories.
+
+#### Scenario: Consumer skill invokes manifest operations
+- **WHEN** a wired consumer runs `bin/changerail-delivery-manifest validate`
+- **THEN** the wrapper resolves the owning ChangeRail checkout
+- **AND** it executes the canonical manifest helper through the shared Python
+  runtime without requiring a consumer-local `scripts/` copy
 
 ### Requirement: NUL-safe operation-aware scope comparison
 Delivery manifest scope reconciliation MUST use machine-readable NUL-delimited

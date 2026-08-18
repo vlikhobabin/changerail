@@ -193,14 +193,14 @@ Helper может вывести или обновить manifest из теку�
 state:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py derive \
+bin/changerail-delivery-manifest derive \
   openspec/board/3.inprogress/example.md --write --json
-bin/changerail-python scripts/changerail_delivery_manifest.py staging-plan \
+bin/changerail-delivery-manifest staging-plan \
   .runtime/changerail/delivery-manifests/example.json --json
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/example.json \
   --target working-tree --json
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/example.json \
   --target staged --json
 ```
@@ -236,7 +236,7 @@ Ignored runtime paths из manifest `excluded_runtime_paths` и Git ignored file
 Перед staging publish должен проверить manifest against working tree:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/example.json \
   --target working-tree --json
 ```
@@ -244,7 +244,7 @@ bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
 После explicit staging publish должен проверить staged index:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/example.json \
   --target staged --json
 ```
@@ -263,7 +263,7 @@ review history и local evidence остаются ignored runtime artifacts.
 После publish ignored manifest можно обновить без staging runtime state:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
+bin/changerail-delivery-manifest publish-update \
   .runtime/changerail/delivery-manifests/example.json \
   --status pushed --payload-commit <payload-commit> \
   --published-commit <published-commit> --remote origin --branch main \
@@ -278,7 +278,7 @@ are all present.
 evidence вместо remote readiness:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
+bin/changerail-delivery-manifest publish-update \
   .runtime/changerail/delivery-manifests/example.json \
   --status skipped --payload-commit <payload-commit> \
   --published-commit <local-final-commit> \

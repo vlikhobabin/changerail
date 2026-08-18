@@ -59,13 +59,12 @@ paths only:
 - concise verification handoff summary with executed commands, observed
   outcomes and evidence references when available.
 
-Validate or normalize the manifest with
-`bin/changerail-python scripts/changerail_delivery_manifest.py` when a project
-provides that helper. When the helper supports `scope-check`, run it against
+Validate or normalize the manifest with `bin/changerail-delivery-manifest` when
+a project provides that helper. When the helper supports `scope-check`, run it against
 the working tree after manifest derivation/update and before review handoff:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --target working-tree --json
 ```
@@ -173,7 +172,7 @@ When a delivery manifest exists, verification must include a working-tree
 manifest scope reconciliation if the helper supports it:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --target working-tree --json
 ```

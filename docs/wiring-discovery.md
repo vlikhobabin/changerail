@@ -19,7 +19,8 @@ wrappers, и какой smoke подтверждает discovery. ChangeRail о�
 - Claude short aliases: `/chrl:explore`, `/chrl:ff`, `/chrl:do`,
   `/chrl:review`, `/chrl:pub`, `/chrl:deliver`, `/chrl:maintain`;
 - default helper wrappers: `bin/openspec`, `bin/changerail-python`,
-  `bin/changerail-review-verdict` and `bin/changerail-evidence`;
+  `bin/changerail-delivery-manifest`, `bin/changerail-review-verdict` and
+  `bin/changerail-evidence`;
 - maintenance opt-in helper wrappers: `bin/changerail-maintenance` and
   `bin/changerail-maintenance-runner`, wired only by
   `bin/bootstrap-project --with-maintenance` or an equivalent manual adoption.
@@ -84,6 +85,7 @@ wiring и не коммитятся.
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
 bin/openspec                    -> /opt/changerail/bin/openspec
 bin/changerail-python           -> /opt/changerail/bin/changerail-python
+bin/changerail-delivery-manifest -> /opt/changerail/bin/changerail-delivery-manifest
 bin/bootstrap-project           -> /opt/changerail/bin/bootstrap-project
 bin/verify-project              -> /opt/changerail/bin/verify-project
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict

@@ -109,7 +109,7 @@ When a delivery manifest exists and the helper supports `scope-check`, compare
 the manifest with the working tree before staging:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --target working-tree --json
 ```
@@ -161,7 +161,7 @@ Stage explicit paths only:
 git add -- <path> ...
 git diff --cached --stat
 git diff --cached --check
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --target staged --json
 git commit -m "<message>"
@@ -185,11 +185,11 @@ deterministic finalization, not a substantive change to the reviewed payload. If
 this creates a new card-only diff before push, amend only the card with explicit
 staging.
 
-When the workspace provides `scripts/changerail_delivery_manifest.py`, prefer
+When the workspace provides `bin/changerail-delivery-manifest`, prefer
 helper-assisted finalization through the shared Python runtime selector:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py finalize-card "<card-path>" \
+bin/changerail-delivery-manifest finalize-card "<card-path>" \
   --commit "<payload-commit>" --remote "<remote>" --branch "<branch>" \
   --push-status pending --timestamp "<utc>"
 git add -- <old-card-path> <new-card-path>
@@ -219,7 +219,7 @@ the card-only amend, update the ignored manifest with skipped local-only publish
 evidence when the helper exists:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
+bin/changerail-delivery-manifest publish-update \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --status skipped --payload-commit "<payload-commit>" \
   --published-commit "<local-final-commit>" \
@@ -229,7 +229,7 @@ bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
 After push, update ignored manifest publish metadata when the helper exists:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py publish-update \
+bin/changerail-delivery-manifest publish-update \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --status pushed --payload-commit "<payload-commit>" \
   --published-commit "<published-commit>" --remote "<remote>" \

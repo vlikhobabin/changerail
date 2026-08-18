@@ -136,7 +136,7 @@ When the manifest helper supports `scope-check`, run the working-tree check and
 treat missing, extra or mismatched committable paths as scope findings:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --target working-tree --json
 ```

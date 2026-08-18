@@ -174,6 +174,7 @@ def create_fixture(project: Path, changerail_root: Path, *, with_maintenance: bo
     symlink_force(changerail_root / "bin" / "openspec", project / "bin" / "openspec")
     symlink_force(changerail_root / "bin" / "changerail-python", project / "bin" / "changerail-python")
     symlink_force(changerail_root / "bin" / "verify-project", project / "bin" / "verify-project")
+    symlink_force(changerail_root / "bin" / "changerail-delivery-manifest", project / "bin" / "changerail-delivery-manifest")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
     symlink_force(changerail_root / "bin" / "changerail-evidence", project / "bin" / "changerail-evidence")
     if with_maintenance:

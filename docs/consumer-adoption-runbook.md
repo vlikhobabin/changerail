@@ -207,6 +207,7 @@ git -C /opt/changerail status --short
 .codex/skills/openspec-*   -> /opt/changerail/skills/openspec-*
 bin/openspec                    -> /opt/changerail/bin/openspec
 bin/changerail-python           -> /opt/changerail/bin/changerail-python
+bin/changerail-delivery-manifest -> /opt/changerail/bin/changerail-delivery-manifest
 bin/bootstrap-project           -> /opt/changerail/bin/bootstrap-project
 bin/verify-project              -> /opt/changerail/bin/verify-project
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
@@ -228,6 +229,7 @@ ln -sfnT "$ChangeRail/claude/commands/changerail" "$PROJECT/.claude/commands/cha
 ln -sfnT "$ChangeRail/claude/commands/chrl" "$PROJECT/.claude/commands/chrl"
 ln -sfnT "$ChangeRail/bin/openspec" "$PROJECT/bin/openspec"
 ln -sfnT "$ChangeRail/bin/changerail-python" "$PROJECT/bin/changerail-python"
+ln -sfnT "$ChangeRail/bin/changerail-delivery-manifest" "$PROJECT/bin/changerail-delivery-manifest"
 ln -sfnT "$ChangeRail/bin/bootstrap-project" "$PROJECT/bin/bootstrap-project"
 ln -sfnT "$ChangeRail/bin/verify-project" "$PROJECT/bin/verify-project"
 ln -sfnT "$ChangeRail/bin/changerail-review-verdict" "$PROJECT/bin/changerail-review-verdict"

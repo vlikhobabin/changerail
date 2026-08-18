@@ -149,6 +149,7 @@ bootstrap-процессом:
 │   ├── verify-project
 │   ├── openspec
 │   ├── changerail-review-verdict
+│   ├── changerail-delivery-manifest
 │   └── changerail-evidence
 ├── templates/
 │   └── project/
@@ -226,6 +227,7 @@ rewiring.
 .codex/skills/openspec-*    -> /opt/changerail/skills/openspec-*
 bin/openspec                -> /opt/changerail/bin/openspec
 bin/changerail-python       -> /opt/changerail/bin/changerail-python
+bin/changerail-delivery-manifest -> /opt/changerail/bin/changerail-delivery-manifest
 ```
 
 При необходимости можно добавить:
@@ -599,6 +601,7 @@ verify-проверки, миграция и adoption идут после зел
 .codex/skills/<skill>     -> /opt/changerail/skills/<skill>   для каждого skill c SKILL.md
 bin/openspec              -> /opt/changerail/bin/openspec
 bin/changerail-python     -> /opt/changerail/bin/changerail-python
+bin/changerail-delivery-manifest -> /opt/changerail/bin/changerail-delivery-manifest
 bin/changerail-review-verdict   -> /opt/changerail/bin/changerail-review-verdict
 bin/changerail-evidence         -> /opt/changerail/bin/changerail-evidence
 ```

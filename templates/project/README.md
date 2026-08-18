@@ -65,6 +65,7 @@ them; `.claude/*` wiring создается только для `all-surfaces`:
 - `.codex/skills/openspec-*`
 - `bin/openspec`
 - `bin/changerail-python`
+- `bin/changerail-delivery-manifest`
 - `bin/verify-project`
 - `bin/changerail-review-verdict`
 - `bin/changerail-evidence`

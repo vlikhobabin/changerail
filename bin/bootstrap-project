@@ -55,6 +55,7 @@ SUPPORTED_HELPERS = (
     "openspec",
     "changerail-python",
     "verify-project",
+    "changerail-delivery-manifest",
     "changerail-review-verdict",
     "changerail-evidence",
 )

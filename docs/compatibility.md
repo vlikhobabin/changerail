@@ -540,6 +540,7 @@ Implemented native runtime entrypoint surface:
 - `bin/bootstrap-project.cmd`
 - `bin/openspec.cmd`
 - `bin/changerail-python.cmd`
+- `bin/changerail-delivery-manifest.cmd`
 - `bin/verify-project.cmd`
 - `bin/changerail-review-verdict.cmd`
 - `bin/changerail-evidence.cmd`

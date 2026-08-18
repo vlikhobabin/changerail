@@ -114,12 +114,15 @@ changes**, каждый со своими OpenSpec-артефактами в `op
   `/chrl:deliver`, plus `/changerail:maintain` and `/chrl:maintain`;
 - `bin/openspec` с pin версии OpenSpec CLI;
 - `bin/changerail-python` как shared runtime selector для Python helpers;
+- `bin/changerail-delivery-manifest` как consumer-stable wrapper для delivery
+  manifest lifecycle;
 - schemas `changerail.review-verdict.v1`,
   `changerail.review-preflight-result.v1`,
   `changerail.review-cycle-history.v1`, `changerail.delivery-manifest.v1`,
   `changerail.delivery-run.v1`, `changerail.evidence-index.v1`,
   repository knowledge и maintenance contracts, включая quality/proposal
-  schemas, а также helpers `bin/changerail-review-verdict`,
+  schemas, а также helpers `bin/changerail-delivery-manifest`,
+  `bin/changerail-review-verdict`,
   `bin/changerail-evidence` and `bin/changerail-maintenance`;
 - `templates/project/` для generated project files и OpenSpec skeleton;
 - `bin/verify-project` как fail-closed gate для consumer wiring/config с явными

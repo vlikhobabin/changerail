@@ -69,10 +69,10 @@ supports `scope-check`, delivery/review/publish can compare manifest scope with
 Git state explicitly:
 
 ```bash
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/<card-id>.json \
   --target working-tree --json
-bin/changerail-python scripts/changerail_delivery_manifest.py scope-check \
+bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/<card-id>.json \
   --target staged --json
 ```
