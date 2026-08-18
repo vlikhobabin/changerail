@@ -578,6 +578,12 @@ def create_fake_npm(changerail_root: Path, fake_bin: Path) -> dict[str, str]:
                 f"MAPPING = {mapping!r}",
                 "if len(sys.argv) == 5 and sys.argv[1] == 'view' and sys.argv[3] == 'dist.integrity' and sys.argv[4] == '--json':",
                 "    spec = sys.argv[2]",
+                "    if os.environ.get('CHANGERAIL_FAKE_NPM_FAIL') == spec:",
+                "        print('registry stdout detail')",
+                "        print('registry stderr detail', file=sys.stderr)",
+                "        raise SystemExit(1)",
+                "    if os.environ.get('CHANGERAIL_FAKE_NPM_WARNING') == spec:",
+                "        print('npm warn Unknown builtin config', file=sys.stderr)",
                 "    if os.environ.get('CHANGERAIL_FAKE_NPM_TAMPER') == spec:",
                 "        print(json.dumps('sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='))",
                 "        raise SystemExit(0)",
@@ -823,6 +829,44 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "valid fixture passes",
             "pass" if verify.returncode == 0 else "fail",
             verify.stdout.strip(),
+        )
+    )
+    warning_env = {
+        **fake_env,
+        "CHANGERAIL_FAKE_NPM_WARNING": "@modelcontextprotocol/server-filesystem@2026.7.10",
+    }
+    warning = run(
+        [str(changerail_root / "bin" / "verify-project"), str(good_project)],
+        changerail_root,
+        warning_env,
+    )
+    checks.append(
+        Check(
+            "successful npm stderr warning preserves integrity verification",
+            "pass"
+            if warning.returncode == 0 and "PASS MCP npm pins" in warning.stdout
+            else "fail",
+            warning.stdout.strip(),
+        )
+    )
+    failure_env = {
+        **fake_env,
+        "CHANGERAIL_FAKE_NPM_FAIL": "@modelcontextprotocol/server-filesystem@2026.7.10",
+    }
+    failure = run(
+        [str(changerail_root / "bin" / "verify-project"), str(good_project)],
+        changerail_root,
+        failure_env,
+    )
+    checks.append(
+        Check(
+            "failed npm lookup preserves stdout and stderr diagnostics",
+            "pass"
+            if failure.returncode != 0
+            and "registry stdout detail" in failure.stdout
+            and "registry stderr detail" in failure.stdout
+            else "fail",
+            failure.stdout.strip(),
         )
     )
     npm_cmd_ok, npm_cmd_message = check_npm_cmd_resolution(changerail_root, run_dir)

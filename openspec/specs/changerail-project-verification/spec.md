@@ -103,6 +103,12 @@ direct package argument, `--package=<package>@<version>` or
 - **AND** it fails if `npm view <package>@<version> dist.integrity --json`
   returns different integrity for any referenced MCP package
 
+#### Scenario: Successful npm warnings do not corrupt integrity verification
+- **WHEN** `npm view <package>@<version> dist.integrity --json` exits zero,
+  returns the locked integrity JSON in stdout and emits a warning in stderr
+- **THEN** `bin/verify-project` compares only the stdout payload with the lock
+- **AND** the stderr warning does not produce a false integrity mismatch
+
 ### Requirement: Runtime/auth ignore policy
 Verification MUST fail when consumer projects do not ignore ChangeRail runtime,
 agent session and auth paths.

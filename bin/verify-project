@@ -1620,7 +1620,7 @@ def npm_registry_integrity(package_name: str, version: str) -> tuple[str | None,
             [npm_executable, "view", spec, "dist.integrity", "--json"],
             text=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             timeout=30,
         )
     except FileNotFoundError:
@@ -1628,7 +1628,11 @@ def npm_registry_integrity(package_name: str, version: str) -> tuple[str | None,
     except subprocess.TimeoutExpired:
         return None, f"npm registry integrity lookup timed out for {spec}"
     if result.returncode != 0:
-        output = result.stdout.strip() or f"npm view failed with exit {result.returncode}"
+        output = "\n".join(
+            part.strip()
+            for part in (result.stdout, result.stderr)
+            if part and part.strip()
+        ) or f"npm view failed with exit {result.returncode}"
         return None, f"npm registry integrity lookup failed for {spec}: {output}"
     output = result.stdout.strip()
     try:
