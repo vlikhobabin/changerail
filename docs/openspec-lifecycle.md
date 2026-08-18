@@ -64,6 +64,9 @@ OPENSPEC_VERSION=1.3.1 /opt/changerail/bin/openspec validate --all
 
 Wrapper выключает telemetry по умолчанию через `OPENSPEC_TELEMETRY=0`, если
 operator явно не задал другое значение.
+Wrapper также задает `npm_config_prefer_offline=true`, если operator не выбрал
+другую npm policy: установленный exact pin используется из кеша без ожидания
+registry metadata, а отсутствующий pin по-прежнему может быть загружен.
 
 Для `archive` wrapper также делает fail-closed диагностику известного случая:
 если OpenSpec CLI сообщает, что `ADDED` requirement уже есть в main spec и

@@ -26,6 +26,7 @@ if [[ "$is_archive" == "true" && "$skip_specs" == "false" ]]; then
 
   set +e
   env OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}" \
+    npm_config_prefer_offline="${npm_config_prefer_offline:-true}" \
     npx -y "@fission-ai/openspec@${openspec_version}" "$@" \
     > >(tee "$output_file") \
     2> >(tee -a "$output_file" >&2)
@@ -49,4 +50,5 @@ EOF
 fi
 
 exec env OPENSPEC_TELEMETRY="${OPENSPEC_TELEMETRY:-0}" \
+  npm_config_prefer_offline="${npm_config_prefer_offline:-true}" \
   npx -y "@fission-ai/openspec@${openspec_version}" "$@"

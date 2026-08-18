@@ -13,6 +13,30 @@ ROOT = Path(__file__).resolve().parents[1]
 OPENSPEC = ROOT / "bin" / "openspec"
 
 
+def check_prefer_offline_default(root: Path) -> None:
+    fake_bin = root / "fake-bin"
+    observed = root / "prefer-offline.txt"
+    write(
+        fake_bin / "npx",
+        "#!/bin/sh\nprintf '%s' \"${npm_config_prefer_offline:-}\" > \"$OBSERVED\"\n",
+    )
+    (fake_bin / "npx").chmod(0o755)
+    env = os.environ.copy()
+    env.pop("npm_config_prefer_offline", None)
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["OBSERVED"] = str(observed)
+    result = subprocess.run(
+        [str(OPENSPEC), "list", "--json"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0 or observed.read_text(encoding="utf-8") != "true":
+        raise AssertionError("OpenSpec wrapper did not default npm_config_prefer_offline=true")
+
+
 def write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -82,7 +106,9 @@ The example capability MUST already contain this requirement.
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
-        project = make_project(Path(tmp))
+        root = Path(tmp)
+        check_prefer_offline_default(root)
+        project = make_project(root)
         result = run_archive(project)
         output = result.stdout + result.stderr
         if result.returncode == 0:

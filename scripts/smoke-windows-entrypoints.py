@@ -120,6 +120,7 @@ def check_openspec_wrapper(checks: list[Check]) -> None:
         "uses npx pinned package": 'npx -y "@fission-ai/openspec@%openspec_version%" %*',
         "supports OPENSPEC_WORKDIR": "OPENSPEC_WORKDIR",
         "sets telemetry default": "OPENSPEC_TELEMETRY=0",
+        "prefers cached package metadata": "npm_config_prefer_offline=true",
         "propagates helper exit code": "exit /b %status%",
     }
     for label, snippet in requirements.items():

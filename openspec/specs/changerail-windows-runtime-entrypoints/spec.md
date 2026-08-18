@@ -65,6 +65,7 @@ contract as the existing ChangeRail OpenSpec entrypoint.
 - **WHEN** an operator launches `openspec.cmd`
 - **THEN** the wrapper invokes the pinned OpenSpec CLI contract used by
   ChangeRail
+- **AND** npm prefers cached metadata and package content by default
 - **AND** it does not require direct extensionless POSIX launch or implicit Bash
 
 #### Scenario: Pinned OpenSpec launch fails

@@ -30,6 +30,8 @@ OpenSpec CLI version and supports an explicit version override.
 - **WHEN** `/opt/changerail/bin/openspec validate --all` is run from an ChangeRail project
 - **THEN** the wrapper executes the pinned OpenSpec CLI package unless
   `OPENSPEC_VERSION` overrides the pin
+- **AND** npm prefers already cached metadata and package content while still
+  allowing retrieval of a missing exact pin
 
 ### Requirement: OpenSpec compatibility notes
 ChangeRail MUST document the OpenSpec CLI pin and the update policy for generated
