@@ -25,6 +25,7 @@ failed, 2 input error.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -32,6 +33,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +64,10 @@ TOP_LEVEL_KEYS = {
     "notes",
 }
 READ_CHUNK_SIZE = 1024 * 1024
+EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+CACHE_SCHEMA = "changerail.review-fingerprint-cache.v1"
+CACHE_VERSION = 1
+FINGERPRINT_KEYS = ("head_commit", "tree_sha", "diff_fingerprint")
 
 
 class VerdictError(Exception):
@@ -139,12 +145,19 @@ def _git_output(workspace: Path, args: list[str], *, env: dict[str, str] | None 
     return result.stdout
 
 
-def _git_output_bytes(workspace: Path, args: list[str], *, env: dict[str, str] | None = None) -> bytes:
+def _git_output_bytes(
+    workspace: Path,
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    input_data: bytes | None = None,
+) -> bytes:
     result = subprocess.run(
         ["git", "-C", str(workspace), *args],
         capture_output=True,
         check=False,
         env=_git_env(env),
+        input=input_data,
     )
     if result.returncode != 0:
         detail = (
@@ -154,6 +167,18 @@ def _git_output_bytes(workspace: Path, args: list[str], *, env: dict[str, str] |
         )
         raise VerdictError(f"git {' '.join(args)}: {detail}", exit_code=2)
     return result.stdout
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _timed(timings: list[dict[str, Any]], phase: str, func: Any) -> Any:
+    start = time.perf_counter()
+    try:
+        return func()
+    finally:
+        timings.append({"phase": phase, "duration_ms": round((time.perf_counter() - start) * 1000, 3)})
 
 
 def _hash_untracked_files(digest: Any, workspace: Path) -> None:
@@ -208,7 +233,31 @@ def _head_commit(workspace: Path) -> str:
     raise VerdictError(f"git rev-parse --verify HEAD: {detail}", exit_code=2)
 
 
-def compute_reviewed_tree(workspace: Path, head_commit: str) -> str:
+def _changed_paths_from_status(status: bytes) -> list[bytes]:
+    records = [record for record in status.split(b"\x00") if record]
+    paths: set[bytes] = set()
+    index = 0
+    while index < len(records):
+        record = records[index]
+        if len(record) < 4:
+            raise VerdictError("git status produced an invalid porcelain record", exit_code=2)
+        code = record[:2].decode("ascii", errors="replace")
+        if "U" in code:
+            raise VerdictError("unmerged paths cannot be fingerprinted safely", exit_code=2)
+        path = record[3:]
+        if not path:
+            raise VerdictError("git status produced an empty changed path", exit_code=2)
+        paths.add(path)
+        if "R" in code or "C" in code:
+            index += 1
+            if index >= len(records):
+                raise VerdictError(f"git status missing source path for {code}", exit_code=2)
+            paths.add(records[index])
+        index += 1
+    return sorted(paths)
+
+
+def _compute_reviewed_tree_reference(workspace: Path, head_commit: str) -> str:
     with tempfile.TemporaryDirectory(prefix="changerail-review-index-") as raw:
         index_path = Path(raw) / "index"
         env = {"GIT_INDEX_FILE": str(index_path)}
@@ -221,25 +270,248 @@ def compute_reviewed_tree(workspace: Path, head_commit: str) -> str:
     return tree_sha
 
 
-def compute_fingerprint(workspace: Path) -> dict[str, str]:
+def _compute_reviewed_tree_optimized(workspace: Path, head_commit: str, changed_paths: list[bytes]) -> str:
+    if not changed_paths:
+        if head_commit == "unborn":
+            return EMPTY_TREE_SHA
+        return _git_output(workspace, ["rev-parse", f"{head_commit}^{{tree}}"]).strip()
+    pathspecs = b"".join(path + b"\x00" for path in changed_paths)
+    with tempfile.TemporaryDirectory(prefix="changerail-review-index-") as raw:
+        index_path = Path(raw) / "index"
+        env = {"GIT_INDEX_FILE": str(index_path), "GIT_LITERAL_PATHSPECS": "1"}
+        if head_commit != "unborn":
+            _git_output(workspace, ["read-tree", head_commit], env=env)
+        _git_output_bytes(
+            workspace,
+            ["add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul"],
+            env=env,
+            input_data=pathspecs,
+        )
+        tree_sha = _git_output(workspace, ["write-tree"], env=env).strip()
+    if not TREE_SHA_RE.fullmatch(tree_sha):
+        raise VerdictError("optimized reviewed tree SHA could not be computed", exit_code=2)
+    return tree_sha
+
+
+def compute_reviewed_tree(
+    workspace: Path,
+    head_commit: str,
+    changed_paths: list[bytes] | None = None,
+    diagnostics: dict[str, Any] | None = None,
+    timings: list[dict[str, Any]] | None = None,
+) -> str:
+    timings = timings if timings is not None else []
+    if changed_paths is None:
+        tree_sha = _timed(timings, "reviewed-tree-construction", lambda: _compute_reviewed_tree_reference(workspace, head_commit))
+        if diagnostics is not None:
+            diagnostics["tree_builder"] = {"mode": "reference", "changed_path_count": None, "full_index_refresh": True}
+        return tree_sha
+    try:
+        tree_sha = _timed(
+            timings,
+            "reviewed-tree-construction",
+            lambda: _compute_reviewed_tree_optimized(workspace, head_commit, changed_paths),
+        )
+        if diagnostics is not None:
+            diagnostics["tree_builder"] = {
+                "mode": "optimized",
+                "changed_path_count": len(changed_paths),
+                "full_index_refresh": False,
+            }
+        return tree_sha
+    except VerdictError as exc:
+        tree_sha = _timed(timings, "reviewed-tree-reference-fallback", lambda: _compute_reviewed_tree_reference(workspace, head_commit))
+        if diagnostics is not None:
+            diagnostics["tree_builder"] = {
+                "mode": "fallback",
+                "changed_path_count": len(changed_paths),
+                "full_index_refresh": True,
+                "reason": str(exc)[:500],
+            }
+        return tree_sha
+
+
+def _path_metadata_fingerprint(workspace: Path, head_commit: str, status: bytes, changed_paths: list[bytes]) -> str:
+    digest = hashlib.sha256()
+    digest.update(b"head\x00")
+    digest.update(head_commit.encode("utf-8"))
+    digest.update(b"\x00status-v1-z\x00")
+    digest.update(status)
+    for raw_path in changed_paths:
+        path = os.fsdecode(raw_path)
+        absolute = workspace / path
+        digest.update(b"\x00path\x00")
+        digest.update(raw_path)
+        try:
+            stat_result = absolute.lstat()
+        except FileNotFoundError:
+            digest.update(b"\x00missing")
+            continue
+        digest.update(f"\x00mode:{stat_result.st_mode:o}\x00size:{stat_result.st_size}\x00".encode("ascii"))
+        if absolute.is_symlink():
+            digest.update(b"symlink\x00")
+            digest.update(os.fsencode(os.readlink(absolute)))
+        elif absolute.is_file():
+            digest.update(b"file\x00")
+            digest.update(_git_output_bytes(workspace, ["hash-object", f"--path={path}", "--", path]).strip())
+        else:
+            raise VerdictError(f"changed path is not a regular file or symlink: {path}", exit_code=2)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _cache_path(workspace: Path) -> Path:
+    return workspace / ".runtime" / "changerail" / "review-fingerprint-cache" / "fingerprint.json"
+
+
+def _load_cache(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError):
+        return {"malformed": True}
+    return data if isinstance(data, dict) else {"malformed": True}
+
+
+def _cache_status(
+    data: dict[str, Any] | None,
+    workspace: Path,
+    head_commit: str,
+    status: bytes,
+    metadata_fingerprint: str,
+) -> str:
+    if data is None:
+        return "miss"
+    if data.get("malformed"):
+        return "malformed"
+    if (
+        data.get("schema") == CACHE_SCHEMA
+        and data.get("version") == CACHE_VERSION
+        and data.get("workspace_root") == str(workspace)
+        and data.get("head_commit") == head_commit
+        and data.get("status_fingerprint") == f"sha256:{hashlib.sha256(status).hexdigest()}"
+        and data.get("changed_path_metadata_fingerprint") == metadata_fingerprint
+        and TREE_SHA_RE.fullmatch(str(data.get("tree_sha", "")))
+        and FINGERPRINT_RE.fullmatch(str(data.get("diff_fingerprint", "")))
+    ):
+        return "hit"
+    return "stale"
+
+
+def _write_cache(
+    path: Path,
+    *,
+    workspace: Path,
+    head_commit: str,
+    status: bytes,
+    metadata_fingerprint: str,
+    tree_sha: str,
+    diff_fingerprint: str,
+    tree_builder: dict[str, Any],
+) -> None:
+    payload = {
+        "schema": CACHE_SCHEMA,
+        "version": CACHE_VERSION,
+        "created_at": _utc_now(),
+        "workspace_root": str(workspace),
+        "head_commit": head_commit,
+        "status_fingerprint": f"sha256:{hashlib.sha256(status).hexdigest()}",
+        "changed_path_metadata_fingerprint": metadata_fingerprint,
+        "tree_sha": tree_sha,
+        "diff_fingerprint": diff_fingerprint,
+        "tree_builder": tree_builder,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
+def _diff_fingerprint(workspace: Path, head_commit: str, status: bytes, tree_sha: str, timings: list[dict[str, Any]]) -> str:
+    diff = b"" if head_commit == "unborn" else _timed(
+        timings,
+        "tracked-diff",
+        lambda: _git_output_bytes(workspace, ["diff", "HEAD", "--no-color", "--binary"]),
+    )
+    digest = hashlib.sha256()
+    digest.update(b"status-v1-z\x00")
+    digest.update(status)
+    digest.update(b"\x00tracked-diff\x00")
+    digest.update(diff)
+    digest.update(b"\x00reviewed-tree\x00")
+    digest.update(tree_sha.encode("ascii"))
+    _timed(timings, "untracked-content-hashing", lambda: _hash_untracked_files(digest, workspace))
+    _timed(timings, "fingerprint-assembly", lambda: digest.update(b"\x00"))
+    return f"sha256:{digest.hexdigest()}"
+
+
+def compute_fingerprint(
+    workspace: Path,
+    *,
+    use_cache: bool = False,
+    diagnostics: bool = False,
+    force_reference: bool = False,
+) -> dict[str, Any]:
     if not workspace.is_dir():
         raise VerdictError(f"workspace directory cannot be read: {workspace}", exit_code=2)
-    head_commit = _head_commit(workspace)
-    status = _git_output(workspace, ["status", "--porcelain"])
-    diff = "" if head_commit == "unborn" else _git_output(workspace, ["diff", "HEAD", "--no-color"])
-    tree_sha = compute_reviewed_tree(workspace, head_commit)
-    digest = hashlib.sha256()
-    digest.update(status.encode("utf-8"))
-    digest.update(b"\x00")
-    digest.update(diff.encode("utf-8"))
-    digest.update(b"\x00")
-    _hash_untracked_files(digest, workspace)
-    return {
+    workspace = workspace.resolve(strict=False)
+    timings: list[dict[str, Any]] = []
+    helper_diagnostics: dict[str, Any] = {}
+    head_commit = _timed(timings, "head-commit", lambda: _head_commit(workspace))
+    status = _timed(
+        timings,
+        "changed-path-discovery",
+        lambda: _git_output_bytes(workspace, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+    )
+    changed_paths = _changed_paths_from_status(status)
+    metadata_fingerprint = _timed(
+        timings,
+        "changed-path-metadata",
+        lambda: _path_metadata_fingerprint(workspace, head_commit, status, changed_paths),
+    )
+    cache = _load_cache(_cache_path(workspace)) if use_cache and not force_reference else None
+    cache_state = (
+        "disabled"
+        if not use_cache or force_reference
+        else _cache_status(cache, workspace, head_commit, status, metadata_fingerprint)
+    )
+    if cache_state == "hit" and cache is not None:
+        tree_sha = str(cache["tree_sha"])
+        diff_fingerprint = str(cache["diff_fingerprint"])
+        helper_diagnostics["tree_builder"] = {"mode": "cache", "changed_path_count": len(changed_paths), "full_index_refresh": False}
+    else:
+        paths = None if force_reference else changed_paths
+        tree_sha = compute_reviewed_tree(workspace, head_commit, paths, helper_diagnostics, timings)
+        diff_fingerprint = _diff_fingerprint(workspace, head_commit, status, tree_sha, timings)
+        if use_cache and not force_reference:
+            try:
+                _write_cache(
+                    _cache_path(workspace),
+                    workspace=workspace,
+                    head_commit=head_commit,
+                    status=status,
+                    metadata_fingerprint=metadata_fingerprint,
+                    tree_sha=tree_sha,
+                    diff_fingerprint=diff_fingerprint,
+                    tree_builder=helper_diagnostics.get("tree_builder", {}),
+                )
+            except OSError:
+                cache_state = "write-failed"
+    result: dict[str, Any] = {
         "workspace": str(workspace),
         "head_commit": head_commit,
         "tree_sha": tree_sha,
-        "diff_fingerprint": f"sha256:{digest.hexdigest()}",
+        "diff_fingerprint": diff_fingerprint,
     }
+    if diagnostics:
+        result["diagnostics"] = {
+            "cache": {
+                "schema": CACHE_SCHEMA,
+                "status": cache_state,
+                "path": os.path.relpath(_cache_path(workspace), workspace),
+            },
+            "tree_builder": helper_diagnostics.get("tree_builder", {}),
+            "timings": timings,
+        }
+    return result
 
 
 def _load_verdict(path: Path) -> Any:
@@ -258,7 +530,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     errors = _validate_verdict(data)
     freshness: dict[str, Any] | None = None
     if not errors and args.check_fresh:
-        current = compute_fingerprint(Path(args.workspace))
+        current = compute_fingerprint(Path(args.workspace), use_cache=True, diagnostics=args.diagnostics)
         recorded = data["workspace"]
         fresh = (
             recorded.get("diff_fingerprint") == current["diff_fingerprint"]
@@ -282,6 +554,8 @@ def _cmd_validate(args: argparse.Namespace) -> int:
             errors.append(
                 "verdict is stale: recorded fingerprint, head commit or reviewed tree does not match the current working tree; re-review required"
             )
+        if args.diagnostics and "diagnostics" in current:
+            freshness["diagnostics"] = current["diagnostics"]
     if errors:
         raise VerdictError("; ".join(errors), exit_code=1)
     payload: dict[str, Any] = {
@@ -305,7 +579,7 @@ def _cmd_fingerprint(args: argparse.Namespace) -> int:
     payload = {
         "ok": True,
         "command": "fingerprint",
-        **compute_fingerprint(Path(args.workspace)),
+        **compute_fingerprint(Path(args.workspace), use_cache=args.cache, diagnostics=args.diagnostics),
     }
     print(json.dumps(payload, ensure_ascii=False))
     return 0
@@ -320,6 +594,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
             card_path=args.card, workspace=Path(args.workspace), manifest_path=args.manifest,
             normalize=args.normalize, risk_override=args.risk_tier, output=args.output,
             fingerprint_fn=compute_fingerprint, validate_verdict=_validate_verdict,
+            diagnostics=args.diagnostics,
         )
     except (ManifestError, ValueError, RuntimeError) as exc:
         raise VerdictError(str(exc), exit_code=1) from exc
@@ -360,6 +635,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="workspace root for --check-fresh (default: current directory)",
     )
     validate.add_argument("--json", action="store_true", help="emit structured JSON result or diagnostic")
+    validate.add_argument("--diagnostics", action="store_true", help="include cache/timing diagnostics in freshness output")
     validate.set_defaults(func=_cmd_validate)
 
     fingerprint = subparsers.add_parser(
@@ -370,6 +646,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=".",
         help="workspace root to fingerprint (default: current directory)",
     )
+    fingerprint.add_argument("--cache", action="store_true", help="reuse a validated ignored runtime cache entry")
+    fingerprint.add_argument("--diagnostics", action="store_true", help="include public-safe timing and cache diagnostics")
     fingerprint.set_defaults(func=_cmd_fingerprint)
 
     preflight = subparsers.add_parser("preflight", help="run deterministic gates before payload review")
@@ -380,6 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--risk-tier", choices=["process", "deterministic", "ordinary", "critical"])
     preflight.add_argument("--output", type=Path)
     preflight.add_argument("--json", action="store_true", help="accepted for CLI symmetry; output is always JSON")
+    preflight.add_argument("--diagnostics", action="store_true", help="include public-safe timing and fingerprint diagnostics")
     preflight.set_defaults(func=_cmd_preflight)
     return parser
 

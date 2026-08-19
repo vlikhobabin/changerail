@@ -1,13 +1,13 @@
 # Deliver bounded review fingerprint optimization
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -70,33 +70,45 @@ production LOC ceiling.
 - `share-review-fingerprint-preflight-cache`
 
 ## Verify
-- `python3 scripts/smoke-review-fingerprint.py`
-- `python3 scripts/smoke-review-verdict-validation.py`
-- `python3 scripts/smoke-review-preflight.py`
-- focused synthetic benchmark and cache smoke created by the changes
-- `python3 scripts/smoke-contract-schemas.py`
-- `python3 scripts/smoke-release-ci.py`
-- `./bin/openspec validate --all --strict`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- `python3 -m py_compile scripts/changerail_review_verdict.py scripts/changerail_review_preflight.py scripts/smoke-review-fingerprint.py scripts/smoke-review-fingerprint-benchmark.py scripts/smoke-review-fingerprint-cache.py scripts/smoke-contract-schemas.py scripts/smoke-release-ci.py scripts/run-release-baseline.py` - passed
+- `.runtime/changerail/ci-venv/bin/ruff check scripts/changerail_review_verdict.py scripts/changerail_review_preflight.py scripts/smoke-review-fingerprint.py scripts/smoke-review-fingerprint-benchmark.py scripts/smoke-review-fingerprint-cache.py scripts/smoke-contract-schemas.py scripts/smoke-release-ci.py scripts/run-release-baseline.py` - passed
+- `python3 scripts/smoke-review-fingerprint.py` - passed
+- `python3 scripts/smoke-review-verdict-validation.py` - passed
+- `python3 scripts/smoke-review-preflight.py` - passed
+- `python3 scripts/smoke-review-fingerprint-benchmark.py` - passed; fixture reported docs-only path scope bounded to 1 changed path across 180 tracked synthetic files
+- `python3 scripts/smoke-review-fingerprint-cache.py` - passed
+- `python3 scripts/smoke-contract-schemas.py` - passed, 20 schemas
+- `python3 scripts/smoke-release-ci.py` - passed, 49/49 checks
+- `./bin/openspec validate "measure-review-fingerprint-costs" --strict` - passed
+- `./bin/openspec validate "optimize-review-fingerprint-tree-build" --strict` - passed
+- `./bin/openspec validate "share-review-fingerprint-preflight-cache" --strict` - passed
+- `./bin/openspec validate "changerail-contracts" --strict` - passed
+- `./bin/openspec validate --all --strict` - passed, 30 items after archive
+- `python3 scripts/public-surface-scan.py` - passed, 1050 files scanned, 0 findings
+- `git diff --check` - passed
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-measure-review-fingerprint-costs/`
+- `openspec/changes/archive/2026-08-19-optimize-review-fingerprint-tree-build/`
+- `openspec/changes/archive/2026-08-19-share-review-fingerprint-preflight-cache/`
 
 ## Related
 - `openspec/changes/measure-review-fingerprint-costs/`
+- `openspec/changes/archive/2026-08-19-measure-review-fingerprint-costs/`
 - `openspec/changes/optimize-review-fingerprint-tree-build/`
+- `openspec/changes/archive/2026-08-19-optimize-review-fingerprint-tree-build/`
 - `openspec/changes/share-review-fingerprint-preflight-cache/`
-- `openspec/board/2.todo/investigate-bounded-review-fingerprint-payload.md`
-- `openspec/board/2.todo/authorize-bounded-review-fingerprint-payload.md`
+- `openspec/changes/archive/2026-08-19-share-review-fingerprint-preflight-cache/`
+- `openspec/board/4.done/investigate-bounded-review-fingerprint-payload.md`
+- `openspec/board/4.done/authorize-bounded-review-fingerprint-payload.md`
 
 ## Result
-planned
+published; review fingerprint optimization complete
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Complete and publish `investigate-bounded-review-fingerprint-payload`.
-- Complete and publish `authorize-bounded-review-fingerprint-payload`.
-- `$chrl-do openspec/board/2.todo/deliver-bounded-review-fingerprint-optimization.md`
+- done
 
 ## Change 1: `measure-review-fingerprint-costs`
 
@@ -210,3 +222,10 @@ proves the cached payload is unchanged.
   `optimize-review-fingerprint-tree-build` and
   `share-review-fingerprint-preflight-cache`, preserved the exact published
   authorization reference and moved the card to `2.todo`.
+- 2026-08-19T08:47:53Z `$chrl-deliver` validated apply-ready artifacts and
+  moved the card to `3.inprogress` for delivery.
+- 2026-08-19T09:01:27Z `$chrl-do` implemented path-scoped review fingerprint
+  construction, opt-in diagnostics, validated ignored cache reuse, release
+  smoke wiring and contract docs/spec sync; archived all three card-owned
+  OpenSpec changes after strict validation.
+- 2026-08-19T09:10:47Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

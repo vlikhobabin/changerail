@@ -425,6 +425,30 @@ def review_preflight_result() -> dict[str, Any]:
         },
         "checks": [{"id": "scope", "status": "pass", "detail": "exact scope"}],
         "llm_review": {"required": True, "reason": "ordinary semantic payload review"},
+        "diagnostics": {
+            "fingerprint": {
+                "cache": {
+                    "schema": "changerail.review-fingerprint-cache.v1",
+                    "status": "hit",
+                    "path": ".runtime/changerail/review-fingerprint-cache/fingerprint.json",
+                },
+                "tree_builder": {
+                    "mode": "cache",
+                    "changed_path_count": 2,
+                    "full_index_refresh": False,
+                },
+                "timings": [
+                    {"phase": "changed-path-discovery", "duration_ms": 1.0},
+                    {"phase": "changed-path-metadata", "duration_ms": 1.0},
+                ],
+            },
+            "preflight_timings": [
+                {"phase": "fingerprint", "duration_ms": 2.0},
+                {"phase": "openspec-validation", "duration_ms": 3.0},
+                {"phase": "scoped-whitespace-check", "duration_ms": 1.0},
+                {"phase": "public-surface-scan", "duration_ms": 4.0},
+            ],
+        },
     }
 
 

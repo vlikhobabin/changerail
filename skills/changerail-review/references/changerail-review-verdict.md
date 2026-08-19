@@ -98,6 +98,15 @@ working tree, through a temporary Git index without touching the real staging
 area. In an unborn repository, `workspace.head_commit` is `unborn` and
 `workspace.tree_sha` still identifies the reviewed initial tree.
 
+Current helpers derive changed paths from NUL-delimited Git status, build the
+reviewed tree from `HEAD` plus the exact changed-path set on the safe happy
+path, and retain a full-tree `git add -A` reference/fallback for unsafe states
+and parity tests. `--diagnostics` reports public-safe timing, tree-builder mode
+and cache hit/miss data. Preflight and verdict validation may reuse an ignored
+`.runtime/changerail/review-fingerprint-cache/` entry only after current HEAD,
+changed-path metadata, path content/mode metadata and Git exclude-visible state
+match the cached payload.
+
 Ignored runtime state does not affect the fingerprint or reviewed tree, so
 writing the verdict file itself does not invalidate it. Reviewers must still
 read newly added files as defense-in-depth; the fingerprint and tree only prove

@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -84,6 +85,21 @@ def _run(workspace: Path, command: list[str]) -> tuple[bool, str]:
         return False, "command timed out after 600 seconds"
     detail = (result.stdout + "\n" + result.stderr).strip() or f"exit={result.returncode}"
     return result.returncode == 0, detail[-2000:]
+
+
+def _timed(timings: list[dict[str, Any]], phase: str, func: Callable[[], Any]) -> Any:
+    start = time.perf_counter()
+    try:
+        return func()
+    finally:
+        timings.append({"phase": phase, "duration_ms": round((time.perf_counter() - start) * 1000, 3)})
+
+
+def _fingerprint(fingerprint_fn: Callable[..., dict[str, Any]], workspace: Path, diagnostics: bool) -> dict[str, Any]:
+    try:
+        return fingerprint_fn(workspace, use_cache=True, diagnostics=diagnostics)
+    except TypeError:
+        return fingerprint_fn(workspace)
 
 
 def _production_path(workspace: Path, path: str) -> bool:
@@ -246,12 +262,13 @@ def _previous_verdict(path: Path, fingerprint: dict[str, str], validate_verdict:
 
 
 def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | None, normalize: bool,
-                  risk_override: str | None, output: Path | None, fingerprint_fn: Callable[[Path], dict[str, str]],
-                  validate_verdict: Callable[[Any], list[str]]) -> tuple[int, dict[str, Any]]:
+                  risk_override: str | None, output: Path | None, fingerprint_fn: Callable[..., dict[str, Any]],
+                  validate_verdict: Callable[[Any], list[str]], diagnostics: bool = False) -> tuple[int, dict[str, Any]]:
     workspace = workspace.resolve(strict=False)
     card_text, card = dm.read_card(card_path, workspace)
     review_text = dm.section_body(card_text, "Review")
-    fingerprint = fingerprint_fn(workspace)
+    timings: list[dict[str, Any]] = []
+    fingerprint = _timed(timings, "fingerprint", lambda: _fingerprint(fingerprint_fn, workspace, diagnostics))
     manifest_path = manifest_path or dm.default_manifest_path(workspace, card)
     if not manifest_path.is_absolute():
         manifest_path = workspace / manifest_path
@@ -328,19 +345,19 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
     openspec = workspace / "bin" / "openspec"
     if openspec.is_file() and os.access(openspec, os.X_OK):
         command = [str(openspec), "validate", "--all", "--strict"]
-        ok, detail = _run(workspace, command)
+        ok, detail = _timed(timings, "openspec-validation", lambda: _run(workspace, command))
         _check(checks, "openspec", ok, detail, command)
     else:
         checks.append({"id": "openspec", "status": "skipped", "detail": "strict OpenSpec helper is not available"})
     scoped_paths = sorted(actual)
     base_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904" if fingerprint["head_commit"] == "unborn" else fingerprint["head_commit"]
     command = ["git", "diff-tree", "--check", "--no-commit-id", base_tree, fingerprint["tree_sha"], "--", *scoped_paths]
-    ok, detail = _run(workspace, command)
+    ok, detail = _timed(timings, "scoped-whitespace-check", lambda: _run(workspace, command))
     _check(checks, "diff", ok, detail, command)
     scanner = workspace / "scripts" / "public-surface-scan.py"
     if scanner.is_file():
         command = [sys.executable, str(scanner)]
-        ok, detail = _run(workspace, command)
+        ok, detail = _timed(timings, "public-surface-scan", lambda: _run(workspace, command))
         _check(checks, "public-surface", ok, detail, command)
     else:
         checks.append({"id": "public-surface", "status": "skipped", "detail": "public-surface scanner is not available"})
@@ -372,6 +389,11 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         },
         "checks": checks, "llm_review": {"required": llm_required, "reason": reason},
     }
+    if diagnostics:
+        result["diagnostics"] = {
+            "fingerprint": fingerprint.get("diagnostics", {}),
+            "preflight_timings": timings,
+        }
     schema_errors = validate_with_schema(result, SCHEMA_FILE)
     if schema_errors:
         raise RuntimeError("invalid review preflight result: " + "; ".join(schema_errors))

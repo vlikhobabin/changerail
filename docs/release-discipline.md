@@ -223,6 +223,8 @@ The CI workflow runs:
   strict-lock clean-clone execution and negative lock/wiring fixtures;
 - `scripts/smoke-review-verdict-validation.py`;
 - `scripts/smoke-review-fingerprint.py`;
+- `scripts/smoke-review-fingerprint-benchmark.py`;
+- `scripts/smoke-review-fingerprint-cache.py`;
 - `scripts/smoke-retained-evidence.py`;
 - `scripts/smoke-maintenance-runner.py`;
 - `scripts/smoke-delivery-manifest.py`;

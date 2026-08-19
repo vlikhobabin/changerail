@@ -68,7 +68,9 @@ identity or full memory boundary of an external agent session.
 ### Requirement: Review verdict fingerprint
 ChangeRail MUST provide a deterministic helper command that computes the review
 freshness fingerprint and reviewed tree SHA from git HEAD, status, tracked diff
-and untracked non-ignored file content.
+and untracked non-ignored file content. The helper MUST compute the exact
+reviewed tree from a machine-readable changed path set without a full-index
+refresh when Git can represent the current workspace changes safely.
 
 #### Scenario: Reviewer writes a verdict
 - **WHEN** reviewer runs `bin/changerail-review-verdict fingerprint --workspace .`
@@ -93,6 +95,113 @@ and untracked non-ignored file content.
 - **WHEN** `bin/changerail-review-verdict validate --check-fresh` checks a
   verdict whose `workspace.tree_sha` differs from the current reviewed tree
 - **THEN** validation fails before publish can stage files
+
+#### Scenario: Docs-only payload avoids full-index refresh
+- **WHEN** a large repository has a docs-only working-tree payload and Git
+  reports an exact changed path set
+- **THEN** the helper computes the reviewed tree by applying only that changed
+  path set to a temporary index
+- **AND** it does not run full-repository `git add -A` for the happy path
+
+#### Scenario: Optimized tree matches reference tree for path edge cases
+- **WHEN** the workspace contains additions, modifications, deletions, renames,
+  symlinks, Unicode paths, spaces, literal ` -> ` text or valid non-UTF-8 Linux
+  paths
+- **THEN** the optimized reviewed-tree builder emits the same `tree_sha` and
+  `diff_fingerprint` as the reference full-tree algorithm
+
+#### Scenario: Unsafe path state does not produce approximate freshness
+- **WHEN** Git reports a changed path set that the optimized builder cannot
+  represent exactly
+- **THEN** the helper either uses the reference full-tree algorithm or exits
+  non-zero before emitting freshness data
+
+### Requirement: Review fingerprint cost measurement
+ChangeRail MUST provide public-safe measurement for deterministic review
+fingerprint and review preflight phases without changing the canonical
+freshness values.
+
+#### Scenario: Operator measures review fingerprint phases
+- **WHEN** an operator runs the review fingerprint measurement surface for a
+  workspace
+- **THEN** the result lists separate durations for changed path discovery,
+  reviewed-tree construction, untracked non-ignored content hashing and final
+  fingerprint assembly
+- **AND** the result includes the same `head_commit`, `tree_sha` and
+  `diff_fingerprint` values as the canonical fingerprint command for the same
+  workspace state
+
+#### Scenario: Preflight measurement separates non-fingerprint gates
+- **WHEN** review preflight runs with measurement enabled
+- **THEN** the result lists fingerprint, OpenSpec validation, scoped whitespace
+  check and public-surface scan durations as distinct phases
+- **AND** failed checks continue to fail closed with their existing check ids
+
+### Requirement: Synthetic large-repository fingerprint benchmark
+ChangeRail MUST include focused benchmark coverage for review fingerprint cost
+using synthetic public-safe repositories.
+
+#### Scenario: Benchmark compares docs-only and source payloads
+- **WHEN** the benchmark smoke runs
+- **THEN** it creates a synthetic repository with many generic tracked files
+- **AND** it records docs-only and source-payload timings before deleting the
+  temporary repository
+- **AND** it does not write private consumer paths, raw field-validation logs or
+  generated repository contents to tracked files
+
+#### Scenario: Benchmark threshold is derived from fixture behavior
+- **WHEN** maintainers inspect the benchmark configuration
+- **THEN** the threshold is based on the measured synthetic baseline and fixture
+  size
+- **AND** it does not depend on a specific consumer repository identity
+
+### Requirement: Canonical review fingerprint consumers
+ChangeRail MUST use one canonical review fingerprint implementation for review
+preflight, review verdict freshness validation and publish gate freshness
+checks.
+
+#### Scenario: Review gates observe the same payload identity
+- **WHEN** review preflight, `bin/changerail-review-verdict validate --check-fresh`
+  and the publish gate run against the same workspace state
+- **THEN** they observe identical `head_commit`, `tree_sha` and
+  `diff_fingerprint` values
+- **AND** a mismatch in any of those values continues to fail publish before
+  staging
+
+#### Scenario: Canonical implementation changes
+- **WHEN** the review fingerprint implementation is updated
+- **THEN** review preflight, verdict validation and publish freshness checks use
+  the updated implementation without maintaining divergent freshness logic
+
+### Requirement: Validated review fingerprint cache
+ChangeRail MUST validate ignored runtime review fingerprint cache entries before
+reuse. It MAY reuse them only when cheap current workspace checks prove the
+cache binds the exact current payload, and MUST fail closed or recompute before
+emitting freshness values when that proof is unavailable.
+
+#### Scenario: Repeated unchanged preflight reuses cache
+- **WHEN** review preflight runs twice for an unchanged workspace
+- **THEN** the second run may reuse a cache entry whose HEAD and changed path
+  metadata match the current workspace
+- **AND** the reused result includes the same reviewed `tree_sha` and
+  `diff_fingerprint` as a full canonical recomputation
+
+#### Scenario: Workspace change invalidates cache
+- **WHEN** tracked content, tracked path state, untracked non-ignored content or
+  Git exclude behavior changes after a cache entry is written
+- **THEN** the next freshness check recomputes the canonical fingerprint before
+  emitting `tree_sha` or `diff_fingerprint`
+
+#### Scenario: Cache remains ignored runtime state
+- **WHEN** cache entries are written
+- **THEN** they live under ignored `.runtime/changerail/` state
+- **AND** tracked cards, manifests, specs and docs do not store cache payloads
+
+#### Scenario: Malformed cache fails closed
+- **WHEN** a cache entry is unreadable, malformed or missing required freshness
+  fields
+- **THEN** the helper ignores it or exits non-zero
+- **AND** it does not emit approximate freshness data from the malformed entry
 
 ### Requirement: Delivery manifest file operations
 Delivery manifests MUST represent card-owned file operations well enough for

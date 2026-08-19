@@ -180,6 +180,65 @@
         "required": {"type": "boolean"},
         "reason": {"type": "string", "minLength": 1}
       }
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": ["fingerprint", "preflight_timings"],
+      "additionalProperties": false,
+      "properties": {
+        "fingerprint": {
+          "type": "object",
+          "required": ["cache", "tree_builder", "timings"],
+          "additionalProperties": false,
+          "properties": {
+            "cache": {
+              "type": "object",
+              "required": ["schema", "status", "path"],
+              "additionalProperties": false,
+              "properties": {
+                "schema": {"const": "changerail.review-fingerprint-cache.v1"},
+                "status": {"enum": ["disabled", "miss", "stale", "malformed", "hit", "write-failed"]},
+                "path": {"type": "string", "minLength": 1}
+              }
+            },
+            "tree_builder": {
+              "type": "object",
+              "required": ["mode", "changed_path_count", "full_index_refresh"],
+              "additionalProperties": false,
+              "properties": {
+                "mode": {"enum": ["optimized", "reference", "fallback", "cache"]},
+                "changed_path_count": {"type": ["integer", "null"], "minimum": 0},
+                "full_index_refresh": {"type": "boolean"},
+                "reason": {"type": "string"}
+              }
+            },
+            "timings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["phase", "duration_ms"],
+                "additionalProperties": false,
+                "properties": {
+                  "phase": {"type": "string", "minLength": 1},
+                  "duration_ms": {"type": "number", "minimum": 0}
+                }
+              }
+            }
+          }
+        },
+        "preflight_timings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["phase", "duration_ms"],
+            "additionalProperties": false,
+            "properties": {
+              "phase": {"type": "string", "minLength": 1},
+              "duration_ms": {"type": "number", "minimum": 0}
+            }
+          }
+        }
+      }
     }
   }
 }

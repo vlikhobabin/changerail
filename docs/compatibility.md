@@ -225,6 +225,8 @@ python3 scripts/smoke-delivery-runner.py
 python3 scripts/smoke-delivery-metrics.py
 python3 scripts/smoke-review-verdict-validation.py
 python3 scripts/smoke-review-fingerprint.py
+python3 scripts/smoke-review-fingerprint-benchmark.py
+python3 scripts/smoke-review-fingerprint-cache.py
 python3 scripts/smoke-review-preflight.py
 python3 scripts/smoke-contract-schemas.py
 python3 scripts/smoke-maintenance-runner.py

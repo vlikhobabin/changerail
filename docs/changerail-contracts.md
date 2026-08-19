@@ -95,6 +95,13 @@ budget. `machine-reviewed` является payload gate для явно determi
 scope без added production code; `ready-for-llm-review` выбирает `high` для
 ordinary или `xhigh` для critical review.
 
+С флагом `--diagnostics` preflight добавляет public-safe timing breakdown:
+fingerprint, OpenSpec validation, scoped whitespace check и public-surface scan.
+Fingerprint diagnostics отдельно показывают changed-path discovery,
+reviewed-tree construction, untracked content hashing, final assembly, cache
+hit/miss и выбранный tree-builder mode. Эти данные не раскрывают raw repository
+content и не меняют canonical freshness values.
+
 Default complexity guard останавливает payload больше 300 production LOC и
 новый authority/wire protocol. Bounded exception требует, чтобы successor
 содержал только reference:
@@ -126,16 +133,16 @@ Review verdict является runtime-файлом:
 - имеет `result: go`;
 - содержит `reviewer.independence` attestation с `fresh_context: true`,
   `did_not_plan_or_implement: true` и непустым `basis`;
-- fresh относительно текущего `HEAD`, `git status --porcelain`,
-  `git diff HEAD --no-color` и содержимого untracked non-ignored файлов,
-  перечисленных через `git ls-files --others --exclude-standard`;
+- fresh относительно текущего `HEAD`, NUL-delimited Git status, tracked diff и
+  содержимого untracked non-ignored файлов, перечисленных через
+  `git ls-files --others --exclude-standard`;
 - содержит `workspace.tree_sha` — Git tree SHA reviewed payload, который publish
   обязан сверить с tree создаваемого commit до stage/commit.
 
 Helper:
 
 ```bash
-bin/changerail-review-verdict fingerprint --workspace .
+bin/changerail-review-verdict fingerprint --workspace . --diagnostics
 bin/changerail-review-verdict validate \
   ".runtime/changerail/reviews/<card-id>.json" --check-fresh --workspace . --json
 ```
@@ -157,6 +164,15 @@ Exit codes: `0` valid, `1` validation failed, `2` input error.
 Ignored paths не входят в freshness fingerprint. Поэтому запись verdict под
 `.runtime/changerail/reviews/` не инвалидирует сам verdict, но изменение содержимого
 нового untracked deliverable-файла делает verdict stale и меняет reviewed tree.
+
+Reviewed tree строится из `HEAD` плюс machine-readable changed-path set через
+path-scoped temporary index, когда Git может представить текущие изменения
+точно. Full-tree `git add -A` остается internal reference/fallback для unsafe
+states и parity tests. Валидация verdict, deterministic preflight и publish
+freshness используют одну canonical fingerprint implementation; ignored cache
+under `.runtime/changerail/review-fingerprint-cache/` может переиспользоваться
+только после проверки текущего `HEAD`, changed-path metadata, file content/mode
+metadata и Git exclude-visible state.
 
 Для unborn repository helper пишет `workspace.head_commit: "unborn"` и всё равно
 вычисляет `workspace.tree_sha` через temporary Git index. Это позволяет review
