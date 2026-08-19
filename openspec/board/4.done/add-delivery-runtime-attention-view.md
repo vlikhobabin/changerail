@@ -1,13 +1,13 @@
 # Добавить read-only представление текущего delivery-состояния
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -76,14 +76,21 @@ records.
 - `add-delivery-runtime-attention-view`
 
 ## Verify
+- GREEN: `python3 -m py_compile bin/changerail-delivery-runner
+  scripts/smoke-delivery-runner.py`
+- GREEN: `python3 scripts/smoke-delivery-runner.py`
 - GREEN: `./bin/openspec validate add-delivery-runtime-attention-view --strict`
-- GREEN: `./bin/openspec validate --all --strict` -> 27/27 passed.
+  before archive.
+- GREEN: `./bin/openspec validate --all --strict` -> 23/23 passed after
+  archive.
 - GREEN: `git diff --check`
 - GREEN: untracked-file trailing-whitespace scan over `git ls-files --others
-  --exclude-standard`
+  --exclude-standard` -> 0 untracked paths.
+- GREEN: `python3 scripts/public-surface-scan.py` -> 1086 files scanned, 0
+  findings.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-add-delivery-runtime-attention-view/`
 
 ## Related
 - `AGENTS.shared.md`
@@ -94,17 +101,17 @@ records.
 - `schemas/changerail-delivery-run.schema.json`
 - `schemas/changerail-delivery-plan-status.schema.json`
 - `schemas/changerail-delivery-manifest.schema.json`
-- `openspec/board/2.todo/support-runner-resume-after-investigation-required.md`
-- `openspec/changes/add-delivery-runtime-attention-view/`
+- `openspec/board/4.done/support-runner-resume-after-investigation-required.md`
+- `openspec/changes/archive/2026-08-19-add-delivery-runtime-attention-view/`
 
 ## Result
-OpenSpec artifacts ready; implementation not started.
+Implemented read-only single-card delivery status reader, docs, synced spec and
+smoke coverage.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- После delivery карточки
-  `openspec/board/2.todo/support-runner-resume-after-investigation-required.md`
-  запустить
-  `$changerail-do openspec/board/2.todo/add-delivery-runtime-attention-view.md`.
+- done
 
 ## Triage Decision
 - Move to `2.todo`: capability отсутствует и подтвердила ценность в реальном
@@ -171,3 +178,7 @@ verdict and evidence paths without mutating runtime state.
   single-card status/attention change and moved the card to `2.todo`.
 - 2026-08-19T15:33:57Z OpenSpec validation and whitespace checks passed for
   generated artifacts and card metadata.
+- 2026-08-19T19:24:55Z implemented `bin/changerail-delivery-runner status`,
+  updated docs and smoke coverage, synced `changerail-delivery-runner` spec and
+  archived `add-delivery-runtime-attention-view`; verification passed.
+- 2026-08-19T19:48:22Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

@@ -827,7 +827,25 @@ bin/changerail-delivery-runner run openspec/board/3.inprogress/example.md \
   --model gpt-5 --reasoning-effort medium
 bin/changerail-delivery-runner resume \
   --status-path .runtime/changerail/delivery-runs/<run-id>/status.json
+bin/changerail-delivery-runner status \
+  .runtime/changerail/delivery-runs/<run-id>/status.json
+bin/changerail-delivery-runner status --run-id <run-id> --json
 ```
+
+Single-card `status` является read-only reader-ом для existing
+`changerail.delivery-run.v1` records. Selector может быть explicit
+`status.json`, `--run-id` внутри effective runtime root или latest status under
+`<workspace>/.runtime/changerail/delivery-runs/`. Одновременные selectors,
+missing/corrupt/schema-invalid или unsupported status records fail-closed и не
+fallback-ят на другой run. Human output показывает compact attention fields:
+card, run id, phase, result, `updated_at`, optional `terminal_reason`,
+selected status path и canonical related runtime paths для manifest, review
+verdict, review history и evidence index. Existing linked artifacts
+валидируются по tracked schemas before trust; invalid manifest/verdict/history
+или evidence index дает non-zero diagnostic вместо guessed guidance. Если
+valid manifest содержит `runtime_pause_reasons`, reader печатает только stored
+`summary` и `next_action` values. `--json` возвращает validated source
+`changerail.delivery-run.v1` record без unschematized wrapper.
 
 Runner запускает `codex exec` через настроенный launcher, закрывает stdin
 child-процесса, выполняет child в effective workspace и экспортирует

@@ -815,6 +815,189 @@ def load_status(runtime_root: Path, run_id: str) -> dict[str, Any]:
     return json.loads((runtime_root / run_id / "status.json").read_text(encoding="utf-8"))
 
 
+def single_card_status_payload(
+    workspace: Path,
+    run_id: str,
+    *,
+    card: str = CARD,
+    result: str = "BLOCKED",
+    phase: str = "terminal",
+    terminal_reason: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "schema": "changerail.delivery-run.v1",
+        "run_id": run_id,
+        "updated_at": "2026-07-15T00:00:00Z",
+        "workspace": {
+            "root": str(workspace),
+            "repository": workspace.name,
+        },
+        "card": {
+            "id": Path(card).name.removesuffix(".md"),
+            "path": card,
+        },
+        "phase": phase,
+        "result": result,
+        "timestamps": {
+            "started_at": "2026-07-15T00:00:00Z",
+        },
+        "command": {
+            "argv": [],
+            "launcher": str(RUNNER),
+            "stdin": "closed",
+            "json": True,
+        },
+        "usage": {
+            "available": False,
+            "reason": "smoke fixture",
+        },
+    }
+    if phase == "terminal":
+        payload["timestamps"]["ended_at"] = "2026-07-15T00:00:01Z"
+        payload["terminal_outcome"] = result
+    if terminal_reason:
+        payload["terminal_reason"] = terminal_reason
+    return payload
+
+
+def single_card_manifest_payload(workspace: Path, card: str = CARD) -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-manifest.v1",
+        "updated_at": "2026-07-15T00:00:00Z",
+        "workspace": {
+            "root": str(workspace),
+            "repository": workspace.name,
+        },
+        "card": {
+            "id": Path(card).name.removesuffix(".md"),
+            "path": card,
+        },
+        "changes": [
+            {
+                "slug": "harden-delivery-operations",
+                "state": "archived",
+                "order": 1,
+            }
+        ],
+        "committable_paths": [],
+        "excluded_runtime_paths": [],
+        "preexisting_dirty": [],
+        "runtime_pause_reasons": [
+            {
+                "id": "pause-1",
+                "category": "safety_pause",
+                "summary": "smoke pause summary",
+                "next_action": "$changerail-deliver openspec/board/3.inprogress/harden-delivery-operations.md",
+            }
+        ],
+    }
+
+
+def single_card_verdict_payload(workspace: Path, card: str = CARD) -> dict[str, Any]:
+    return {
+        "schema": "changerail.review-verdict.v1",
+        "reviewed_at": "2026-07-15T00:00:00Z",
+        "card": {
+            "id": Path(card).name.removesuffix(".md"),
+            "path": card,
+        },
+        "workspace": {
+            "root": str(workspace),
+            "head_commit": "1" * 40,
+            "tree_sha": "2" * 40,
+            "diff_fingerprint": "sha256:" + "3" * 64,
+        },
+        "reviewer": {
+            "kind": "codex-exec",
+            "independence": {
+                "fresh_context": True,
+                "did_not_plan_or_implement": True,
+                "basis": "fresh smoke-test reviewer context",
+            },
+        },
+        "result": "no-go",
+        "review_cycle": 1,
+        "acceptance": [
+            {
+                "criterion": "status reader smoke",
+                "verdict": "fail",
+                "evidence": "smoke fixture",
+            }
+        ],
+        "findings": [
+            {
+                "id": "R1",
+                "severity": "blocker",
+                "area": "process",
+                "summary": "smoke no-go diagnostic",
+            }
+        ],
+    }
+
+
+def single_card_history_payload(workspace: Path, card: str = CARD) -> dict[str, Any]:
+    card_id = Path(card).name.removesuffix(".md")
+    return {
+        "schema": "changerail.review-cycle-history.v1",
+        "updated_at": "2026-07-15T00:00:00Z",
+        "card": {
+            "id": card_id,
+            "path": card,
+        },
+        "workspace": {
+            "root": str(workspace),
+            "head_commit": "1" * 40,
+        },
+        "cycles": [
+            {
+                "review_cycle": 1,
+                "same_card_rescue_attempt": 0,
+                "result": "no-go",
+                "reviewed_at": "2026-07-15T00:00:00Z",
+                "verdict_path": f".runtime/changerail/reviews/{card_id}.json",
+                "findings": {
+                    "blocker": 1,
+                    "major": 0,
+                    "minor": 0,
+                },
+                "finding_details": [
+                    {
+                        "id": "R1",
+                        "severity": "blocker",
+                        "summary": "smoke no-go diagnostic",
+                    }
+                ],
+                "acceptance": {
+                    "pass": 0,
+                    "fail": 1,
+                    "unverifiable": 0,
+                    "not_applicable": 0,
+                },
+            }
+        ],
+    }
+
+
+def single_card_evidence_payload(workspace: Path, card: str = CARD) -> dict[str, Any]:
+    return {
+        "schema": "changerail.evidence-index.v1",
+        "updated_at": "2026-07-15T00:00:00Z",
+        "workspace": {
+            "root": str(workspace),
+            "repository": workspace.name,
+        },
+        "scope": {
+            "card_id": Path(card).name.removesuffix(".md"),
+            "card_path": card,
+        },
+        "entries": [],
+    }
+
+
+def file_digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def write_board_card(workspace: Path, card: str) -> None:
     path = workspace / card
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1154,6 +1337,127 @@ def assert_one_command_success(workspace: Path, runtime: Path, run_id: str, base
             raise AssertionError(f"final card contains mutable publish metadata: {forbidden}")
     if status.get("performance", {}).get("publish", {}).get("pushed_at") != "2026-08-01T00:00:00Z":
         raise AssertionError(f"runner status did not summarize publish timing: {status.get('performance')}")
+
+
+def check_single_card_status_reader(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "single-card-status-workspace")
+    runtime = tmp / "single-card-status-runtime"
+    card_id = Path(CARD).name.removesuffix(".md")
+    status_path = runtime / "status-blocked" / "status.json"
+    no_go_path = runtime / "status-no-go" / "status.json"
+    older_path = runtime / "status-old" / "status.json"
+    corrupt_path = runtime / "status-corrupt" / "status.json"
+    unsupported_path = runtime / "status-unsupported" / "status.json"
+
+    status_payload = single_card_status_payload(
+        workspace,
+        "status-blocked",
+        terminal_reason="fix_budget_exhausted",
+    )
+    write_json(status_path, status_payload)
+    write_json(no_go_path, single_card_status_payload(workspace, "status-no-go", result="NO-GO"))
+    write_json(older_path, single_card_status_payload(workspace, "status-old", result="DELIVERED"))
+    corrupt_path.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_path.write_text("{not json\n", encoding="utf-8")
+    unsupported = single_card_status_payload(workspace, "status-unsupported")
+    unsupported["schema"] = "changerail.unsupported.v1"
+    write_json(unsupported_path, unsupported)
+
+    manifest_path = workspace / ".runtime" / "changerail" / "delivery-manifests" / f"{card_id}.json"
+    verdict_path = workspace / ".runtime" / "changerail" / "reviews" / f"{card_id}.json"
+    history_path = workspace / ".runtime" / "changerail" / "reviews" / f"{card_id}.history.json"
+    evidence_path = workspace / ".runtime" / "changerail" / "evidence" / card_id / "index.json"
+    write_json(manifest_path, single_card_manifest_payload(workspace))
+    write_json(verdict_path, single_card_verdict_payload(workspace))
+    write_json(history_path, single_card_history_payload(workspace))
+    write_json(evidence_path, single_card_evidence_payload(workspace))
+
+    before = {path: file_digest(path) for path in (status_path, manifest_path, verdict_path, history_path, evidence_path)}
+    explicit = run([str(RUNNER), "status", str(status_path), "--workspace", str(workspace)])
+    require_ok(explicit, "single-card status explicit path")
+    for expected in (
+        f"card: {CARD}",
+        "run_id: status-blocked",
+        "phase: terminal",
+        "result: BLOCKED",
+        "terminal_reason: fix_budget_exhausted",
+        f"manifest: .runtime/changerail/delivery-manifests/{card_id}.json",
+        f"review_verdict: .runtime/changerail/reviews/{card_id}.json",
+        f"review_history: .runtime/changerail/reviews/{card_id}.history.json",
+        f"evidence: .runtime/changerail/evidence/{card_id}/index.json",
+        "pause_reason[1].summary: smoke pause summary",
+        f"pause_reason[1].next_action: $changerail-deliver {CARD}",
+    ):
+        if expected not in explicit.stdout:
+            raise AssertionError(f"single-card status output missing {expected!r}: {explicit.stdout}")
+    after = {path: file_digest(path) for path in before}
+    if before != after:
+        raise AssertionError("single-card status reader modified source or linked runtime artifacts")
+
+    by_run_id = run(
+        [
+            str(RUNNER),
+            "status",
+            "--run-id",
+            "status-blocked",
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--json",
+        ]
+    )
+    require_ok(by_run_id, "single-card status by run id")
+    if json.loads(by_run_id.stdout) != status_payload:
+        raise AssertionError(f"--json did not return the source delivery-run record: {by_run_id.stdout}")
+
+    os.utime(older_path, (1_000, 1_000))
+    os.utime(no_go_path, (2_000, 2_000))
+    os.utime(status_path, (3_000, 3_000))
+    os.utime(corrupt_path, (500, 500))
+    os.utime(unsupported_path, (500, 500))
+    latest = run([str(RUNNER), "status", "--workspace", str(workspace), "--runtime-root", str(runtime)])
+    require_ok(latest, "single-card status latest")
+    if "run_id: status-blocked" not in latest.stdout:
+        raise AssertionError(f"latest status did not pick the newest status record: {latest.stdout}")
+
+    no_go = run([str(RUNNER), "status", str(no_go_path), "--workspace", str(workspace)])
+    require_ok(no_go, "single-card status no-go")
+    if "result: NO-GO" not in no_go.stdout:
+        raise AssertionError(f"NO-GO status diagnostic missing: {no_go.stdout}")
+
+    conflict = run(
+        [
+            str(RUNNER),
+            "status",
+            str(status_path),
+            "--run-id",
+            "status-blocked",
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+        ]
+    )
+    if conflict.returncode == 0 or "conflicting status selectors" not in conflict.stderr:
+        raise AssertionError(f"conflicting status selectors did not fail closed: {conflict.stdout} {conflict.stderr}")
+
+    corrupt = run([str(RUNNER), "status", str(corrupt_path), "--workspace", str(workspace)])
+    if corrupt.returncode == 0 or "delivery-run status is invalid" not in corrupt.stderr:
+        raise AssertionError(f"corrupt explicit status did not fail closed: {corrupt.stdout} {corrupt.stderr}")
+
+    unsupported_result = run([str(RUNNER), "status", str(unsupported_path), "--workspace", str(workspace)])
+    if unsupported_result.returncode == 0 or "delivery-run status is invalid" not in unsupported_result.stderr:
+        raise AssertionError(
+            f"unsupported explicit status did not fail closed: {unsupported_result.stdout} {unsupported_result.stderr}"
+        )
+
+    invalid_manifest = single_card_manifest_payload(workspace)
+    invalid_manifest["schema"] = "changerail.invalid-manifest.v1"
+    write_json(manifest_path, invalid_manifest)
+    linked = run([str(RUNNER), "status", str(status_path), "--workspace", str(workspace)])
+    if linked.returncode == 0 or f"manifest: .runtime/changerail/delivery-manifests/{card_id}.json (invalid:" not in linked.stdout:
+        raise AssertionError(f"invalid linked manifest was trusted: {linked.stdout} {linked.stderr}")
 
 
 def check_one_command_delivery_success(tmp: Path) -> None:
@@ -4042,6 +4346,7 @@ def check_queue_no_push_requires_ahead(tmp: Path) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-delivery-runner-") as tmp:
         workspace = Path(tmp)
+        check_single_card_status_reader(workspace)
         check_one_command_delivery_success(workspace)
         check_one_command_delivery_resume_after_preflight(workspace)
         check_one_command_delivery_stale_verdict_blocks(workspace)

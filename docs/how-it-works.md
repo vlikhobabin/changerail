@@ -127,6 +127,25 @@ tracked `/opt/changerail/bin/codex`; consumer repository не обязан им�
 tracked `bin/codex`, если оператор запускает ChangeRail runner извне или явно
 передает supported launcher через `--launcher`.
 
+Single-card состояние читается read-only командой `status`:
+
+```bash
+bin/changerail-delivery-runner status \
+  .runtime/changerail/delivery-runs/<run-id>/status.json
+bin/changerail-delivery-runner status --run-id <run-id>
+bin/changerail-delivery-runner status --json
+```
+
+Она валидирует selected `changerail.delivery-run.v1` record, fail-closed
+отклоняет missing/corrupt/unsupported input и в human output показывает card,
+phase, result, `updated_at`, `terminal_reason`, selected status path и
+canonical paths к manifest, review verdict/history и evidence index, если они
+однозначно выводятся из card/workspace. Manifest `runtime_pause_reasons`
+показываются только из structured `summary`/`next_action`; команда не выводит
+guidance из raw stdout/stderr, process tree или session prose. `--json`
+возвращает исходный schema-valid delivery-run record без отдельного view
+wrapper.
+
 Для dependency-ordered очередей через несколько независимых workspaces runner
 поддерживает отдельный JSON plan contract и plan-oriented команды:
 
@@ -145,6 +164,10 @@ bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /o
 bin/changerail-delivery-runner status-plan \
   /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json --json
 ```
+
+`status` читает одну карточку и ее single-card runtime artifacts;
+`status-plan` читает aggregate queue status
+`changerail.delivery-plan-status.v1` и references на child delivery runs.
 
 Plan-файл использует `changerail.delivery-plan.v1`: workspace aliases,
 consumer-root-relative paths, card ids, dependencies, waves и concurrency

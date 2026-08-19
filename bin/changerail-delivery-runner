@@ -3171,6 +3171,173 @@ def command_status_plan(args: argparse.Namespace) -> int:
     return 0 if data.get("result") != "BLOCKED" else 1
 
 
+def safe_status_segment(value: str, label: str) -> tuple[str | None, str | None]:
+    if not value:
+        return None, f"{label} is empty"
+    if value in {".", ".."} or "/" in value or "\\" in value:
+        return None, f"{label} must be a single path segment"
+    return value, None
+
+
+def status_reader_error(args: argparse.Namespace, message: str, errors: list[str] | None = None) -> int:
+    details = errors or [message]
+    if getattr(args, "json", False):
+        print(
+            json.dumps({"result": "BLOCKED", "errors": details}, ensure_ascii=False, indent=2, sort_keys=True),
+            file=sys.stderr,
+        )
+    else:
+        print(f"status failed: {message}", file=sys.stderr)
+        for detail in details:
+            if detail != message:
+                print(f"- {detail}", file=sys.stderr)
+    return 1
+
+
+def select_delivery_status_path(args: argparse.Namespace) -> tuple[Path | None, list[str]]:
+    selectors = []
+    if args.status_path is not None:
+        selectors.append("status path")
+    if args.run_id is not None:
+        selectors.append("--run-id")
+    if len(selectors) > 1:
+        return None, ["conflicting status selectors: " + ", ".join(selectors)]
+    if args.status_path is not None:
+        return args.status_path, []
+    if args.run_id is not None:
+        run_id, error = safe_status_segment(args.run_id, "run id")
+        if error:
+            return None, [error]
+        assert run_id is not None
+        return args.runtime_root / run_id / "status.json", []
+    if not args.runtime_root.is_dir():
+        return None, [f"delivery-run runtime root does not exist: {args.runtime_root}"]
+    candidates: list[Path] = []
+    for child in args.runtime_root.iterdir():
+        status = child / "status.json"
+        if status.is_file():
+            candidates.append(status)
+    if not candidates:
+        return None, [f"no delivery-run status records under {args.runtime_root}"]
+    candidates.sort(key=lambda path: (path.stat().st_mtime_ns, path.as_posix()), reverse=True)
+    return candidates[0], []
+
+
+def load_valid_json_record(path: Path, schema_filename: str, label: str) -> tuple[dict[str, Any] | None, list[str]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return None, [f"{label} cannot be read: {exc}"]
+    except json.JSONDecodeError as exc:
+        return None, [f"{label} JSON is invalid: {exc}"]
+    if not isinstance(payload, dict):
+        return None, [f"{label} must be a JSON object"]
+    errors = schema_errors(payload, schema_filename)
+    return (payload if not errors else None), errors
+
+
+def status_record_workspace(args: argparse.Namespace, record: dict[str, Any]) -> Path:
+    workspace = record.get("workspace")
+    if isinstance(workspace, dict):
+        root = workspace.get("root")
+        if isinstance(root, str) and root:
+            return Path(root).expanduser().resolve(strict=False)
+    return args.workspace.resolve(strict=False)
+
+
+def status_record_card_id(record: dict[str, Any]) -> tuple[str | None, str | None]:
+    card = record.get("card")
+    if not isinstance(card, dict):
+        return None, "status card metadata is missing"
+    raw = card.get("id")
+    if not isinstance(raw, str) or not raw:
+        return None, "status card id is missing"
+    return safe_status_segment(raw, "card id")
+
+
+def linked_attention_artifacts(root: Path, record: dict[str, Any]) -> tuple[list[tuple[str, Path, str]], str | None]:
+    status_card_id, error = status_record_card_id(record)
+    if error:
+        return [], error
+    assert status_card_id is not None
+    return [
+        (
+            "manifest",
+            root / ".runtime" / "changerail" / "delivery-manifests" / f"{status_card_id}.json",
+            "changerail-delivery-manifest.schema.json",
+        ),
+        (
+            "review_verdict",
+            root / ".runtime" / "changerail" / "reviews" / f"{status_card_id}.json",
+            "changerail-review-verdict.schema.json",
+        ),
+        (
+            "review_history",
+            root / ".runtime" / "changerail" / "reviews" / f"{status_card_id}.history.json",
+            "changerail-review-cycle-history.schema.json",
+        ),
+        (
+            "evidence",
+            root / ".runtime" / "changerail" / "evidence" / status_card_id / "index.json",
+            "changerail-evidence-index.schema.json",
+        ),
+    ], None
+
+
+def command_status(args: argparse.Namespace) -> int:
+    selected, selection_errors = select_delivery_status_path(args)
+    if selected is None:
+        return status_reader_error(args, selection_errors[0], selection_errors)
+    record, errors = load_valid_json_record(selected, "changerail-delivery-run.schema.json", "delivery-run status")
+    if record is None:
+        return status_reader_error(args, "delivery-run status is invalid", errors)
+    if args.json:
+        print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    root = status_record_workspace(args, record)
+    card = record.get("card", {}) if isinstance(record.get("card"), dict) else {}
+    print(f"card: {card.get('path', 'unknown')}")
+    print(f"run_id: {record.get('run_id')}")
+    print(f"phase: {record.get('phase')}")
+    print(f"result: {record.get('result')}")
+    print(f"updated_at: {record.get('updated_at')}")
+    if record.get("terminal_reason"):
+        print(f"terminal_reason: {record.get('terminal_reason')}")
+    print(f"status: {repository_relative(selected, root)}")
+
+    artifacts, artifact_error = linked_attention_artifacts(root, record)
+    if artifact_error:
+        print(f"runtime_artifacts: invalid ({artifact_error})")
+        return 1
+
+    manifest: dict[str, Any] | None = None
+    linked_errors: list[str] = []
+    for label, path, schema_filename in artifacts:
+        relative = repository_relative(path, root)
+        if not path.exists():
+            print(f"{label}: {relative} (missing)")
+            continue
+        payload, artifact_errors = load_valid_json_record(path, schema_filename, label)
+        if artifact_errors:
+            linked_errors.append(f"{label}: {'; '.join(artifact_errors)}")
+            print(f"{label}: {relative} (invalid: {artifact_errors[0]})")
+            continue
+        print(f"{label}: {relative}")
+        if label == "manifest":
+            manifest = payload
+
+    pause_reasons = manifest.get("runtime_pause_reasons") if isinstance(manifest, dict) else None
+    if isinstance(pause_reasons, list):
+        for index, reason in enumerate(pause_reasons, start=1):
+            if not isinstance(reason, dict):
+                continue
+            print(f"pause_reason[{index}].summary: {reason.get('summary')}")
+            print(f"pause_reason[{index}].next_action: {reason.get('next_action')}")
+
+    return 1 if linked_errors else 0
+
+
 def add_common(parser: argparse.ArgumentParser) -> None:
     root = repo_root_from_script()
     parser.add_argument("card", help="single repository-relative board card path")
@@ -3240,6 +3407,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     resume.set_defaults(func=command_resume)
 
+    status = subparsers.add_parser("status", help="read single-card delivery status")
+    status.add_argument("status_path", nargs="?", type=Path, help="delivery-run status.json path")
+    status.add_argument("--workspace", type=Path)
+    status.add_argument("--runtime-root", type=Path)
+    status.add_argument("--run-id")
+    status.add_argument("--json", action="store_true")
+    status.set_defaults(func=command_status)
+
     plan = subparsers.add_parser("plan", help="resolve a delivery plan without launching children")
     add_plan_common(plan)
     plan.set_defaults(func=command_plan)
@@ -3305,6 +3480,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         else:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
         args.launcher = resolve_path(args.launcher)
+    elif args.command == "status":
+        args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
+        if args.runtime_root:
+            args.runtime_root = resolve_path(args.runtime_root, args.workspace)
+        else:
+            args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
+        if args.status_path is not None:
+            args.status_path = resolve_path(args.status_path, args.workspace)
     else:
         args.consumer_root = resolve_path(args.consumer_root) if getattr(args, "consumer_root", None) else invocation_workspace()
         if hasattr(args, "status_path") and args.status_path:
