@@ -1,13 +1,13 @@
 # Добавить read-only представление текущего delivery-состояния
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail maintainer
 
 ## OpenSpec Stage
-story
+artifacts
 
 ## Series
 - none
@@ -73,10 +73,14 @@ records.
   возрасту или отсутствию PID.
 
 ## Change Set
-- none yet
+- `add-delivery-runtime-attention-view`
 
 ## Verify
-- not started
+- GREEN: `./bin/openspec validate add-delivery-runtime-attention-view --strict`
+- GREEN: `./bin/openspec validate --all --strict` -> 27/27 passed.
+- GREEN: `git diff --check`
+- GREEN: untracked-file trailing-whitespace scan over `git ls-files --others
+  --exclude-standard`
 
 ## Archive
 - not started
@@ -90,25 +94,72 @@ records.
 - `schemas/changerail-delivery-run.schema.json`
 - `schemas/changerail-delivery-plan-status.schema.json`
 - `schemas/changerail-delivery-manifest.schema.json`
+- `openspec/board/2.todo/support-runner-resume-after-investigation-required.md`
+- `openspec/changes/add-delivery-runtime-attention-view/`
 
 ## Result
-not started
+OpenSpec artifacts ready; implementation not started.
 
 ## Next
-- Выполнять после `support-runner-resume-after-investigation-required`.
-- Перед реализацией запустить `$chrl-ff` и выбрать минимальный read-only
-  single-card CLI без нового runtime writer.
+- После delivery карточки
+  `openspec/board/2.todo/support-runner-resume-after-investigation-required.md`
+  запустить
+  `$changerail-do openspec/board/2.todo/add-delivery-runtime-attention-view.md`.
 
 ## Triage Decision
-- Keep в `1.backlog`: capability отсутствует и подтвердила ценность в реальном
-  длительном package-runner delivery.
+- Move to `2.todo`: capability отсутствует и подтвердила ценность в реальном
+  длительном package-runner delivery, а OpenSpec artifacts теперь apply-ready.
 - Priority: medium. Сначала закрыть невозможность resume после
   `investigation_required`, затем улучшать operator visibility.
 
-## Change Plan Notes
-Перед переводом в `2.todo` выбрать минимальную CLI-форму и проверить, можно ли
-полностью переиспользовать существующие status/manifest schemas. Предпочтение
-следует отдать одному read-only change без нового runtime writer или daemon.
+## Change 1: `add-delivery-runtime-attention-view`
+
+### Why
+Single-card delivery status already exists as schema-backed ignored runtime
+records, but operators lack one compact read-only command to inspect a current
+or blocked card without process-tree checks or ad hoc runtime path lookup.
+
+### Goal
+Add a minimal single-card `bin/changerail-delivery-runner status` command that
+validates an existing `changerail.delivery-run.v1` record, prints compact
+human-readable attention fields and surfaces canonical related manifest,
+verdict and evidence paths without mutating runtime state.
+
+### Scope
+- Add single-card `status` CLI selection by explicit `status.json`, `--run-id`
+  or latest record in the effective workspace runtime root.
+- Validate selected delivery-run status before display and fail closed for
+  missing, corrupt, schema-invalid or unsupported inputs.
+- Derive canonical related delivery manifest, review verdict, review history
+  and retained evidence paths from the validated status/card/workspace.
+- Render manifest `runtime_pause_reasons[].summary` and
+  `runtime_pause_reasons[].next_action` only from validated manifest structure.
+- Keep `status-plan` as the aggregate queue reader and defer any common reader
+  schema until a machine consumer needs it.
+- Update docs and focused runner smoke coverage.
+
+### Acceptance
+- Explicit status path, `--run-id` and latest workspace selection read the
+  intended single-card `changerail.delivery-run.v1` record.
+- Invalid selected status records fail closed without fallback to another run.
+- Human output shows card, phase, result, `updated_at`, `terminal_reason`,
+  selected status path and unambiguous related runtime paths.
+- Existing manifest pause `summary` and `next_action` values are shown without
+  deriving guidance from raw logs, process state or free-text agent sessions.
+- `--json` returns the schema-valid source status record and does not introduce
+  an unschematized machine view.
+- Status inspection is read-only for board files, locks, manifests, verdicts,
+  evidence indexes, logs and status records.
+- Focused smoke covers success, latest or run-id selection, blocked/no-go
+  diagnostics, manifest pause reasons, invalid input and read-only behavior.
+
+### Depends On
+- `record-investigation-required-payload-identity`
+- `resume-investigation-required-single-card`
+- `support-investigation-required-queue-recovery`
+
+### Related
+- `openspec/changes/add-delivery-runtime-attention-view/`
 
 ## Log
 - 2026-08-12T09:30:49Z карточка создана по итогам сравнения ChangeRail с Orca;
@@ -116,3 +167,7 @@ not started
 - 2026-08-19T14:05:00Z triage подтвердил актуальность: `status-plan` покрывает
   aggregate plan, но отдельного schema-valid single-card reader нет; карточка
   оставлена в backlog после runner resume fix.
+- 2026-08-19T15:32:59Z `$chrl-ff` decomposed the story into one read-only
+  single-card status/attention change and moved the card to `2.todo`.
+- 2026-08-19T15:33:57Z OpenSpec validation and whitespace checks passed for
+  generated artifacts and card metadata.
