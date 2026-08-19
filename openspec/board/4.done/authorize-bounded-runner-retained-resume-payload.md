@@ -1,13 +1,13 @@
 # Authorize bounded runner retained resume payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 - none
@@ -61,22 +61,35 @@ protocol boundary already accepted by the investigation decision.
 - `authorize-bounded-runner-retained-resume-payload`
 
 ## Verify
-- not started
+- GREEN: `./bin/openspec validate "authorize-bounded-runner-retained-resume-payload" --strict` - passed.
+- GREEN: `./bin/openspec validate "changerail-contracts" --strict` - passed.
+- GREEN: `python3 scripts/smoke-review-preflight.py` - passed; exact runner
+  retained-resume authorization acceptance and mismatched-card rejection covered.
+- GREEN: `./bin/openspec archive "authorize-bounded-runner-retained-resume-payload" --yes --skip-specs` - passed after manual spec sync.
+- GREEN: `./bin/openspec validate --all --strict` - passed, 27 items after archive.
+- GREEN: `python3 scripts/public-surface-scan.py` - passed, 1086 files scanned, 0 findings.
+- GREEN: `git diff --check` - passed.
+- GREEN: untracked-file trailing-whitespace scan over archived
+  `git ls-files --others --exclude-standard` paths passed.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-authorize-bounded-runner-retained-resume-payload/`
 
 ## Related
+- `openspec/changes/authorize-bounded-runner-retained-resume-payload/`
+- `openspec/changes/archive/2026-08-19-authorize-bounded-runner-retained-resume-payload/`
 - `openspec/board/4.done/investigate-runner-retained-resume-payload-boundary.md`
 - `openspec/board/2.todo/support-runner-resume-after-investigation-required.md`
 - `scripts/smoke-review-preflight.py`
 - `openspec/specs/changerail-contracts/spec.md`
 
 ## Result
-not started
+published; bounded runner retained-resume authorization source complete
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$changerail-deliver openspec/board/2.todo/authorize-bounded-runner-retained-resume-payload.md`
+- done
 
 ## Change 1: `authorize-bounded-runner-retained-resume-payload`
 
@@ -118,3 +131,12 @@ without changing production runner behavior or global review policy.
 ## Log
 - 2026-08-19T17:36:05Z created after the published investigation selected a
   simplified same-card successor bounded at 500 production-counted LOC.
+- 2026-08-19T17:45:19Z `$changerail-ff` created
+  `authorize-bounded-runner-retained-resume-payload`, completed apply-ready
+  proposal/design/spec/tasks artifacts and moved the card to `3.inprogress`.
+- 2026-08-19T17:50:00Z `$changerail-do` synced the bounded runner
+  retained-resume authorization requirement, added focused exact-chain
+  preflight smoke coverage, archived
+  `authorize-bounded-runner-retained-resume-payload` and prepared review
+  handoff.
+- 2026-08-19T17:57:08Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
