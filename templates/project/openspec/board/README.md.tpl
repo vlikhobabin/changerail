@@ -24,6 +24,9 @@
 - `Related` содержит project-local paths или generic public examples.
 - `Review` объявляет `deterministic|ordinary|critical` risk и complexity flags;
   legacy card без секции считается `ordinary`.
+- Domain-specific production source kinds can be declared in project-owned
+  `.changerail/source-classification.yaml`; generated templates do not create
+  application-specific production roots by default.
 - Runtime evidence may be referenced, but raw runtime state stays ignored.
 
 ## Gates

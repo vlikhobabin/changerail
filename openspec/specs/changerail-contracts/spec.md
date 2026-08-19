@@ -1200,6 +1200,145 @@ added production LOC while continuing to count other scoped Go source files.
 - **WHEN** a scoped change adds a production `.go` file and a `*_test.go` file
 - **THEN** only the production file contributes to `added_production_loc`
 
+### Requirement: Review preflight source classification
+The deterministic review preflight MUST support an optional tracked
+`.changerail/source-classification.yaml` consumer file using schema id
+`changerail.source-classification.v1`. When present, the file MUST declare
+repository-relative production source roots and source-kind rules using safe
+paths that are neither absolute nor path-traversing. Missing classification
+MUST preserve existing built-in source suffix behavior. Malformed
+classification MUST block preflight before LLM review and MUST NOT be ignored
+as a legacy fallback.
+
+#### Scenario: Consumer declares production source kind
+- **WHEN** preflight runs in a consumer repository with a schema-valid source
+  classification file that declares a production root and source kind
+- **THEN** files under that root matching the declared source kind are eligible
+  for production complexity accounting
+- **AND** built-in non-production path parts continue to exclude tests,
+  fixtures, examples, schemas, templates, docs and OpenSpec artifacts
+
+#### Scenario: Source classification is missing
+- **WHEN** preflight runs without `.changerail/source-classification.yaml`
+- **THEN** existing built-in production suffixes and executable helper rules
+  continue to determine `added_production_loc`
+- **AND** domain-specific suffixes that require declaration are not counted by
+  default
+
+#### Scenario: Source classification is unsafe
+- **WHEN** the classification file contains an absolute path, traversal, root
+  escape, duplicate source-kind id or schema-invalid value
+- **THEN** preflight returns `blocked`
+- **AND** the result includes a failing deterministic check explaining the
+  invalid classification
+
+### Requirement: Review preflight reports source-kind complexity detail
+The `changerail.review-preflight-result.v1` result MUST retain aggregate
+complexity guard fields and MUST include bounded source-kind detail for counted
+production source. Each detail entry MUST identify the source kind, measure
+strategy, counted path count, raw added lines and effective complexity
+contribution without copying source content.
+
+#### Scenario: Payload has mixed source kinds
+- **WHEN** a scoped payload contains production files counted by more than one
+  source kind
+- **THEN** the preflight result reports the aggregate guard value
+- **AND** it reports source-kind breakdown entries that explain how each kind
+  contributed to the aggregate
+
+#### Scenario: Breakdown remains public-safe
+- **WHEN** preflight emits source-kind detail
+- **THEN** the result contains repository-relative paths or counts only
+- **AND** it does not include raw source snippets, customer data or ignored
+  runtime content
+
+### Requirement: Review preflight counts declared production BSL
+The deterministic review preflight MUST count added `.bsl` lines toward
+production complexity only when the path is classified as production BSL source
+by the consumer source-classification contract. Existing non-production path
+parts MUST continue to exclude BSL tests, fixtures, examples, schemas,
+templates, docs and OpenSpec artifacts from production complexity.
+
+#### Scenario: Production BSL crosses default ceiling
+- **WHEN** a scoped payload adds more than 300 lines to `.bsl` files under a
+  declared production BSL source root
+- **THEN** preflight reports those lines in `added_production_loc`
+- **AND** preflight returns `investigation-required` unless a valid bounded
+  published investigation authorization applies
+
+#### Scenario: Non-production BSL is excluded
+- **WHEN** a scoped payload adds `.bsl` files under `test`, `tests`,
+  `fixtures`, `examples` or another built-in non-production root
+- **THEN** those lines do not contribute to `added_production_loc`
+- **AND** source-kind breakdown explains that no production BSL contribution was
+  counted for those paths
+
+#### Scenario: Existing source suffixes are unchanged
+- **WHEN** a scoped payload adds Python, Go, JavaScript or executable helper
+  files covered by the built-in classifier
+- **THEN** their production complexity behavior remains the same as before this
+  change
+
+### Requirement: Review preflight counts declared Designer XML structurally
+The deterministic review preflight MUST count Designer XML only when a valid
+consumer source-classification rule proves that the XML path belongs to a
+production Designer XML source kind. The preflight MUST NOT treat generic
+`.xml` paths as production source by suffix alone.
+
+#### Scenario: Production Designer XML is classified
+- **WHEN** a scoped payload adds Designer XML under a declared production
+  Designer XML source root
+- **THEN** preflight counts the file through the Designer XML measure strategy
+- **AND** the source-kind breakdown identifies Designer XML as a production
+  contribution
+
+#### Scenario: Generic XML remains non-production
+- **WHEN** a scoped payload adds `.xml` files under schemas, templates,
+  fixtures, examples, docs, OpenSpec or an unclassified path
+- **THEN** those XML files do not contribute to production complexity
+- **AND** they do not make the payload `investigation-required` by suffix alone
+
+### Requirement: Designer XML complexity is fail-closed and explainable
+Designer XML production complexity MUST use an effective structural measure
+instead of unconditional raw XML line count when the helper can measure the XML
+safely. If the helper cannot safely prove structural complexity, it MUST either
+fall back to raw added lines or block preflight; it MUST NOT silently report
+zero for classified production Designer XML.
+
+#### Scenario: Verbose Designer XML has bounded structural complexity
+- **WHEN** a classified Designer XML addition has raw added lines above the
+  default or authorized LOC ceiling but measured structural complexity within
+  the applicable ceiling
+- **THEN** preflight may continue to the declared risk-appropriate review route
+- **AND** the result reports both raw added lines and effective structural
+  complexity for the Designer XML source kind
+
+#### Scenario: Designer XML exceeds effective ceiling
+- **WHEN** classified Designer XML effective complexity exceeds the applicable
+  default or published authorization ceiling
+- **THEN** preflight returns `investigation-required`
+- **AND** the complexity guard reasons identify the exceeded effective ceiling
+
+#### Scenario: Designer XML cannot be measured safely
+- **WHEN** classified production Designer XML is malformed or the structural
+  measure cannot be computed conservatively
+- **THEN** preflight uses raw added lines as the effective contribution or
+  returns `blocked`
+- **AND** the result explains the fallback or blocker in source-kind detail
+
+### Requirement: Mixed 1C payload complexity is itemized
+The preflight result MUST itemize mixed production payloads so maintainers can
+see how BSL and Designer XML contribute to the guard without inspecting raw
+source content.
+
+#### Scenario: BSL and Designer XML share a payload
+- **WHEN** a scoped payload contains declared production BSL and Designer XML
+  changes
+- **THEN** `added_production_loc` reflects their aggregate effective
+  contribution
+- **AND** source-kind detail reports separate BSL and Designer XML entries with
+  path counts, raw added lines, effective contribution and measure strategy
+
 ### Requirement: Review history phase counters
 Review-cycle history MUST support independent optional counters for planning,
 delivery-fix, implementation-review and live-admission phases.

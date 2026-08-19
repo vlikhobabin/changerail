@@ -1,13 +1,13 @@
 # Учитывать production-исходники 1С в review complexity guard
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -85,31 +85,44 @@ classification, совместимая с существующим investigation
 - `measure-review-preflight-designer-xml`
 
 ## Verify
-- `./bin/openspec validate "define-review-preflight-source-classification" --strict`
-- `./bin/openspec validate "count-review-preflight-bsl-production-loc" --strict`
-- `./bin/openspec validate "measure-review-preflight-designer-xml" --strict`
-- `./bin/openspec validate --all --strict`
-- `git diff --check`
-- `python3 scripts/public-surface-scan.py`
+- passed: `python3 -m py_compile scripts/changerail_review_preflight.py scripts/changerail_contract_schema.py`
+- passed: `python3 scripts/smoke-contract-schemas.py`
+- passed: `python3 scripts/smoke-review-preflight.py`
+- passed: `./bin/openspec validate "define-review-preflight-source-classification" --strict`
+- passed: `./bin/openspec validate "count-review-preflight-bsl-production-loc" --strict`
+- passed: `./bin/openspec validate "measure-review-preflight-designer-xml" --strict`
+- passed: `./bin/openspec validate --all --strict`
+- passed: `git diff --check`
+- passed: `python3 scripts/public-surface-scan.py`
+- passed: `python3 scripts/public-surface-scan.py --history`
+- passed: `python3 scripts/run-release-baseline.py`
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-define-review-preflight-source-classification/`
+- `openspec/changes/archive/2026-08-19-count-review-preflight-bsl-production-loc/`
+- `openspec/changes/archive/2026-08-19-measure-review-preflight-designer-xml/`
 
 ## Related
 - `scripts/changerail_review_preflight.py`
 - `scripts/smoke-review-preflight.py`
+- `scripts/smoke-contract-schemas.py`
 - `schemas/changerail-review-preflight-result.schema.json`
+- `schemas/changerail-source-classification.schema.json`
 - `docs/changerail-contracts.md`
 - `openspec/specs/changerail-contracts/spec.md`
-- `openspec/changes/define-review-preflight-source-classification/`
-- `openspec/changes/count-review-preflight-bsl-production-loc/`
-- `openspec/changes/measure-review-preflight-designer-xml/`
+- `openspec/specs/changerail-project-templates/spec.md`
+- `templates/project/openspec/board/README.md.tpl`
+- `openspec/changes/archive/2026-08-19-define-review-preflight-source-classification/`
+- `openspec/changes/archive/2026-08-19-count-review-preflight-bsl-production-loc/`
+- `openspec/changes/archive/2026-08-19-measure-review-preflight-designer-xml/`
 
 ## Result
-not started
+implemented; awaiting fresh independent review
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$changerail-do openspec/board/2.todo/count-1c-production-source-in-review-complexity.md`
+- done
 
 ## Change 1: `define-review-preflight-source-classification`
 
@@ -143,7 +156,7 @@ preserving legacy generic classification when absent.
 - none
 
 ### Related
-- `openspec/changes/define-review-preflight-source-classification/`
+- `openspec/changes/archive/2026-08-19-define-review-preflight-source-classification/`
 
 ## Change 2: `count-review-preflight-bsl-production-loc`
 
@@ -175,7 +188,7 @@ fixtures, examples and other non-production paths excluded.
 - `define-review-preflight-source-classification`
 
 ### Related
-- `openspec/changes/count-review-preflight-bsl-production-loc/`
+- `openspec/changes/archive/2026-08-19-count-review-preflight-bsl-production-loc/`
 
 ## Change 3: `measure-review-preflight-designer-xml`
 
@@ -214,7 +227,7 @@ complexity measure and report mixed BSL/XML guard detail.
 - `count-review-preflight-bsl-production-loc`
 
 ### Related
-- `openspec/changes/measure-review-preflight-designer-xml/`
+- `openspec/changes/archive/2026-08-19-measure-review-preflight-designer-xml/`
 
 ## Log
 - 2026-08-18T11:08:00Z карточка создана по результату field validation:
@@ -222,3 +235,13 @@ complexity measure and report mixed BSL/XML guard detail.
   до нуля.
 - 2026-08-19T06:38:57Z `$chrl-ff` разложил story на три ordered OpenSpec
   changes, создал apply-ready artifacts и перенес карточку в `2.todo`.
+- 2026-08-19T12:00:05Z `$changerail-do` реализовал source-classification
+  contract, BSL counting и Designer XML structural measure; specs synced,
+  changes archived, verification passed, next step is fresh independent review.
+- 2026-08-19T12:12:01Z independent review cycle 1 returned `go` with one
+  minor dead-code finding; delivery removed the dead helper and reran focused
+  verification, requiring a fresh re-review before publish.
+- 2026-08-19T12:35:18Z release baseline passed after keeping generated
+  source-classification guidance in board templates instead of expanding
+  generated `AGENTS.md` instruction budget.
+- 2026-08-19T13:06:24Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

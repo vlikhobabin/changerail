@@ -413,6 +413,27 @@ def review_cycle_history() -> dict[str, Any]:
     }
 
 
+def source_classification() -> dict[str, Any]:
+    return {
+        "schema": "changerail.source-classification.v1",
+        "source_kinds": [
+            {
+                "id": "bsl",
+                "suffixes": [".bsl"],
+                "production_roots": ["src/production"],
+                "measure": "lines",
+            },
+            {
+                "id": "designer-xml",
+                "suffixes": [".xml"],
+                "production_roots": ["src/designer"],
+                "measure": "xml-structure",
+            },
+        ],
+        "non_production_roots": ["src/examples"],
+    }
+
+
 def review_preflight_result() -> dict[str, Any]:
     return {
         "schema": "changerail.review-preflight-result.v1",
@@ -457,6 +478,17 @@ def review_preflight_result() -> dict[str, Any]:
             },
             "stop_required": False,
             "reasons": [],
+            "source_breakdown": [
+                {
+                    "source_kind": "builtin",
+                    "measure_strategy": "lines",
+                    "path_count": 1,
+                    "raw_added_lines": 20,
+                    "effective_complexity": 20,
+                    "fallback": "none",
+                    "paths": ["src/example.py"],
+                }
+            ],
         },
         "checks": [{"id": "scope", "status": "pass", "detail": "exact scope"}],
         "llm_review": {"required": True, "reason": "ordinary semantic payload review"},
@@ -926,6 +958,10 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         review_cycle_history,
         schema_validator("changerail-review-cycle-history.schema.json"),
     ),
+    "changerail-source-classification.schema.json": (
+        source_classification,
+        schema_validator("changerail-source-classification.schema.json"),
+    ),
     "changerail-evidence-index.schema.json": (evidence_index, schema_validator("changerail-evidence-index.schema.json")),
     "changerail-repository-knowledge.schema.json": (
         repository_knowledge_catalog,
@@ -1063,6 +1099,13 @@ def main() -> int:
             legacy_errors = validator(legacy_history)
             if legacy_errors:
                 failures.append(f"{name}: legacy fixture without rescue budget failed: {legacy_errors}")
+        if name == "changerail-source-classification.schema.json":
+            unsafe_source_root = source_classification()
+            unsafe_source_root["source_kinds"][0]["production_roots"] = ["/absolute"]
+            expect_invalid(failures, f"{name} unsafe production root", validator, unsafe_source_root, "production_roots")
+            traversal_root = source_classification()
+            traversal_root["non_production_roots"] = ["src/../fixtures"]
+            expect_invalid(failures, f"{name} traversal non-production root", validator, traversal_root, "non_production_roots")
         if name == "changerail-maintenance-report.schema.json":
             missing_detectors = copy.deepcopy(positive)
             missing_detectors.pop("detectors")

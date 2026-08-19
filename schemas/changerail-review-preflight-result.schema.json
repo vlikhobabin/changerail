@@ -95,7 +95,8 @@
         "repeated_defect_class",
         "published_investigation_authorization",
         "stop_required",
-        "reasons"
+        "reasons",
+        "source_breakdown"
       ],
       "additionalProperties": false,
       "properties": {
@@ -154,6 +155,41 @@
         "reasons": {
           "type": "array",
           "items": {"type": "string", "minLength": 1}
+        },
+        "source_breakdown": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "source_kind",
+              "measure_strategy",
+              "path_count",
+              "raw_added_lines",
+              "effective_complexity",
+              "fallback"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "source_kind": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+              "measure_strategy": {"enum": ["lines", "xml-structure"]},
+              "path_count": {"type": "integer", "minimum": 0},
+              "raw_added_lines": {"type": "integer", "minimum": 0},
+              "effective_complexity": {"type": "integer", "minimum": 0},
+              "fallback": {"enum": ["none", "raw-lines"]},
+              "paths": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {"type": "string", "minLength": 1}
+              },
+              "excluded_path_count": {"type": "integer", "minimum": 0},
+              "excluded_raw_added_lines": {"type": "integer", "minimum": 0},
+              "notes": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {"type": "string", "minLength": 1}
+              }
+            }
+          }
         }
       }
     },

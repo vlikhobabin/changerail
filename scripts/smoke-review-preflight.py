@@ -74,7 +74,10 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
               executable_lines: int = 0, executable_path: str = "bin/new-helper", go_test_lines: int = 0,
               authorization: bool = False, authorization_protocol: bool = False, authorization_ceiling: int = 500,
               mismatched_blocks: bool = False, investigation_status: str = "4.done",
-              self_authorize_reference: bool = False, investigation_block_reference: str = "example-card") -> tuple[Path, Path]:
+              self_authorize_reference: bool = False, investigation_block_reference: str = "example-card",
+              source_classification: str | None = None, bsl_lines: int = 0,
+              bsl_path: str = "src/production/module.bsl", xml_text: str | None = None,
+              xml_path: str = "src/designer/Form.xml") -> tuple[Path, Path]:
     repo = root / f"repo-{risk}-{production_lines}-{int(protocol)}"
     while repo.exists():
         repo = repo.with_name(repo.name + "-next")
@@ -85,6 +88,8 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
     write(repo / ".gitignore", ".runtime/\n")
     write(repo / "docs" / "base.md", "baseline\n")
     write(repo / "src" / "base.py", "BASE = True\n")
+    if source_classification is not None:
+        write(repo / ".changerail" / "source-classification.yaml", source_classification)
     if authorization:
         write(
             repo / "openspec" / "board" / "4.done" / "published-investigation.md",
@@ -129,12 +134,47 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
         helper = repo / executable_path
         write(helper, "\n".join(f"command-{index}" for index in range(executable_lines)) + "\n")
         helper.chmod(0o755)
+    if bsl_lines:
+        write(repo / bsl_path, "\n".join(f"Procedure Synthetic{index}() EndProcedure" for index in range(bsl_lines)) + "\n")
+    if xml_text is not None:
+        write(repo / xml_path, xml_text)
     derived = run(
         [sys.executable, str(MANIFEST_HELPER), "derive", str(card.relative_to(repo)), "--workspace", str(repo), "--write", "--json"],
         repo,
     )
     require_ok(derived, "derive manifest")
     return repo, Path(json.loads(derived.stdout)["manifest"])
+
+
+def source_classification(*, bsl: bool = False, designer_xml: bool = False, root: str = "src") -> str:
+    kinds: list[str] = []
+    if bsl:
+        kinds.append(
+            "  - id: bsl\n"
+            "    suffixes: [\".bsl\"]\n"
+            f"    production_roots: [\"{root}\"]\n"
+            "    measure: lines\n"
+        )
+    if designer_xml:
+        kinds.append(
+            "  - id: designer-xml\n"
+            "    suffixes: [\".xml\"]\n"
+            f"    production_roots: [\"{root}\"]\n"
+            "    measure: xml-structure\n"
+        )
+    return "schema: changerail.source-classification.v1\nsource_kinds:\n" + "".join(kinds)
+
+
+def breakdown_entry(data: dict[str, Any], source_kind: str) -> dict[str, Any]:
+    for entry in data["complexity_guard"]["source_breakdown"]:
+        if entry["source_kind"] == source_kind:
+            return entry
+    raise AssertionError(f"missing source_breakdown entry for {source_kind}")
+
+
+def verbose_xml(raw_lines: int = 360) -> str:
+    comments = "\n".join(f"  <!-- synthetic formatter line {index} -->" for index in range(raw_lines))
+    return f"<Form>\n{comments}\n  <Attribute>Value</Attribute>\n</Form>\n"
 
 
 def preflight(
@@ -272,6 +312,57 @@ def main() -> int:
         assert result.returncode == 1
         assert data["outcome"] == "investigation-required"
         assert data["complexity_guard"]["added_production_loc"] == 301
+
+        repo, manifest = workspace(root, "ordinary", bsl_lines=301)
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "legacy unclassified BSL preflight")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["complexity_guard"]["added_production_loc"] == 0
+
+        repo, manifest = workspace(
+            root,
+            "ordinary",
+            bsl_lines=301,
+            source_classification=source_classification(bsl=True),
+        )
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["added_production_loc"] == 301
+        bsl = breakdown_entry(data, "bsl")
+        assert bsl["measure_strategy"] == "lines"
+        assert bsl["path_count"] == 1
+        assert bsl["raw_added_lines"] == 301
+        assert bsl["effective_complexity"] == 301
+
+        repo, manifest = workspace(
+            root,
+            "ordinary",
+            bsl_lines=301,
+            bsl_path="src/tests/module.bsl",
+            source_classification=source_classification(bsl=True),
+        )
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "non-production BSL exclusion")
+        assert data["complexity_guard"]["added_production_loc"] == 0
+        bsl = breakdown_entry(data, "bsl")
+        assert bsl["path_count"] == 0
+        assert bsl["excluded_path_count"] == 1
+        assert bsl["excluded_raw_added_lines"] == 301
+
+        invalid_classification = (
+            "schema: changerail.source-classification.v1\n"
+            "source_kinds:\n"
+            "  - id: bsl\n"
+            "    suffixes: [\".bsl\"]\n"
+            "    production_roots: [\"/absolute\"]\n"
+            "    measure: lines\n"
+        )
+        repo, manifest = workspace(root, "ordinary", source_classification=invalid_classification)
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert next(item for item in data["checks"] if item["id"] == "source-classification")["status"] == "fail"
 
         repo, manifest = workspace(root, "ordinary", go_test_lines=301)
         result, data = preflight(repo, manifest, "--normalize")
@@ -413,6 +504,66 @@ def main() -> int:
         result, data = preflight(repo, manifest, "--normalize")
         require_ok(result, "nonproduction executable preflight")
         assert data["complexity_guard"]["added_production_loc"] == 0
+
+        repo, manifest = workspace(
+            root,
+            "ordinary",
+            xml_text="<Form>\n  <Attribute>Value</Attribute>\n</Form>\n",
+            source_classification=source_classification(designer_xml=True, root="src/designer"),
+        )
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "classified Designer XML preflight")
+        designer = breakdown_entry(data, "designer-xml")
+        assert designer["measure_strategy"] == "xml-structure"
+        assert designer["path_count"] == 1
+        assert designer["raw_added_lines"] == 3
+        assert designer["effective_complexity"] == 3
+        assert data["complexity_guard"]["added_production_loc"] == 3
+
+        repo, manifest = workspace(root, "ordinary", xml_text=verbose_xml(), xml_path="schemas/generic.xml")
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "generic XML suffix remains non-production")
+        assert data["complexity_guard"]["added_production_loc"] == 0
+
+        repo, manifest = workspace(
+            root,
+            "ordinary",
+            xml_text=verbose_xml(),
+            source_classification=source_classification(designer_xml=True, root="src/designer"),
+        )
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "verbose Designer XML structural measure")
+        designer = breakdown_entry(data, "designer-xml")
+        assert designer["raw_added_lines"] > 300
+        assert designer["effective_complexity"] <= 300
+        assert designer["fallback"] == "none"
+        assert data["complexity_guard"]["added_production_loc"] == designer["effective_complexity"]
+
+        repo, manifest = workspace(
+            root,
+            "ordinary",
+            xml_text="<Form>\n  <Broken>\n",
+            source_classification=source_classification(designer_xml=True, root="src/designer"),
+        )
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "malformed Designer XML raw-line fallback")
+        designer = breakdown_entry(data, "designer-xml")
+        assert designer["fallback"] == "raw-lines"
+        assert designer["raw_added_lines"] == 2
+        assert designer["effective_complexity"] == 2
+
+        repo, manifest = workspace(
+            root,
+            "ordinary",
+            bsl_lines=5,
+            xml_text="<Form>\n  <Attribute>Value</Attribute>\n</Form>\n",
+            source_classification=source_classification(bsl=True, designer_xml=True, root="src"),
+        )
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "mixed BSL and Designer XML preflight")
+        assert breakdown_entry(data, "bsl")["effective_complexity"] == 5
+        assert breakdown_entry(data, "designer-xml")["effective_complexity"] == 3
+        assert data["complexity_guard"]["added_production_loc"] == 8
 
         repo, manifest = workspace(root, "ordinary", protocol=True)
         result, data = preflight(repo, manifest, "--normalize")

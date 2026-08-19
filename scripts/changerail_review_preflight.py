@@ -8,7 +8,9 @@ import re
 import subprocess
 import sys
 import time
-from pathlib import Path
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from changerail_contract_schema import validate_with_schema
@@ -16,16 +18,39 @@ import changerail_delivery_manifest as dm
 
 SCHEMA_ID = "changerail.review-preflight-result.v1"
 SCHEMA_FILE = "changerail-review-preflight-result.schema.json"
+SOURCE_CLASSIFICATION_SCHEMA_FILE = "changerail-source-classification.schema.json"
+SOURCE_CLASSIFICATION_PATH = ".changerail/source-classification.yaml"
 PRODUCTION_SUFFIXES = {".c", ".cc", ".cpp", ".cs", ".go", ".h", ".hpp", ".java", ".js", ".jsx", ".kt", ".php", ".py", ".rb", ".rs", ".sh", ".ts", ".tsx"}
 NON_PRODUCTION_PARTS = {"docs", "examples", "fixtures", "openspec", "schemas", "templates", "test", "tests"}
 DEFAULT_PRODUCTION_LOC_LIMIT = 300
 MAX_AUTHORIZED_PRODUCTION_LOC_LIMIT = 500
+MAX_BREAKDOWN_PATHS = 20
 AUTHORIZATION_FIELD = "Published investigation authorization"
 AUTHORIZATION_SOURCE_FIELD = "Investigation authorization"
 CARD_ID_RE = r"[a-z0-9][a-z0-9-]*"
 BOARD_CARD_REFERENCE_RE = re.compile(rf"^openspec/board/[1-5]\.(?:backlog|todo|inprogress|done|canceled)/({CARD_ID_RE})\.md$")
 CARD_FILENAME_RE = re.compile(rf"^({CARD_ID_RE})\.md$")
 BARE_CARD_ID_RE = re.compile(rf"^{CARD_ID_RE}$")
+
+
+@dataclass(frozen=True)
+class SourceKindRule:
+    id: str
+    suffixes: tuple[str, ...]
+    production_roots: tuple[str, ...]
+    measure: str
+
+
+@dataclass(frozen=True)
+class SourceClassification:
+    present: bool
+    rules: tuple[SourceKindRule, ...]
+    non_production_roots: tuple[str, ...]
+    errors: tuple[str, ...] = ()
+
+
+def _classification(present: bool, rules: Any = (), non_production_roots: Any = (), errors: Any = ()) -> SourceClassification:
+    return SourceClassification(present, tuple(rules), tuple(non_production_roots), tuple(errors))
 
 
 def _field(text: str, name: str) -> str | None:
@@ -102,13 +127,264 @@ def _fingerprint(fingerprint_fn: Callable[..., dict[str, Any]], workspace: Path,
         return fingerprint_fn(workspace)
 
 
-def _production_path(workspace: Path, path: str) -> bool:
-    candidate = Path(path)
+def _safe_classification_path(value: Any, label: str) -> tuple[str | None, str | None]:
+    if not isinstance(value, str) or not value.strip():
+        return None, f"{label} must be a non-empty repository-relative path"
+    raw = value.strip().rstrip("/")
+    path = PurePosixPath(raw)
+    if raw in {"", "."} or "\\" in raw or raw.startswith(("~", "/")) or path.is_absolute():
+        return None, f"{label} must be a repository-relative POSIX path below the repository root"
+    if any(part in {"", ".", ".."} for part in path.parts):
+        return None, f"{label} must not contain traversal or empty path parts"
+    normalized = path.as_posix()
+    if normalized != raw:
+        return None, f"{label} must be normalized as {normalized!r}"
+    return normalized, None
+
+
+def _load_source_classification(workspace: Path) -> SourceClassification:
+    config_path = workspace / SOURCE_CLASSIFICATION_PATH
+    if not config_path.is_file():
+        return _classification(False)
+    try:
+        import yaml
+    except Exception as exc:
+        return _classification(True, errors=(f"PyYAML is required to read {SOURCE_CLASSIFICATION_PATH}: {type(exc).__name__}: {exc}",))
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        return _classification(True, errors=(f"{SOURCE_CLASSIFICATION_PATH} cannot be parsed: {exc}",))
+    schema_errors = validate_with_schema(data, SOURCE_CLASSIFICATION_SCHEMA_FILE)
+    if schema_errors:
+        return _classification(True, errors=tuple(f"schema: {error}" for error in schema_errors))
+    if not isinstance(data, dict):
+        return _classification(True, errors=(f"{SOURCE_CLASSIFICATION_PATH} must be a mapping",))
+
+    errors: list[str] = []
+    rules: list[SourceKindRule] = []
+    seen_ids: set[str] = set()
+    for index, item in enumerate(data.get("source_kinds", [])):
+        label = f"source_kinds[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{label} must be an object")
+            continue
+        source_id = item.get("id")
+        if not isinstance(source_id, str) or not source_id:
+            errors.append(f"{label}.id must be a non-empty string")
+            continue
+        if source_id in seen_ids:
+            errors.append(f"{label}.id duplicates {source_id!r}")
+        seen_ids.add(source_id)
+        suffixes = tuple(sorted({str(suffix).lower() for suffix in item.get("suffixes", [])}))
+        if len(suffixes) != len(item.get("suffixes", [])):
+            errors.append(f"{label}.suffixes contains case-insensitive duplicates")
+        production_roots: list[str] = []
+        for root_index, root in enumerate(item.get("production_roots", [])):
+            normalized, error = _safe_classification_path(root, f"{label}.production_roots[{root_index}]")
+            if error:
+                errors.append(error)
+            elif normalized:
+                production_roots.append(normalized)
+        if len(set(production_roots)) != len(production_roots):
+            errors.append(f"{label}.production_roots contains duplicate roots")
+        measure = item.get("measure")
+        if measure == "xml-structure" and ".xml" not in suffixes:
+            errors.append(f"{label}.measure xml-structure requires a .xml suffix")
+        if not errors:
+            rules.append(
+                SourceKindRule(
+                    id=source_id,
+                    suffixes=suffixes,
+                    production_roots=tuple(production_roots),
+                    measure=str(measure),
+                )
+            )
+
+    non_production_roots: list[str] = []
+    for index, root in enumerate(data.get("non_production_roots", [])):
+        normalized, error = _safe_classification_path(root, f"non_production_roots[{index}]")
+        if error:
+            errors.append(error)
+        elif normalized:
+            non_production_roots.append(normalized)
+    if len(set(non_production_roots)) != len(non_production_roots):
+        errors.append("non_production_roots contains duplicate roots")
+    if errors:
+        return _classification(True, errors=errors)
+    return _classification(True, rules, non_production_roots)
+
+
+def _path_under(path: str, root: str) -> bool:
+    candidate_parts = PurePosixPath(path).parts
+    root_parts = PurePosixPath(root).parts
+    return candidate_parts[: len(root_parts)] == root_parts
+
+
+def _non_production_path(path: str, extra_roots: tuple[str, ...] = ()) -> bool:
+    candidate = PurePosixPath(path)
     lowered = {part.lower() for part in candidate.parts}
+    if lowered & NON_PRODUCTION_PARTS:
+        return True
+    return any(_path_under(path, root) for root in extra_roots)
+
+
+def _builtin_production_path(workspace: Path, path: str, extra_non_production_roots: tuple[str, ...] = ()) -> bool:
+    candidate = PurePosixPath(path)
     name = candidate.name.lower()
-    executable = candidate.parts[:1] == ("bin",) and not candidate.suffix and (workspace / candidate).is_file() and bool((workspace / candidate).stat().st_mode & 0o111)
-    return ((candidate.suffix.lower() in PRODUCTION_SUFFIXES or executable) and not name.endswith("_test.go") and not (lowered & NON_PRODUCTION_PARTS)
-            and not name.startswith(("test_", "smoke-", "smoke_")))
+    executable_path = workspace / path
+    executable = candidate.parts[:1] == ("bin",) and not candidate.suffix and executable_path.is_file() and bool(executable_path.stat().st_mode & 0o111)
+    if name.endswith("_test.go") or name.startswith(("test_", "smoke-", "smoke_")):
+        return False
+    return (candidate.suffix.lower() in PRODUCTION_SUFFIXES or executable) and not _non_production_path(path, extra_non_production_roots)
+
+
+def _matches_source_rule(rule: SourceKindRule, path: str) -> bool:
+    candidate = PurePosixPath(path)
+    return candidate.suffix.lower() in rule.suffixes and any(_path_under(path, root) for root in rule.production_roots)
+
+
+def _file_line_count(path: Path) -> int:
+    payload = path.read_bytes()
+    if b"\0" in payload:
+        return 0
+    return len(payload.splitlines())
+
+
+def _raw_added_lines(workspace: Path, entries: dict[str, dict[str, Any]]) -> dict[str, int]:
+    lines: dict[str, int] = {}
+    paths = sorted(path for path, entry in entries.items() if entry.get("operation") != "delete")
+    if paths:
+        result = subprocess.run(
+            ["git", "-C", str(workspace), "diff", "--numstat", "HEAD", "--", *paths],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "git diff --numstat failed")
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 3 and parts[0].isdigit():
+                lines[parts[2]] = int(parts[0])
+    for path, entry in entries.items():
+        if entry.get("operation") != "add" or path in lines:
+            continue
+        target = entry.get("target_path") or entry.get("path") or path
+        if not isinstance(target, str):
+            continue
+        absolute = workspace / target
+        if absolute.is_file():
+            lines[path] = _file_line_count(absolute)
+    return lines
+
+
+def _xml_structure_units(path: Path) -> tuple[int | None, str | None]:
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError) as exc:
+        return None, f"xml-structure fallback to raw lines: {exc}"
+    units = 0
+    for element in root.iter():
+        units += 1
+        if element.text and element.text.strip():
+            units += 1
+        if element.tail and element.tail.strip():
+            units += 1
+    return units, None
+
+
+def _breakdown_bucket(
+    buckets: dict[tuple[str, str], dict[str, Any]],
+    source_kind: str,
+    measure_strategy: str,
+) -> dict[str, Any]:
+    key = (source_kind, measure_strategy)
+    if key not in buckets:
+        buckets[key] = {"source_kind": source_kind, "measure_strategy": measure_strategy, "path_count": 0, "raw_added_lines": 0,
+                        "effective_complexity": 0, "fallback": "none", "paths": [], "excluded_path_count": 0,
+                        "excluded_raw_added_lines": 0, "notes": []}
+    return buckets[key]
+
+
+def _append_bounded(values: list[str], value: str) -> None:
+    if value not in values and len(values) < MAX_BREAKDOWN_PATHS:
+        values.append(value)
+
+
+def _complexity_measure(
+    workspace: Path,
+    path: str,
+    entry: dict[str, Any],
+    raw_lines: int,
+    rule: SourceKindRule,
+) -> tuple[int, str, str | None]:
+    if rule.measure != "xml-structure":
+        return raw_lines, "none", None
+    target = entry.get("target_path") or entry.get("path") or path
+    if entry.get("operation") != "add":
+        return raw_lines, "raw-lines", "modified classified XML uses raw added lines"
+    if not isinstance(target, str):
+        return raw_lines, "raw-lines", "classified XML target path is unavailable"
+    effective, note = _xml_structure_units(workspace / target)
+    if effective is None:
+        return raw_lines, "raw-lines", note
+    return effective, "none", None
+
+
+def _finalize_breakdown(buckets: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
+    finalized: list[dict[str, Any]] = []
+    for key in sorted(buckets):
+        bucket = buckets[key]
+        entry = {field: bucket[field] for field in ("source_kind", "measure_strategy", "path_count", "raw_added_lines", "effective_complexity", "fallback")}
+        if bucket["paths"]:
+            entry["paths"] = bucket["paths"]
+        if bucket["excluded_path_count"]:
+            entry["excluded_path_count"] = bucket["excluded_path_count"]
+            entry["excluded_raw_added_lines"] = bucket["excluded_raw_added_lines"]
+        if bucket["notes"]:
+            entry["notes"] = bucket["notes"][:MAX_BREAKDOWN_PATHS]
+        finalized.append(entry)
+    return finalized
+
+
+def _production_complexity(
+    workspace: Path,
+    entries: dict[str, dict[str, Any]],
+    classification: SourceClassification,
+) -> dict[str, Any]:
+    raw_by_path = _raw_added_lines(workspace, entries)
+    buckets: dict[tuple[str, str], dict[str, Any]] = {}
+    total = 0
+    for path in sorted(entries):
+        entry = entries[path]
+        if entry.get("operation") == "delete":
+            continue
+        raw_lines = raw_by_path.get(path, 0)
+        matched_rules = [rule for rule in classification.rules if _matches_source_rule(rule, path)]
+        excluded = _non_production_path(path, classification.non_production_roots)
+        if excluded:
+            for rule in matched_rules:
+                bucket = _breakdown_bucket(buckets, rule.id, rule.measure)
+                bucket["excluded_path_count"] += 1
+                bucket["excluded_raw_added_lines"] += raw_lines
+            continue
+        rule = matched_rules[0] if matched_rules else None
+        if rule is None:
+            if not _builtin_production_path(workspace, path, classification.non_production_roots):
+                continue
+            rule = SourceKindRule("builtin", (PurePosixPath(path).suffix.lower(),), (), "lines")
+        effective, fallback, note = _complexity_measure(workspace, path, entry, raw_lines, rule)
+        bucket = _breakdown_bucket(buckets, rule.id, rule.measure)
+        bucket["path_count"] += 1
+        bucket["raw_added_lines"] += raw_lines
+        bucket["effective_complexity"] += effective
+        if fallback != "none":
+            bucket["fallback"] = fallback
+        if note:
+            _append_bounded(bucket["notes"], f"{path}: {note}")
+        _append_bounded(bucket["paths"], path)
+        total += effective
+    return {"added_production_loc": total, "source_breakdown": _finalize_breakdown(buckets)}
 
 
 def _reference_matches(text: str, heading: str, expected: str) -> bool:
@@ -193,30 +469,6 @@ def _published_investigation_authorization(review_text: str, card_text: str, car
         return state
 
 
-def _added_loc(workspace: Path, entries: dict[str, dict[str, Any]]) -> int:
-    total = 0
-    tracked = [path for path in entries if _production_path(workspace, path)]
-    if tracked:
-        result = subprocess.run(
-            ["git", "-C", str(workspace), "diff", "--numstat", "HEAD", "--", *tracked],
-            capture_output=True, text=True, check=False,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "git diff --numstat failed")
-        for line in result.stdout.splitlines():
-            added = line.split("\t", 1)[0]
-            if added.isdigit():
-                total += int(added)
-    for path, entry in entries.items():
-        if not _production_path(workspace, path) or entry.get("operation") != "add":
-            continue
-        absolute = workspace / path
-        if absolute.is_file():
-            payload = absolute.read_bytes()
-            if b"\0" not in payload:
-                total += len(payload.splitlines())
-    return total
-
 
 def _normalize_manifest(manifest: dict[str, Any], card: dict[str, Any], card_text: str, workspace: Path) -> bool:
     excluded = dm.scope_excluded_paths(manifest)
@@ -277,6 +529,13 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         raise ValueError("manifest path must stay inside the workspace")
     checks: list[dict[str, Any]] = []
     risk = _risk(review_text, risk_override)
+    classification = _load_source_classification(workspace)
+    if classification.errors:
+        _check(checks, "source-classification", False, "; ".join(classification.errors))
+    elif classification.present:
+        _check(checks, "source-classification", True, f"{SOURCE_CLASSIFICATION_PATH} declares {len(classification.rules)} source kinds")
+    else:
+        _check(checks, "source-classification", True, f"{SOURCE_CLASSIFICATION_PATH} absent; built-in classifier only")
     manifest_state = {"path": os.path.relpath(manifest_path, workspace), "valid": False, "normalized": False, "scope_ok": False}
     manifest: dict[str, Any] | None = None
     try:
@@ -313,7 +572,8 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         _check(checks, "scope", False, "scope cannot be checked without a valid manifest")
         _check(checks, "archive", False, "archive state cannot be checked without a valid manifest")
 
-    added_loc = _added_loc(workspace, actual) if actual else 0
+    complexity = _production_complexity(workspace, actual, classification) if actual else {"added_production_loc": 0, "source_breakdown": []}
+    added_loc = complexity["added_production_loc"]
     new_protocol = _boolean(_field(review_text, "New authority or wire protocol"), "New authority or wire protocol")
     repeated = _boolean(_field(review_text, "Repeated defect class"), "Repeated defect class")
     live = _boolean(_field(review_text, "Live admission"), "Live admission")
@@ -386,6 +646,7 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
             "added_production_loc": added_loc, "limit": loc_limit, "new_authority_or_wire_protocol": new_protocol,
             "repeated_defect_class": repeated, "published_investigation_authorization": authorization,
             "stop_required": stop, "reasons": complexity_reasons,
+            "source_breakdown": complexity["source_breakdown"],
         },
         "checks": checks, "llm_review": {"required": llm_required, "reason": reason},
     }

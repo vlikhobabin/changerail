@@ -14,6 +14,7 @@
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
 - `changerail.review-cycle-history.v1`
+- `changerail.source-classification.v1`
 - `changerail.consumer-lock.v1`
 - `changerail.repository-knowledge.v1`
 - `changerail.maintenance-policy.v1`
@@ -38,6 +39,7 @@ schemas/changerail-delivery-run.schema.json
 schemas/changerail-delivery-plan.schema.json
 schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-review-cycle-history.schema.json
+schemas/changerail-source-classification.schema.json
 schemas/changerail-consumer-lock.schema.json
 schemas/changerail-repository-knowledge.schema.json
 schemas/changerail-maintenance-policy.schema.json
@@ -94,6 +96,51 @@ missing/extra paths остаются blockers. `blocked` и
 budget. `machine-reviewed` является payload gate для явно deterministic/process
 scope без added production code; `ready-for-llm-review` выбирает `high` для
 ordinary или `xhigh` для critical review.
+
+Опциональный tracked consumer-файл
+`.changerail/source-classification.yaml` использует schema id
+`changerail.source-classification.v1` и позволяет проекту объявить production
+source kinds для domain-specific форматов без встраивания прикладных имен в
+ChangeRail core:
+
+```yaml
+schema: changerail.source-classification.v1
+source_kinds:
+  - id: bsl
+    suffixes: [".bsl"]
+    production_roots: ["src/production"]
+    measure: lines
+  - id: designer-xml
+    suffixes: [".xml"]
+    production_roots: ["src/designer"]
+    measure: xml-structure
+```
+
+Paths в файле являются repository-relative POSIX prefixes, не shell glob-ами.
+Absolute paths, traversal, duplicate source-kind ids, unsafe roots или
+schema-invalid values блокируют preflight до LLM review. Если файл отсутствует,
+preflight использует прежний built-in classifier: common source suffixes и
+executable helpers считаются production, а domain-specific `.bsl`/`.xml` не
+становятся production по одному suffix.
+
+`complexity_guard.source_breakdown` содержит bounded детализацию по kind:
+`source_kind`, `measure_strategy`, counted `path_count`, `raw_added_lines`,
+`effective_complexity`, `fallback`, bounded `paths` samples и при необходимости
+excluded-path counters/notes. Raw source content, ignored runtime state и
+private data в result не копируются.
+
+Declared BSL использует `lines`: added `.bsl` lines под объявленными production
+roots входят в `added_production_loc`. Built-in non-production path parts
+`test`, `tests`, `fixtures`, `examples`, `schemas`, `templates`, `docs` и
+`openspec` продолжают побеждать даже при широком production root.
+
+Declared Designer XML использует `xml-structure`: helper считает effective
+structural units по XML elements и non-empty scalar text values вместо
+безусловного raw line count, когда XML можно измерить safely. Generic XML
+schemas, templates, fixtures, examples, docs, OpenSpec files и unclassified
+`.xml` не считаются production source. Для malformed или conservatively
+unmeasurable classified XML preflight использует raw added lines как fallback
+или блокирует gate; он не возвращает silent zero для classified production XML.
 
 С флагом `--diagnostics` preflight добавляет public-safe timing breakdown:
 fingerprint, OpenSpec validation, scoped whitespace check и public-surface scan.
