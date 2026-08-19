@@ -166,6 +166,7 @@ def make_workspace(root: Path) -> Path:
     write(workspace / "docs" / "tracked path.md", "before\n")
     write(workspace / "docs" / "delete-me.md", "delete me\n")
     write(workspace / "docs" / "rename-source.md", "rename me\n")
+    write(workspace / "docs" / "filesystem-rename-source.md", "filesystem rename\n")
     write(workspace / "openspec" / "board" / "3.inprogress" / ".gitkeep", "")
     write(workspace / "openspec" / "board" / "4.done" / ".gitkeep", "")
     write(workspace / "openspec" / "changes" / "archive" / ".gitkeep", "")
@@ -179,6 +180,7 @@ def make_workspace(root: Path) -> Path:
                 "docs/tracked path.md",
                 "docs/delete-me.md",
                 "docs/rename-source.md",
+                "docs/filesystem-rename-source.md",
                 "openspec/board/3.inprogress/.gitkeep",
                 "openspec/board/4.done/.gitkeep",
                 "openspec/changes/archive/.gitkeep",
@@ -192,6 +194,9 @@ def make_workspace(root: Path) -> Path:
     write(workspace / "docs" / "tracked path.md", "after\n")
     (workspace / "docs" / "delete-me.md").unlink()
     require_ok(run(["git", "mv", "docs/rename-source.md", "docs/renamed target.md"], cwd=workspace), "git mv")
+    (workspace / "docs" / "filesystem-rename-source.md").rename(
+        workspace / "docs" / "filesystem-renamed target.md"
+    )
     write(workspace / "docs" / "quoted \"path\".txt", "quoted\n")
     write(workspace / "docs" / "name -> literal.txt", "literal arrow\n")
     write(workspace / "docs" / "unicode-снег.txt", "unicode\n")
@@ -700,6 +705,8 @@ def main() -> int:
             "docs/delete-me.md",
             "docs/rename-source.md",
             "docs/renamed target.md",
+            "docs/filesystem-rename-source.md",
+            "docs/filesystem-renamed target.md",
             "docs/quoted \"path\".txt",
             "docs/name -> literal.txt",
             "docs/unicode-снег.txt",

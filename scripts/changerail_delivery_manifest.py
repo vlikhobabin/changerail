@@ -477,10 +477,37 @@ def comparable_scope(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def coalesce_equivalent_renames(
+    entries: dict[str, dict[str, Any]],
+    rename_entries: dict[str, dict[str, Any]],
+) -> None:
+    for rename_entry in rename_entries.values():
+        if rename_entry.get("operation") != "rename":
+            continue
+        source_path = rename_entry.get("source_path")
+        target_path = rename_entry.get("target_path")
+        if not isinstance(source_path, str) or not isinstance(target_path, str):
+            continue
+        source_entry = entries.get(source_path)
+        target_entry = entries.get(target_path)
+        if source_entry is None or target_entry is None:
+            continue
+        if comparable_scope(source_entry) != {"operation": "delete", "source_path": source_path}:
+            continue
+        if comparable_scope(target_entry) != {"operation": "add", "target_path": target_path}:
+            continue
+        entries.pop(source_path)
+        entries[target_path] = dict(rename_entry)
+
+
 def compare_scope(data: dict[str, Any], workspace: Path, target: str) -> dict[str, Any]:
     excluded = scope_excluded_paths(data)
     expected = scope_expected_entries(data, excluded)
     actual = scope_actual_entries(workspace, target, excluded)
+    # Git can classify an unstaged filesystem move as delete+add and the staged
+    # form as a rename. Exact source/target pairs describe the same scope.
+    coalesce_equivalent_renames(expected, actual)
+    coalesce_equivalent_renames(actual, expected)
     missing = [expected[path] for path in sorted(set(expected) - set(actual))]
     extra = [actual[path] for path in sorted(set(actual) - set(expected))]
     mismatched = []
