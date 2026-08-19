@@ -137,14 +137,78 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
     return repo, Path(json.loads(derived.stdout)["manifest"])
 
 
-def preflight(repo: Path, manifest: Path, *options: str) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
+def preflight(
+    repo: Path,
+    manifest: Path,
+    *options: str,
+    card_path: str = "openspec/board/3.inprogress/example-card.md",
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     result = run(
-        [str(HELPER), "preflight", "openspec/board/3.inprogress/example-card.md", "--workspace", str(repo), "--manifest", str(manifest), "--json", *options],
+        [str(HELPER), "preflight", card_path, "--workspace", str(repo), "--manifest", str(manifest), "--json", *options],
         repo,
     )
     if not result.stdout.strip():
         raise AssertionError(f"preflight emitted no machine result: {result.stderr}")
     return result, json.loads(result.stdout)
+
+
+def exact_bounded_authorization_workspace(root: Path) -> tuple[Path, Path]:
+    repo = root / "repo-bounded-review-fingerprint-authorization"
+    while repo.exists():
+        repo = repo.with_name(repo.name + "-next")
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "smoke@example.invalid")
+    git(repo, "config", "user.name", "ChangeRail Smoke")
+    write(repo / ".gitignore", ".runtime/\n")
+    write(repo / "docs" / "base.md", "baseline\n")
+    write(repo / "src" / "base.py", "BASE = True\n")
+    investigation_id = "investigate-bounded-review-fingerprint-payload"
+    successor_id = "deliver-bounded-review-fingerprint-optimization"
+    authorization_id = "authorize-bounded-review-fingerprint-payload"
+    authorization_reference = json.dumps(
+        {
+            "authorization_card": f"openspec/board/4.done/{authorization_id}.md",
+            "authorization_id": authorization_id,
+        },
+        separators=(",", ":"),
+    )
+    authorization_payload = json.dumps(
+        {
+            "investigation_card": f"openspec/board/4.done/{investigation_id}.md",
+            "investigation_id": investigation_id,
+            "successor_card": f"openspec/board/3.inprogress/{successor_id}.md",
+            "successor_id": successor_id,
+            "production_loc_ceiling": 500,
+            "allow_new_authority_or_wire_protocol": False,
+        },
+        separators=(",", ":"),
+    )
+    write(
+        repo / "openspec" / "board" / "4.done" / f"{investigation_id}.md",
+        f"# Investigation\n\n## Status\n4.done\n\n## Blocks\n- `{successor_id}`\n",
+    )
+    write(
+        repo / "openspec" / "board" / "4.done" / f"{authorization_id}.md",
+        "# Authorization\n\n## Status\n4.done\n\n## Depends On\n"
+        f"- `{investigation_id}`\n\n## Authorization\n"
+        f"- Investigation authorization: `{authorization_payload}`\n",
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "baseline")
+    successor_path = f"openspec/board/3.inprogress/{successor_id}.md"
+    write(
+        repo / successor_path,
+        card_text("ordinary", authorization=authorization_reference, blocks=investigation_id),
+    )
+    write(repo / "openspec" / "changes" / "archive" / "2026-08-19-example-change" / "tasks.md", "## Tasks\n\n- [x] done\n")
+    write(repo / "src" / "new.py", "\n".join(f"VALUE_{index} = {index}" for index in range(444)) + "\n")
+    derived = run(
+        [sys.executable, str(MANIFEST_HELPER), "derive", successor_path, "--workspace", str(repo), "--write", "--json"],
+        repo,
+    )
+    require_ok(derived, "derive exact bounded authorization manifest")
+    return repo, Path(json.loads(derived.stdout)["manifest"])
 
 
 def main() -> int:
@@ -285,6 +349,44 @@ def main() -> int:
         repo, manifest = workspace(root, "ordinary", production_lines=444, authorization=True,
                                    self_authorize_reference=True)
         result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        exact_successor_path = "openspec/board/3.inprogress/deliver-bounded-review-fingerprint-optimization.md"
+        repo, manifest = exact_bounded_authorization_workspace(root)
+        result, data = preflight(repo, manifest, "--normalize", card_path=exact_successor_path)
+        require_ok(result, "exact bounded review fingerprint authorization")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["complexity_guard"]["added_production_loc"] == 444
+        assert data["complexity_guard"]["limit"] == 500
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "exact successor payload")
+        authorization_reference = json.dumps(
+            {
+                "authorization_card": "openspec/board/4.done/authorize-bounded-review-fingerprint-payload.md",
+                "authorization_id": "authorize-bounded-review-fingerprint-payload",
+            },
+            separators=(",", ":"),
+        )
+        mismatched_path = "openspec/board/3.inprogress/other-fingerprint-successor.md"
+        write(
+            repo / mismatched_path,
+            card_text(
+                "ordinary",
+                authorization=authorization_reference,
+                blocks="investigate-bounded-review-fingerprint-payload",
+            ).replace("example-change", "mismatch-change"),
+        )
+        write(repo / "openspec" / "changes" / "archive" / "2026-08-19-mismatch-change" / "tasks.md", "## Tasks\n\n- [x] done\n")
+        derived = run(
+            [sys.executable, str(MANIFEST_HELPER), "derive", mismatched_path, "--workspace", str(repo), "--write", "--json"],
+            repo,
+        )
+        require_ok(derived, "derive mismatched bounded authorization manifest")
+        result, data = preflight(repo, Path(json.loads(derived.stdout)["manifest"]), "--normalize", card_path=mismatched_path)
         assert result.returncode == 1
         assert data["outcome"] == "investigation-required"
         assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"

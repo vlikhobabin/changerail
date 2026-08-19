@@ -1,13 +1,13 @@
 # Authorize bounded review fingerprint payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -55,26 +55,32 @@ wire protocol.
 - `authorize-bounded-review-fingerprint-payload`
 
 ## Verify
-- `./bin/openspec validate "authorize-bounded-review-fingerprint-payload" --strict`
-- focused deterministic preflight or smoke verification for the exact successor
-  authorization path
-- `./bin/openspec validate --all --strict`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- `./bin/openspec validate "authorize-bounded-review-fingerprint-payload" --strict` - passed
+- `./bin/openspec validate "changerail-contracts" --strict` - passed
+- `python3 scripts/smoke-review-preflight.py` - passed; exact successor
+  acceptance and mismatched-card rejection covered
+- `./bin/openspec archive "authorize-bounded-review-fingerprint-payload" --yes --skip-specs` - passed
+- `./bin/openspec validate --all --strict` - passed, 33 items after archive
+- `python3 scripts/public-surface-scan.py` - passed, 1048 files scanned, 0 findings
+- `./bin/changerail-delivery-manifest scope-check .runtime/changerail/delivery-manifests/authorize-bounded-review-fingerprint-payload.json --workspace . --target working-tree --json` - passed
+- `git diff --check` - passed
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-authorize-bounded-review-fingerprint-payload/`
 
 ## Related
 - `openspec/changes/authorize-bounded-review-fingerprint-payload/`
-- `openspec/board/2.todo/investigate-bounded-review-fingerprint-payload.md`
-- `openspec/board/1.backlog/deliver-bounded-review-fingerprint-optimization.md`
+- `openspec/changes/archive/2026-08-19-authorize-bounded-review-fingerprint-payload/`
+- `openspec/board/4.done/investigate-bounded-review-fingerprint-payload.md`
+- `openspec/board/2.todo/deliver-bounded-review-fingerprint-optimization.md`
 
 ## Result
-planned
+published; bounded review-fingerprint authorization source complete
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$chrl-do openspec/board/2.todo/authorize-bounded-review-fingerprint-payload.md`
+- done
 
 ## Change 1: `authorize-bounded-review-fingerprint-payload`
 
@@ -128,3 +134,9 @@ production LOC and forbidding any new authority or wire protocol.
 - 2026-08-19T07:51:09Z `$chrl-ff` created
   `authorize-bounded-review-fingerprint-payload`, recorded the bounded
   authorization publication plan and moved the card to `2.todo`.
+- 2026-08-19T08:23:15Z `$chrl-do` synced the bounded authorization requirement,
+  added focused exact-chain preflight smoke coverage and archived
+  `authorize-bounded-review-fingerprint-payload`.
+- 2026-08-19T08:23:51Z `$chrl-do` refreshed the delivery manifest and confirmed
+  working-tree scope reconciliation for review handoff.
+- 2026-08-19T08:43:40Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
