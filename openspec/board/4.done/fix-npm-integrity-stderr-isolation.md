@@ -1,13 +1,13 @@
 # Изолировать npm stderr при проверке integrity
 
 ## Status
-3.inprogress
+4.done
 
 ## Owner
-Codex delivery worker
+unassigned
 
 ## OpenSpec Stage
-implemented and published; lifecycle closure review pending
+archived
 
 ## Review
 - Risk tier: `critical`
@@ -77,17 +77,13 @@ stdout успешной команды, сохраняя stderr для диаг�
 
 ## Result
 Implementation is present in published commit `7aab1eb` and remains in the
-current branch. The original session did not produce a canonical independent
-review receipt before publishing, so the card stays in `3.inprogress` instead
-of being falsely finalized as `4.done`; no code reimplementation is required.
+current branch. A fresh critical final-certification review supplied the missing
+canonical independent review receipt; no code reimplementation was required.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Run this card first in the package plan. Delivery MUST NOT reimplement the
-  fix; it prepares only the lifecycle handoff for a fresh final-certification
-  reviewer.
-- The reviewer audits commit `7aab1eb`, current implementation, regression
-  smoke adequacy, all four acceptance criteria and the current `36/36`
-  baseline before the deterministic card-only finalization.
+- done
 
 ## Log
 - 2026-08-18T09:25:00Z regression reproduced and implementation prepared.
@@ -99,3 +95,7 @@ of being falsely finalized as `4.done`; no code reimplementation is required.
 - 2026-08-19T15:36:00Z package preparation declared a one-time critical
   final-certification milestone so the historical implementation receives a
   fresh semantic audit instead of a docs-only machine receipt.
+- 2026-08-19T16:05:27Z independent critical final-certification review cycle 1
+  returned `go`; one minor non-blocking evidence note was retained in ignored
+  review evidence.
+- 2026-08-19T16:08:35Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
