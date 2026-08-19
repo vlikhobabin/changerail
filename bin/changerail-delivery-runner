@@ -573,6 +573,95 @@ def repository_relative(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+def review_fingerprint(root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    helper = repo_root_from_script() / "bin" / "changerail-review-verdict"
+    result = subprocess.run(
+        [str(helper), "fingerprint", "--workspace", str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None, result.stderr.strip() or result.stdout.strip() or "review fingerprint failed"
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"review fingerprint JSON is invalid: {exc}"
+    return payload if isinstance(payload, dict) else None, "review fingerprint did not return an object"
+
+
+def retained_payload_identity(args: argparse.Namespace, root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    fingerprint, error = review_fingerprint(root)
+    if fingerprint is None:
+        return None, error or "review fingerprint unavailable"
+    missing = [
+        key
+        for key in ("head_commit", "tree_sha", "diff_fingerprint")
+        if not isinstance(fingerprint.get(key), str) or not fingerprint[key]
+    ]
+    if missing:
+        return None, "review fingerprint missing required fields: " + ", ".join(missing)
+    identity = {
+        "schema": "changerail.retained-payload-identity.v1",
+        "source_run_id": args.run_id,
+        "source_status_path": repository_relative(status_path(args), root),
+        "captured_at": utc_now(),
+        "card": {
+            "id": card_id(args.card),
+            "path": args.card,
+        },
+        "workspace": {
+            "root": str(root),
+        },
+        "head_commit": fingerprint["head_commit"],
+        "tree_sha": fingerprint["tree_sha"],
+        "diff_fingerprint": fingerprint["diff_fingerprint"],
+        "review_target": {
+            "kind": "working-tree",
+        },
+    }
+    return identity, None
+
+
+def retained_recovery_summary(child_status: dict[str, Any], run_status_path: str | None = None) -> dict[str, Any] | None:
+    retained = child_status.get("retained_payload")
+    if not isinstance(retained, dict):
+        return None
+    card = retained.get("card")
+    review_target = retained.get("review_target")
+    if not isinstance(card, dict) or not isinstance(review_target, dict):
+        return None
+    summary = {
+        "kind": "original-retained-payload",
+        "source_run_id": retained.get("source_run_id"),
+        "source_run_status_path": run_status_path or retained.get("source_status_path"),
+        "source_terminal_reason": "investigation_required",
+        "card": {
+            "id": card.get("id"),
+            "path": card.get("path"),
+        },
+        "fingerprint": {
+            "head_commit": retained.get("head_commit"),
+            "tree_sha": retained.get("tree_sha"),
+            "diff_fingerprint": retained.get("diff_fingerprint"),
+        },
+        "review_target_kind": review_target.get("kind"),
+    }
+    if all(isinstance(value, str) and value for value in (
+        summary["source_run_id"],
+        summary["source_run_status_path"],
+        summary["source_terminal_reason"],
+        summary["card"]["id"],
+        summary["card"]["path"],
+        summary["fingerprint"]["head_commit"],
+        summary["fingerprint"]["tree_sha"],
+        summary["fingerprint"]["diff_fingerprint"],
+        summary["review_target_kind"],
+    )):
+        return summary
+    return None
+
+
 def current_card_locations(root: Path, card: str) -> list[str]:
     filename = Path(card).name
     seen: set[str] = set()
@@ -927,8 +1016,13 @@ def resolve_plan_card(workspace: Path, card_ref: str) -> tuple[str | None, list[
     return resolved, errors
 
 
-def check_plan_semantics(data: dict[str, Any], consumer_root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[Check]]:
+def check_plan_semantics(
+    data: dict[str, Any],
+    consumer_root: Path,
+    allow_dirty_workspaces: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[Check]]:
     checks: list[Check] = []
+    allow_dirty_workspaces = allow_dirty_workspaces or set()
     workspaces = data.get("workspaces") if isinstance(data.get("workspaces"), list) else []
     cards = data.get("cards") if isinstance(data.get("cards"), list) else []
     waves = data.get("waves") if isinstance(data.get("waves"), list) else []
@@ -957,8 +1051,17 @@ def check_plan_semantics(data: dict[str, Any], consumer_root: Path) -> tuple[lis
         else:
             checks.append(Check("workspace", "pass", f"{alias}: {root}"))
             clean, clean_reason = git_clean(root)
-            checks.append(Check("workspace dirty state", "pass" if clean else "fail", f"{alias}: {clean_reason}"))
-            if not clean:
+            dirty_allowed = alias in allow_dirty_workspaces
+            checks.append(
+                Check(
+                    "workspace dirty state",
+                    "pass" if clean or dirty_allowed else "fail",
+                    f"{alias}: {clean_reason}"
+                    if clean or not dirty_allowed
+                    else f"{alias}: retained investigation recovery will validate exact dirty payload",
+                )
+            )
+            if not clean and not dirty_allowed:
                 state = "blocked"
         entry = {"alias": alias, "path": path, "root": str(root), "state": state}
         workspace_by_alias[alias] = entry
@@ -1154,17 +1257,35 @@ def child_status_path_for(args: argparse.Namespace, card: dict[str, Any], worksp
 
 
 def child_command_for_card(args: argparse.Namespace, card: dict[str, Any], workspace: dict[str, Any], mode: str) -> list[str]:
-    command = [
-        str(args.launcher),
-        "run",
-        card.get("resolved_path") or card["card"],
-        "--workspace",
-        workspace["root"],
-        "--runtime-root",
-        str(child_runtime_root(workspace)),
-        "--run-id",
-        child_run_id(args, card),
-    ]
+    card_path = card.get("resolved_path") or card["card"]
+    resume_status_path = card.get("resume_status_path")
+    if isinstance(resume_status_path, str) and resume_status_path:
+        status_path_value = resolve_path(Path(resume_status_path), args.consumer_root)
+        command = [
+            str(args.launcher),
+            "resume",
+            card_path,
+            "--status-path",
+            str(status_path_value),
+            "--workspace",
+            workspace["root"],
+            "--runtime-root",
+            str(child_runtime_root(workspace)),
+            "--run-id",
+            child_run_id(args, card),
+        ]
+    else:
+        command = [
+            str(args.launcher),
+            "run",
+            card_path,
+            "--workspace",
+            workspace["root"],
+            "--runtime-root",
+            str(child_runtime_root(workspace)),
+            "--run-id",
+            child_run_id(args, card),
+        ]
     if card.get("model"):
         command.extend(["--model", str(card["model"])])
     if card.get("reasoning_effort"):
@@ -1340,6 +1461,7 @@ def plan_status_record(
                 "run_status_path",
                 "result",
                 "terminal_reason",
+                "retained_recovery",
                 "failure_class",
                 "recovered_by",
                 "upstream_state",
@@ -1689,15 +1811,23 @@ def log_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     return run_dir / "stdout.jsonl", run_dir / "stderr.log"
 
 
-def check_preflight(args: argparse.Namespace) -> list[Check]:
+def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = False) -> list[Check]:
     root = args.workspace.resolve(strict=False)
     launcher = args.launcher
     env = child_environment(args)
     codex_home = effective_codex_home(args)
     config = codex_home / "config.toml"
     stale = stale_symlinks(codex_home)
+    clean, clean_reason = git_clean(root)
     checks = [
         Check("workspace", "pass" if root.is_dir() else "fail", str(root)),
+        Check(
+            "workspace dirty state",
+            "pass" if clean or allow_dirty_workspace else "fail",
+            clean_reason
+            if clean or not allow_dirty_workspace
+            else "dirty tree accepted only after retained-payload fingerprint validation",
+        ),
         Check("CODEX_WORKDIR", "pass", env["CODEX_WORKDIR"]),
         Check("launcher exists", "pass" if launcher.is_file() else "fail", str(launcher)),
         Check("launcher executable", "pass" if os.access(launcher, os.X_OK) else "fail", str(launcher)),
@@ -2060,6 +2190,23 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["terminal_outcome"] = outcome
     if terminal_signal.reason:
         record["terminal_reason"] = terminal_signal.reason
+    if outcome == "BLOCKED" and terminal_signal.reason == "investigation_required":
+        identity, identity_error = retained_payload_identity(args, root)
+        if identity:
+            record["retained_payload"] = identity
+        else:
+            checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
+            if isinstance(checks_payload, list):
+                checks_payload.append(
+                    check_payload(
+                        Check(
+                            "retained payload identity",
+                            "fail",
+                            "retained_payload_identity_unavailable",
+                            {"detail": identity_error or "review fingerprint unavailable"},
+                        )
+                    )
+                )
     record.setdefault("process", {})["exit_code"] = exit_code
     record["usage"] = parse_usage(stdout_path)
     performance.record_terminal(outcome, terminal_signal.reason)
@@ -2097,24 +2244,171 @@ def prior_status_remote_failure(prior: dict[str, Any]) -> str | None:
     return None
 
 
-def resume_prior_checks(args: argparse.Namespace) -> list[Check]:
+def resume_fail(name: str, message: str, reason: str) -> tuple[list[Check], str]:
+    return [Check(name, "fail", message, {"detail": reason})], reason
+
+
+def authorization_failure_reason(preflight: dict[str, Any] | None) -> str:
+    if not isinstance(preflight, dict):
+        return "retained_resume_preflight_failed"
+    guard = preflight.get("complexity_guard")
+    authorization = guard.get("published_investigation_authorization") if isinstance(guard, dict) else None
+    if isinstance(authorization, dict):
+        status = authorization.get("status")
+        detail = str(authorization.get("detail", "")).lower()
+        if status == "missing":
+            return "authorization_absence"
+        if status == "invalid":
+            if "unchanged tracked head" in detail or "tracked" in detail or "4.done" in detail:
+                return "authorization_stale"
+            if any(fragment in detail for fragment in ("successor", "investigation", "depends on", "blocks", "path/id", "reference")):
+                return "relation_mismatch"
+            if "production_loc_ceiling" in detail:
+                return "authorization_ceiling_violation"
+            return "authorization_validation_failed"
+    if isinstance(guard, dict):
+        reasons = guard.get("reasons")
+        if isinstance(reasons, list):
+            joined = " ".join(str(reason).lower() for reason in reasons)
+            if "added production loc" in joined or "exceeds" in joined:
+                return "authorization_ceiling_violation"
+            if "new authority or wire protocol" in joined:
+                return "authorization_absence"
+    return "retained_resume_preflight_failed"
+
+
+def retained_resume_review_preflight(args: argparse.Namespace) -> tuple[Check, str | None]:
+    root = args.workspace.resolve(strict=False)
+    output = args.runtime_root / args.run_id / "retained-resume-review-preflight.json"
+    helper = repo_root_from_script() / "bin" / "changerail-review-verdict"
+    result = subprocess.run(
+        [
+            str(helper),
+            "preflight",
+            args.card,
+            "--workspace",
+            str(root),
+            "--output",
+            str(output),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    try:
+        preflight = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        preflight = None
+    if result.returncode == 0 and isinstance(preflight, dict):
+        authorization = preflight.get("complexity_guard", {}).get("published_investigation_authorization", {})
+        if isinstance(authorization, dict) and authorization.get("status") == "valid":
+            return (
+                Check(
+                    "published investigation authorization",
+                    "pass",
+                    "deterministic review preflight accepted the retained resume authorization",
+                    {"detail": repository_relative(output, root)},
+                ),
+                None,
+            )
+    reason = authorization_failure_reason(preflight)
+    detail = result.stderr.strip() or result.stdout.strip() or "review preflight failed"
+    return (
+        Check("published investigation authorization", "fail", compact_reason(detail), {"detail": reason}),
+        reason,
+    )
+
+
+def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+    root = args.workspace.resolve(strict=False)
+    retained = prior.get("retained_payload")
+    if not isinstance(retained, dict):
+        checks, reason = resume_fail("retained payload identity", "prior status has no retained_payload identity", "missing_retained_identity")
+        return checks, reason, False
+    expected_status_path = repository_relative(args.status_path, root)
+    if retained.get("source_run_id") != prior.get("run_id") or retained.get("source_status_path") != expected_status_path:
+        checks, reason = resume_fail(
+            "retained payload source",
+            "retained payload source run/status does not match the resume input",
+            "prior_status_mismatch",
+        )
+        return checks, reason, False
+    retained_card = retained.get("card")
+    if not isinstance(retained_card, dict) or retained_card.get("id") != card_id(args.card) or retained_card.get("path") != args.card:
+        checks, reason = resume_fail("retained payload card", "retained payload belongs to another card", "card_mismatch")
+        return checks, reason, False
+    retained_workspace = retained.get("workspace")
+    if not isinstance(retained_workspace, dict) or retained_workspace.get("root") != str(root):
+        checks, reason = resume_fail("retained payload workspace", "retained payload belongs to another workspace", "workspace_mismatch")
+        return checks, reason, False
+    review_target = retained.get("review_target")
+    if not isinstance(review_target, dict) or review_target.get("kind") != "working-tree":
+        checks, reason = resume_fail(
+            "retained payload review target",
+            "retained payload does not identify the working tree review target",
+            "missing_retained_identity",
+        )
+        return checks, reason, False
+    fingerprint, fingerprint_error = review_fingerprint(root)
+    if fingerprint is None:
+        checks, reason = resume_fail(
+            "retained payload fingerprint",
+            fingerprint_error or "current retained payload fingerprint cannot be computed",
+            "retained_payload_fingerprint_unavailable",
+        )
+        return checks, reason, False
+    mismatched = [
+        key
+        for key in ("head_commit", "tree_sha", "diff_fingerprint")
+        if fingerprint.get(key) != retained.get(key)
+    ]
+    if mismatched:
+        checks, reason = resume_fail(
+            "retained payload fingerprint",
+            "current retained payload fingerprint differs: " + ", ".join(mismatched),
+            "payload_drift",
+        )
+        return checks, reason, False
+    preflight_check, preflight_reason = retained_resume_review_preflight(args)
+    checks = [
+        Check("resume prior status", "pass", "prior investigation_required status accepted"),
+        Check("retained payload fingerprint", "pass", "current working tree matches retained identity"),
+        preflight_check,
+    ]
+    return checks, preflight_reason, preflight_reason is None
+
+
+def resume_prior_checks(args: argparse.Namespace) -> tuple[list[Check], str | None, bool]:
     prior = load_json_object(args.status_path)
     if prior is None:
-        return [Check("resume prior status", "fail", f"prior status cannot be read: {args.status_path}")]
+        checks, reason = resume_fail("resume prior status", f"prior status cannot be read: {args.status_path}", "prior_status_invalid")
+        return checks, reason, False
     errors = schema_errors(prior, "changerail-delivery-run.schema.json")
     if errors:
-        return [Check("resume prior status", "fail", "; ".join(errors))]
+        checks, reason = resume_fail("resume prior status", "; ".join(errors), "prior_status_invalid")
+        return checks, reason, False
     if prior.get("schema") != SCHEMA or prior.get("result") != "BLOCKED":
-        return [Check("resume prior status", "fail", "prior status is not a blocked delivery-run record")]
+        checks, reason = resume_fail("resume prior status", "prior status is not a blocked delivery-run record", "prior_status_invalid")
+        return checks, reason, False
     prior_workspace = prior.get("workspace", {}).get("root")
     if prior_workspace != str(args.workspace.resolve(strict=False)):
-        return [Check("resume prior status", "fail", "prior status belongs to another workspace")]
+        checks, reason = resume_fail("resume prior status", "prior status belongs to another workspace", "workspace_mismatch")
+        return checks, reason, False
     prior_card = prior.get("card", {}).get("path")
     if prior_card != args.card:
-        return [Check("resume prior status", "fail", "prior status belongs to another card")]
+        checks, reason = resume_fail("resume prior status", "prior status belongs to another card", "card_mismatch")
+        return checks, reason, False
+    if prior.get("terminal_reason") == "investigation_required":
+        return retained_resume_checks(args, prior)
     failure_class = prior_status_remote_failure(prior)
     if not failure_class:
-        return [Check("resume prior status", "fail", "prior status did not stop at remote publish-target preflight")]
+        checks, reason = resume_fail(
+            "resume prior status",
+            "prior status did not stop at a recoverable remote or retained-payload boundary",
+            "prior_status_not_recoverable",
+        )
+        return checks, reason, False
     return [
         Check(
             "resume prior status",
@@ -2122,25 +2416,25 @@ def resume_prior_checks(args: argparse.Namespace) -> list[Check]:
             f"prior remote preflight failure accepted: {failure_class}",
             {"failure_class": failure_class},
         )
-    ]
+    ], None, False
 
 
 def command_resume(args: argparse.Namespace) -> int:
     args.started_at = utc_now()
-    resume_checks = resume_prior_checks(args)
+    resume_checks, failure_reason, allow_dirty_workspace = resume_prior_checks(args)
     if any(check.status == "fail" for check in resume_checks):
         record = base_record(args, "terminal", "BLOCKED")
         record["preflight"] = {"checks": [check_payload(check) for check in resume_checks]}
         record["terminal_outcome"] = "BLOCKED"
-        record["terminal_reason"] = "resume_prior_status_invalid"
+        record["terminal_reason"] = failure_reason or "resume_prior_status_invalid"
         record["timestamps"]["ended_at"] = utc_now()
         args.runtime_root.mkdir(parents=True, exist_ok=True)
         atomic_write_json(status_path(args), record)
         print("terminal_outcome: BLOCKED")
-        print("terminal_reason: resume_prior_status_invalid")
+        print(f"terminal_reason: {record['terminal_reason']}")
         print(f"status: {status_path(args)}")
         return 1
-    return run_single_card_delivery(args, resume_checks + check_preflight(args))
+    return run_single_card_delivery(args, resume_checks + check_preflight(args, allow_dirty_workspace))
 
 
 def workspace_lock_path(args: argparse.Namespace, workspace: dict[str, Any]) -> Path:
@@ -2245,14 +2539,62 @@ def dependency_list(card: dict[str, Any]) -> list[str]:
     return [dependency for dependency in dependencies if isinstance(dependency, str)]
 
 
+def retained_recovery_is_valid(card: dict[str, Any]) -> bool:
+    if card.get("terminal_reason") != "investigation_required":
+        return False
+    retained = card.get("retained_recovery")
+    if not isinstance(retained, dict):
+        return False
+    fingerprint = retained.get("fingerprint")
+    retained_card = retained.get("card")
+    return (
+        retained.get("kind") == "original-retained-payload"
+        and retained.get("source_terminal_reason") == "investigation_required"
+        and isinstance(retained.get("source_run_id"), str)
+        and isinstance(retained.get("source_run_status_path"), str)
+        and isinstance(retained_card, dict)
+        and isinstance(fingerprint, dict)
+        and retained_card.get("id") == card.get("id")
+        and isinstance(retained_card.get("path"), str)
+        and isinstance(fingerprint.get("head_commit"), str)
+        and isinstance(fingerprint.get("tree_sha"), str)
+        and isinstance(fingerprint.get("diff_fingerprint"), str)
+        and retained.get("review_target_kind") == "working-tree"
+    )
+
+
 def recoverable_source(card: dict[str, Any]) -> bool:
     if card.get("state") == "no-go" and card.get("result") == "NO-GO":
+        return True
+    if (
+        card.get("state") == "blocked"
+        and card.get("result") == "BLOCKED"
+        and retained_recovery_is_valid(card)
+    ):
         return True
     return (
         card.get("state") == "blocked"
         and card.get("result") == "BLOCKED"
         and card.get("terminal_reason") == "fix_budget_exhausted"
     )
+
+
+def retained_original_resume_workspaces(previous: dict[str, Any] | None, data: dict[str, Any]) -> set[str]:
+    if not isinstance(previous, dict):
+        return set()
+    if previous.get("plan", {}).get("fingerprint") != plan_fingerprint(data):
+        return set()
+    cards = previous.get("cards")
+    if not isinstance(cards, list):
+        return set()
+    workspaces: set[str] = set()
+    for card in cards:
+        if not isinstance(card, dict) or not retained_recovery_is_valid(card):
+            continue
+        workspace = card.get("workspace")
+        if isinstance(workspace, str):
+            workspaces.add(workspace)
+    return workspaces
 
 
 def recovery_by_source(cards: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -2397,7 +2739,11 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
         record = blocked_plan_status_for_errors(args, errors, data)
         atomic_write_json(plan_status_path(args), record)
         return record, 1
-    workspaces, cards, checks = check_plan_semantics(data, args.consumer_root)
+    previous = load_json_object(args.status_path) if resume and getattr(args, "status_path", None) else None
+    if resume and previous is None:
+        previous = load_json_object(plan_status_path(args))
+    allow_dirty_workspaces = retained_original_resume_workspaces(previous, data) if resume else set()
+    workspaces, cards, checks = check_plan_semantics(data, args.consumer_root, allow_dirty_workspaces)
     checks.append(Check("single-card runner exists", "pass" if args.launcher.is_file() else "fail", str(args.launcher)))
     checks.append(Check("single-card runner executable", "pass" if os.access(args.launcher, os.X_OK) else "fail", str(args.launcher)))
     workspace_by_alias = {workspace["alias"]: workspace for workspace in workspaces}
@@ -2408,9 +2754,6 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
     if any(check.status == "fail" for check in checks):
         record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
         return record, 1
-    previous = load_json_object(args.status_path) if resume and getattr(args, "status_path", None) else None
-    if resume and previous is None:
-        previous = load_json_object(plan_status_path(args))
     if resume:
         previous_fingerprint = previous.get("plan", {}).get("fingerprint") if isinstance(previous, dict) else None
         if previous_fingerprint != plan_fingerprint(data) and not (
@@ -2436,6 +2779,17 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 card["state"] = "skipped"
                 card["result"] = "DELIVERED"
                 card["reason"] = f"already delivered; {reason}"
+        if resume and isinstance(previous_card, dict) and retained_recovery_is_valid(previous_card):
+            retained_recovery = previous_card.get("retained_recovery")
+            if isinstance(retained_recovery, dict):
+                card["retained_recovery"] = retained_recovery
+            if card["id"] not in recovery_by_source(cards):
+                status_path = previous_card.get("run_status_path")
+                if not isinstance(status_path, str) or not status_path:
+                    status_path = retained_recovery.get("source_run_status_path") if isinstance(retained_recovery, dict) else None
+                if isinstance(status_path, str) and status_path:
+                    card["resume_status_path"] = status_path
+                    card["reason"] = "retained investigation recovery will resume original child"
         if resume and isinstance(previous_card, dict) and recoverable_source(previous_card):
             recoveries = recovery_by_source(cards)
             if card["id"] in recoveries:
@@ -2443,6 +2797,8 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 card["result"] = previous_card.get("result")
                 if isinstance(previous_card.get("terminal_reason"), str):
                     card["terminal_reason"] = previous_card["terminal_reason"]
+                if isinstance(previous_card.get("retained_recovery"), dict):
+                    card["retained_recovery"] = previous_card["retained_recovery"]
                 if isinstance(previous_card.get("reason"), str):
                     card["reason"] = previous_card["reason"]
                 if isinstance(previous_card.get("run_status_path"), str):
@@ -2515,6 +2871,10 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
             card["result"] = child_result
             if child_signal.reason:
                 card["terminal_reason"] = child_signal.reason
+            if child_signal.reason == "investigation_required" and isinstance(child_status, dict):
+                retained = retained_recovery_summary(child_status, card.get("run_status_path"))
+                if retained:
+                    card["retained_recovery"] = retained
             if child_result == "DELIVERED":
                 ok, reason, details = queue_success_check(workspace, card, mode)
                 card.update(details)

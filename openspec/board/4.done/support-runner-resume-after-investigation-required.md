@@ -1,13 +1,13 @@
 # Support runner resume after investigation-required
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -73,23 +73,30 @@ checkpoint commit as review evidence.
 - Reading or publishing raw child logs as recovery proof.
 
 ## Change Set
-- `record-investigation-required-payload-identity`
-- `resume-investigation-required-single-card`
-- `support-investigation-required-queue-recovery`
+- `record-investigation-required-payload-identity` (archived)
+- `resume-investigation-required-single-card` (archived)
+- `support-investigation-required-queue-recovery` (archived)
 
 ## Verify
 - GREEN: `./bin/openspec validate record-investigation-required-payload-identity --strict`
 - GREEN: `./bin/openspec validate resume-investigation-required-single-card --strict`
 - GREEN: `./bin/openspec validate support-investigation-required-queue-recovery --strict`
-- GREEN: `./bin/openspec validate --all --strict` -> 26/26 passed.
+- GREEN: `./bin/openspec validate --all --strict` -> 24/24 passed.
+- GREEN: `python3 scripts/smoke-delivery-runner.py` -> `ok: delivery runner smoke passed`
+- GREEN: `python3 scripts/smoke-contract-schemas.py` -> `SMOKE_CONTRACT_SCHEMAS_OK (21 schemas)`
 - GREEN: `git diff --check`
 - GREEN: untracked-file trailing-whitespace scan over `git ls-files --others
   --exclude-standard`
-- GREEN: `python3 scripts/public-surface-scan.py` -> 1069 files scanned, 0
+- GREEN: `bin/changerail-delivery-manifest scope-check
+  .runtime/changerail/delivery-manifests/support-runner-resume-after-investigation-required.json
+  --workspace . --target working-tree --json`
+- GREEN: `python3 scripts/public-surface-scan.py` -> 1086 files scanned, 0
   findings.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-record-investigation-required-payload-identity/`
+- `openspec/changes/archive/2026-08-19-resume-investigation-required-single-card/`
+- `openspec/changes/archive/2026-08-19-support-investigation-required-queue-recovery/`
 
 ## Related
 - `bin/changerail-delivery-runner`
@@ -98,20 +105,16 @@ checkpoint commit as review evidence.
 - `openspec/specs/changerail-delivery-runner/spec.md`
 - `openspec/specs/changerail-contracts/spec.md`
 - `openspec/board/4.done/investigate-runner-retained-resume-payload-boundary.md`
-- `openspec/board/2.todo/authorize-bounded-runner-retained-resume-payload.md`
-- `openspec/changes/record-investigation-required-payload-identity/`
-- `openspec/changes/resume-investigation-required-single-card/`
-- `openspec/changes/support-investigation-required-queue-recovery/`
+- `openspec/board/4.done/authorize-bounded-runner-retained-resume-payload.md`
+- `openspec/changes/archive/2026-08-19-record-investigation-required-payload-identity/`
+- `openspec/changes/archive/2026-08-19-resume-investigation-required-single-card/`
+- `openspec/changes/archive/2026-08-19-support-investigation-required-queue-recovery/`
 
 ## Result
-not started
+implemented, verified, independently reviewed and finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Deliver `authorize-bounded-runner-retained-resume-payload`, then run
-  `$changerail-deliver openspec/board/2.todo/support-runner-resume-after-investigation-required.md`.
-- Simplify the retained implementation to at most 500 added
-  production-counted LOC without weakening the investigation verification
-  floor; the WIP checkpoint remains investigation input only.
+- done
 
 ## Change 1: `record-investigation-required-payload-identity`
 
@@ -144,7 +147,7 @@ HEAD, tree, diff fingerprint and review target.
 - none
 
 ### Related
-- `openspec/changes/record-investigation-required-payload-identity/`
+- `openspec/changes/archive/2026-08-19-record-investigation-required-payload-identity/`
 
 ## Change 2: `resume-investigation-required-single-card`
 
@@ -178,7 +181,7 @@ clean and tracked at `HEAD`.
 - `record-investigation-required-payload-identity`
 
 ### Related
-- `openspec/changes/resume-investigation-required-single-card/`
+- `openspec/changes/archive/2026-08-19-resume-investigation-required-single-card/`
 
 ## Change 3: `support-investigation-required-queue-recovery`
 
@@ -212,7 +215,7 @@ reviewed and published.
 - `resume-investigation-required-single-card`
 
 ### Related
-- `openspec/changes/support-investigation-required-queue-recovery/`
+- `openspec/changes/archive/2026-08-19-support-investigation-required-queue-recovery/`
 
 ## Triage Decision
 - Move to `2.todo`: bounded replacement already delivered, but the original
@@ -235,3 +238,16 @@ reviewed and published.
 - 2026-08-19T15:25:29Z final all-change validation and whitespace checks
   passed.
 - 2026-08-19T15:26:01Z current-tree public-surface scan passed.
+- 2026-08-19T18:04:03Z `$changerail-deliver` revalidated apply-ready
+  artifacts, corrected the published authorization relation and moved the card
+  to `3.inprogress` for delivery.
+- 2026-08-19T18:24:58Z `$changerail-do` implemented retained-payload identity,
+  single-card retained resume and queue recovery, synced specs, completed
+  focused smokes, archived the three OpenSpec changes and prepared review
+  handoff.
+- 2026-08-19T18:42:39Z independent review cycle 1 returned `no-go` with
+  blockers R1 smoke reproducibility and R2 missing ordinary clean-tree gate;
+  same-card rescue added deterministic timeout smoke logging, clean-tree
+  preflight enforcement for ordinary run/remote resume, retained-resume dirty
+  bypass isolation and focused smoke coverage. Verification floor rerun passed.
+- 2026-08-19T19:09:38Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

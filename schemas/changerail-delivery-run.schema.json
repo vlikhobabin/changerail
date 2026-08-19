@@ -133,6 +133,9 @@
     "terminal_reason": {
       "$ref": "#/$defs/terminalReason"
     },
+    "retained_payload": {
+      "$ref": "#/$defs/retainedPayloadIdentity"
+    },
     "commit": {
       "type": "string",
       "minLength": 1
@@ -524,6 +527,87 @@
     "terminalReason": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9_]*$"
+    },
+    "retainedPayloadIdentity": {
+      "type": "object",
+      "required": [
+        "schema",
+        "source_run_id",
+        "source_status_path",
+        "captured_at",
+        "card",
+        "workspace",
+        "head_commit",
+        "tree_sha",
+        "diff_fingerprint",
+        "review_target"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.retained-payload-identity.v1"
+        },
+        "source_run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_status_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "card": {
+          "type": "object",
+          "required": ["id", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "required": ["root"],
+          "additionalProperties": false,
+          "properties": {
+            "root": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "head_commit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tree_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "diff_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "review_target": {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "working-tree"
+            }
+          }
+        }
+      }
     },
     "check": {
       "type": "object",

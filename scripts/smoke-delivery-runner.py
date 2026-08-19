@@ -637,7 +637,7 @@ def write_fake_git(path: Path) -> None:
                 "if mode == 'missing_branch':",
                 "    sys.exit(2)",
                 "if mode == 'timeout':",
-                "    time.sleep(0.2)",
+                "    time.sleep(2.0)",
                 "    sys.exit(128)",
                 "if mode == 'unknown_remote_failure':",
                 "    sys.stderr.write('fatal: remote end hung up unexpectedly\\n')",
@@ -691,6 +691,15 @@ def write_fake_queue_runner(path: Path) -> None:
                 "preflight.add_argument('--deliver-arg', action='append', default=[])",
                 "preflight.add_argument('--json', action='store_true')",
                 "preflight.add_argument('--write-status', action='store_true')",
+                "resume = sub.add_parser('resume')",
+                "resume.add_argument('card')",
+                "resume.add_argument('--status-path', required=True)",
+                "resume.add_argument('--workspace', required=True)",
+                "resume.add_argument('--runtime-root', required=True)",
+                "resume.add_argument('--run-id', required=True)",
+                "resume.add_argument('--model')",
+                "resume.add_argument('--reasoning-effort')",
+                "resume.add_argument('--deliver-arg', action='append', default=[])",
                 "args = parser.parse_args()",
                 "mode = os.environ.get('CHANGERAIL_QUEUE_FAKE_MODE')",
                 "preflight_mode = os.environ.get('CHANGERAIL_QUEUE_PREFLIGHT_MODE')",
@@ -729,6 +738,10 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    sys.exit(0 if result == 'DELIVERED' else 1)",
                 "if mode == 'missing-status' and 'service-a-card' in args.card:",
                 "    sys.exit(0)",
+                "if args.command == 'resume':",
+                "    dirty = Path(args.workspace) / 'DIRTY.txt'",
+                "    if dirty.exists():",
+                "        dirty.unlink()",
                 "result = 'DELIVERED'",
                 "terminal_reason = None",
                 "if mode == 'no-go' and 'service-a-card' in args.card:",
@@ -738,11 +751,24 @@ def write_fake_queue_runner(path: Path) -> None:
                 "if mode == 'fix-budget' and 'service-a-card' in args.card:",
                 "    result = 'BLOCKED'",
                 "    terminal_reason = 'fix_budget_exhausted'",
+                "if mode == 'investigation-required' and 'service-a-card' in args.card and args.command == 'run':",
+                "    result = 'BLOCKED'",
+                "    terminal_reason = 'investigation_required'",
                 "if mode == 'external-blocker' and 'service-a-card' in args.card:",
                 "    result = 'BLOCKED'",
                 "    terminal_reason = 'external_blocker'",
                 "if mode == 'recovery-no-go' and 'service-a-recovery' in args.card:",
                 "    result = 'NO-GO'",
+                "if args.command == 'resume' and 'service-a-card' in args.card:",
+                "    resume_reasons = {",
+                "        'resume-stale-auth': 'authorization_stale',",
+                "        'resume-wrong-card': 'card_mismatch',",
+                "        'resume-wrong-workspace': 'workspace_mismatch',",
+                "        'resume-fingerprint-drift': 'payload_drift',",
+                "    }",
+                "    if mode in resume_reasons:",
+                "        result = 'BLOCKED'",
+                "        terminal_reason = resume_reasons[mode]",
                 "status = {",
                 "    'schema': 'changerail.delivery-run.v1',",
                 "    'run_id': args.run_id,",
@@ -758,6 +784,19 @@ def write_fake_queue_runner(path: Path) -> None:
                 "}",
                 "if terminal_reason:",
                 "    status['terminal_reason'] = terminal_reason",
+                "if terminal_reason == 'investigation_required':",
+                "    status['retained_payload'] = {",
+                "        'schema': 'changerail.retained-payload-identity.v1',",
+                "        'source_run_id': args.run_id,",
+                "        'source_status_path': str(Path('.runtime/changerail/delivery-runs') / args.run_id / 'status.json'),",
+                "        'captured_at': '2026-07-15T00:00:00Z',",
+                "        'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
+                "        'workspace': {'root': args.workspace},",
+                "        'head_commit': '1' * 40,",
+                "        'tree_sha': '2' * 40,",
+                "        'diff_fingerprint': 'sha256:' + '3' * 64,",
+                "        'review_target': {'kind': 'working-tree'},",
+                "    }",
                 "path = Path(args.runtime_root) / args.run_id / 'status.json'",
                 "path.parent.mkdir(parents=True, exist_ok=True)",
                 "path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
@@ -793,6 +832,14 @@ def write_board_card(workspace: Path, card: str) -> None:
             ]
         ),
         encoding="utf-8",
+    )
+
+
+def commit_paths(workspace: Path, message: str, *paths: str) -> None:
+    git(["add", *paths], workspace)
+    git(
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", message],
+        workspace,
     )
 
 
@@ -1234,6 +1281,315 @@ def write_stale_go_verdict(workspace: Path, card: str) -> Path:
     return verdict_path
 
 
+RETAINED_CARD = "openspec/board/3.inprogress/retained-card.md"
+RETAINED_CHANGE = "retained-resume-smoke"
+RETAINED_INVESTIGATION = "openspec/board/4.done/retained-investigation.md"
+RETAINED_AUTHORIZATION = "openspec/board/4.done/retained-authorization.md"
+RETAINED_PAYLOAD = "bin/retained-runner"
+
+
+def retained_card_text() -> str:
+    return "\n".join(
+        [
+            "# Retained resume smoke",
+            "",
+            "## Status",
+            "3.inprogress",
+            "",
+            "## Review",
+            "- Risk tier: `critical`",
+            "- Milestone audit: `no`",
+            "- New authority or wire protocol: `yes`",
+            "- Credential or mutation authority: `no`",
+            "- Repeated defect class: `no`",
+            "- Live admission: `no`",
+            "- Final certification: `no`",
+            '- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/retained-authorization.md","authorization_id":"retained-authorization"}`',
+            "",
+            "## Depends On",
+            "- `retained-investigation`",
+            "",
+            "## Change Set",
+            f"- `{RETAINED_CHANGE}`",
+            "",
+            f"## Change 1: `{RETAINED_CHANGE}`",
+            "",
+            "### Depends On",
+            "- none",
+            "",
+        ]
+    )
+
+
+def retained_investigation_text() -> str:
+    return "\n".join(
+        [
+            "# Retained investigation",
+            "",
+            "## Status",
+            "4.done",
+            "",
+            "## Blocks",
+            "- `retained-card`",
+            "",
+        ]
+    )
+
+
+def retained_authorization_text(*, successor_id: str = "retained-card", ceiling: int = 500) -> str:
+    authorization = {
+        "investigation_card": RETAINED_INVESTIGATION,
+        "investigation_id": "retained-investigation",
+        "successor_card": RETAINED_CARD,
+        "successor_id": successor_id,
+        "production_loc_ceiling": ceiling,
+        "allow_new_authority_or_wire_protocol": True,
+    }
+    return "\n".join(
+        [
+            "# Retained authorization",
+            "",
+            "## Status",
+            "4.done",
+            "",
+            "## Depends On",
+            "- `retained-investigation`",
+            "",
+            "## Authorization",
+            f"- Investigation authorization: `{json.dumps(authorization, separators=(',', ':'))}`",
+            "",
+        ]
+    )
+
+
+def retained_manifest(workspace: Path) -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-manifest.v1",
+        "updated_at": "2026-08-01T00:00:00Z",
+        "workspace": {"root": str(workspace), "repository": workspace.name},
+        "card": {"id": "retained-card", "path": RETAINED_CARD, "status": "3.inprogress"},
+        "changes": [
+            {
+                "slug": RETAINED_CHANGE,
+                "state": "archived",
+                "order": 1,
+                "archive_path": f"openspec/changes/archive/2026-08-01-{RETAINED_CHANGE}",
+            }
+        ],
+        "committable_paths": [
+            {
+                "path": RETAINED_PAYLOAD,
+                "kind": "helper",
+                "phase": "do",
+                "operation": "add",
+                "target_path": RETAINED_PAYLOAD,
+            }
+        ],
+        "excluded_runtime_paths": [
+            {
+                "path": ".runtime/changerail/delivery-manifests/retained-card.json",
+                "kind": "manifest",
+                "phase": "do",
+                "reason": "ignored runtime manifest",
+            }
+        ],
+        "preexisting_dirty": [],
+        "verification_summary": {"result": "passed", "summary": "retained resume smoke fixture"},
+    }
+
+
+def create_retained_resume_workspace(
+    tmp: Path,
+    name: str,
+    *,
+    payload_lines: int = 3,
+    successor_id: str = "retained-card",
+    auth_dirty_before_fingerprint: bool = False,
+    ceiling: int = 500,
+) -> tuple[Path, Path, Path]:
+    workspace = create_workspace(tmp, name)
+    (workspace / RETAINED_CARD).parent.mkdir(parents=True, exist_ok=True)
+    (workspace / RETAINED_CARD).write_text(retained_card_text(), encoding="utf-8")
+    (workspace / RETAINED_INVESTIGATION).parent.mkdir(parents=True, exist_ok=True)
+    (workspace / RETAINED_INVESTIGATION).write_text(retained_investigation_text(), encoding="utf-8")
+    (workspace / RETAINED_AUTHORIZATION).write_text(
+        retained_authorization_text(successor_id=successor_id, ceiling=ceiling),
+        encoding="utf-8",
+    )
+    archive = workspace / "openspec" / "changes" / "archive" / f"2026-08-01-{RETAINED_CHANGE}"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "proposal.md").write_text("## Why\n\nRetained resume smoke.\n", encoding="utf-8")
+    git(["add", "openspec"], workspace)
+    git(
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "retained auth fixture"],
+        workspace,
+    )
+    if auth_dirty_before_fingerprint:
+        with (workspace / RETAINED_AUTHORIZATION).open("a", encoding="utf-8") as handle:
+            handle.write("\n<!-- stale authorization smoke -->\n")
+    payload = workspace / RETAINED_PAYLOAD
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    payload.write_text("\n".join(f"echo retained-{index}" for index in range(payload_lines)) + "\n", encoding="utf-8")
+    payload.chmod(0o755)
+    manifest_path = workspace / ".runtime" / "changerail" / "delivery-manifests" / "retained-card.json"
+    write_json(manifest_path, retained_manifest(workspace))
+    runtime = workspace / ".runtime" / "changerail" / "delivery-runs"
+    prior_path = runtime / "retained-prior" / "status.json"
+    fingerprint_data = review_fingerprint(workspace)
+    prior = {
+        "schema": "changerail.delivery-run.v1",
+        "run_id": "retained-prior",
+        "updated_at": "2026-08-01T00:00:00Z",
+        "workspace": {"root": str(workspace), "repository": workspace.name, "head_commit": fingerprint_data["head_commit"]},
+        "card": {"id": "retained-card", "path": RETAINED_CARD},
+        "phase": "terminal",
+        "result": "BLOCKED",
+        "terminal_outcome": "BLOCKED",
+        "terminal_reason": "investigation_required",
+        "timestamps": {"started_at": "2026-08-01T00:00:00Z", "ended_at": "2026-08-01T00:00:01Z"},
+        "command": {"argv": ["fake"], "launcher": "fake", "stdin": "closed", "json": True},
+        "usage": {"available": False, "reason": "smoke retained prior"},
+        "retained_payload": {
+            "schema": "changerail.retained-payload-identity.v1",
+            "source_run_id": "retained-prior",
+            "source_status_path": ".runtime/changerail/delivery-runs/retained-prior/status.json",
+            "captured_at": "2026-08-01T00:00:00Z",
+            "card": {"id": "retained-card", "path": RETAINED_CARD},
+            "workspace": {"root": str(workspace)},
+            "head_commit": fingerprint_data["head_commit"],
+            "tree_sha": fingerprint_data["tree_sha"],
+            "diff_fingerprint": fingerprint_data["diff_fingerprint"],
+            "review_target": {"kind": "working-tree"},
+        },
+    }
+    write_json(prior_path, prior)
+    return workspace, runtime, prior_path
+
+
+def run_retained_resume(
+    workspace: Path,
+    runtime: Path,
+    prior_path: Path,
+    launcher: Path,
+    *,
+    run_id: str,
+    card: str = RETAINED_CARD,
+) -> subprocess.CompletedProcess[str]:
+    return run(
+        [
+            str(RUNNER),
+            "resume",
+            card,
+            "--status-path",
+            str(prior_path),
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            run_id,
+            "--launcher",
+            str(launcher),
+        ],
+        env={**runner_env(), "CHANGERAIL_FAKE_MODE": "success"},
+    )
+
+
+def check_retained_payload_status_schema_and_single_card_resume(tmp: Path) -> None:
+    workspace, runtime, prior_path = create_retained_resume_workspace(tmp, "retained-resume-ok")
+    launcher = tmp / "fake-retained-resume"
+    write_fake_launcher(launcher)
+    result = run_retained_resume(workspace, runtime, prior_path, launcher, run_id="retained-resume-ok")
+    require_ok(result, "retained single-card resume")
+    status = load_status(runtime, "retained-resume-ok")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["retained payload fingerprint"]["status"] != "pass":
+        raise AssertionError(f"retained fingerprint check did not pass: {status}")
+    if checks["published investigation authorization"]["status"] != "pass":
+        raise AssertionError(f"retained authorization check did not pass: {status}")
+
+    prior = json.loads(prior_path.read_text(encoding="utf-8"))
+    invalid = json.loads(json.dumps(prior))
+    invalid["retained_payload"]["raw_stdout"] = "RAW_CHILD_STDOUT_SHOULD_NOT_BE_SCHEMA_VALID"
+    invalid_path = runtime / "retained-invalid" / "status.json"
+    write_json(invalid_path, invalid)
+    invalid_result = run_retained_resume(workspace, runtime, invalid_path, launcher, run_id="retained-invalid")
+    if invalid_result.returncode == 0:
+        raise AssertionError("retained status with raw stdout unexpectedly resumed")
+    invalid_status = load_status(runtime, "retained-invalid")
+    if invalid_status.get("terminal_reason") != "prior_status_invalid":
+        raise AssertionError(f"invalid retained schema did not fail closed: {invalid_status}")
+
+
+def check_retained_payload_resume_fail_closed(tmp: Path) -> None:
+    launcher = tmp / "fake-retained-resume-fail"
+    write_fake_launcher(launcher)
+
+    wrong_workspace, runtime, prior_path = create_retained_resume_workspace(tmp, "retained-wrong-workspace-source")
+    other_workspace = create_workspace(tmp, "retained-wrong-workspace-other")
+    wrong_workspace_result = run_retained_resume(other_workspace, runtime, prior_path, launcher, run_id="retained-wrong-workspace")
+    if wrong_workspace_result.returncode == 0:
+        raise AssertionError("wrong workspace retained resume unexpectedly passed")
+    if load_status(runtime, "retained-wrong-workspace").get("terminal_reason") != "workspace_mismatch":
+        raise AssertionError("wrong workspace did not use stable reason")
+
+    wrong_card_workspace, wrong_card_runtime, wrong_card_prior = create_retained_resume_workspace(tmp, "retained-wrong-card")
+    wrong_card_result = run_retained_resume(
+        wrong_card_workspace,
+        wrong_card_runtime,
+        wrong_card_prior,
+        launcher,
+        run_id="retained-wrong-card",
+        card="openspec/board/3.inprogress/another-card.md",
+    )
+    if wrong_card_result.returncode == 0:
+        raise AssertionError("wrong card retained resume unexpectedly passed")
+    if load_status(wrong_card_runtime, "retained-wrong-card").get("terminal_reason") != "card_mismatch":
+        raise AssertionError("wrong card did not use stable reason")
+
+    drift_workspace, drift_runtime, drift_prior = create_retained_resume_workspace(tmp, "retained-drift")
+    with (drift_workspace / RETAINED_PAYLOAD).open("a", encoding="utf-8") as handle:
+        handle.write("echo drift\n")
+    drift_result = run_retained_resume(drift_workspace, drift_runtime, drift_prior, launcher, run_id="retained-drift")
+    if drift_result.returncode == 0:
+        raise AssertionError("fingerprint drift retained resume unexpectedly passed")
+    if load_status(drift_runtime, "retained-drift").get("terminal_reason") != "payload_drift":
+        raise AssertionError("fingerprint drift did not use stable reason")
+
+    stale_workspace, stale_runtime, stale_prior = create_retained_resume_workspace(
+        tmp,
+        "retained-stale-auth",
+        auth_dirty_before_fingerprint=True,
+    )
+    stale_result = run_retained_resume(stale_workspace, stale_runtime, stale_prior, launcher, run_id="retained-stale-auth")
+    if stale_result.returncode == 0:
+        raise AssertionError("stale authorization retained resume unexpectedly passed")
+    if load_status(stale_runtime, "retained-stale-auth").get("terminal_reason") != "authorization_stale":
+        raise AssertionError("stale authorization did not use stable reason")
+
+    relation_workspace, relation_runtime, relation_prior = create_retained_resume_workspace(
+        tmp,
+        "retained-relation-mismatch",
+        successor_id="wrong-card",
+    )
+    relation_result = run_retained_resume(relation_workspace, relation_runtime, relation_prior, launcher, run_id="retained-relation")
+    if relation_result.returncode == 0:
+        raise AssertionError("relation mismatch retained resume unexpectedly passed")
+    if load_status(relation_runtime, "retained-relation").get("terminal_reason") != "relation_mismatch":
+        raise AssertionError("relation mismatch did not use stable reason")
+
+    ceiling_workspace, ceiling_runtime, ceiling_prior = create_retained_resume_workspace(
+        tmp,
+        "retained-over-ceiling",
+        payload_lines=501,
+    )
+    ceiling_result = run_retained_resume(ceiling_workspace, ceiling_runtime, ceiling_prior, launcher, run_id="retained-over-ceiling")
+    if ceiling_result.returncode == 0:
+        raise AssertionError("over-ceiling retained resume unexpectedly passed")
+    if load_status(ceiling_runtime, "retained-over-ceiling").get("terminal_reason") != "authorization_ceiling_violation":
+        raise AssertionError("over-ceiling authorization did not use stable reason")
+
+
 def check_one_command_delivery_stale_verdict_blocks(tmp: Path) -> None:
     workspace = create_one_command_workspace(tmp, "one-command-stale-verdict")
     launcher = tmp / "fake-one-command-stale-verdict"
@@ -1594,6 +1950,7 @@ def check_review_no_go_fallback_run(tmp: Path) -> None:
     card = "openspec/board/3.inprogress/review-no-go-fallback.md"
     write_fake_launcher(launcher)
     write_board_card(workspace, card)
+    commit_paths(workspace, "review no-go fallback card", card)
     write_no_go_verdict(workspace, card)
     result = run(
         [
@@ -1632,6 +1989,7 @@ def check_supervisor_stops_after_fallback_no_go(tmp: Path) -> None:
     write_fake_launcher(launcher)
     write_board_card(workspace, first_card)
     write_board_card(workspace, second_card)
+    commit_paths(workspace, "supervisor cards", first_card, second_card)
     write_no_go_verdict(workspace, first_card)
 
     started: list[str] = []
@@ -2210,12 +2568,13 @@ def check_remote_preflight_failure_classes(tmp: Path) -> None:
         ("dns", True, 2, None),
         ("auth", False, 1, None),
         ("missing_branch", False, 1, None),
-        ("timeout", True, 2, 0.05),
+        ("timeout", True, 2, 1.0),
         ("unknown_remote_failure", True, 2, None),
     ]
     for mode, retryable, attempts, timeout in cases:
         workspace, launcher, runtime = remote_preflight_workspace(tmp, f"remote-{mode}")
         log = tmp / f"remote-{mode}-git-calls.log"
+        log.write_text("", encoding="utf-8")
         result = run(
             [
                 str(RUNNER),
@@ -2432,6 +2791,88 @@ def check_run_preflight_failure(tmp: Path) -> None:
         f"status: {runtime / 'run-preflight-failure' / 'status.json'}",
     ]:
         raise AssertionError(f"run preflight failure did not print BLOCKED before status: {result.stdout}")
+
+
+def check_single_card_dirty_workspace_blocks_ordinary_launches(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "dirty-ordinary-run")
+    launcher = tmp / "fake-codex-dirty-ordinary-run"
+    runtime = tmp / "runtime"
+    call_log = tmp / "dirty-ordinary-run-calls.jsonl"
+    write_fake_launcher(launcher)
+    (workspace / "DIRTY.txt").write_text("ordinary run must not start with dirty tree\n", encoding="utf-8")
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "dirty-ordinary-run",
+            "--launcher",
+            str(launcher),
+        ],
+        env={**runner_env(), "CHANGERAIL_FAKE_CALL_LOG": str(call_log)},
+    )
+    if result.returncode == 0:
+        raise AssertionError("dirty ordinary run unexpectedly passed")
+    if call_log.exists():
+        raise AssertionError("dirty ordinary run launched child despite preflight failure")
+    status = load_status(runtime, "dirty-ordinary-run")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["workspace dirty state"]["status"] != "fail":
+        raise AssertionError(f"dirty ordinary run did not fail clean-tree check: {status}")
+
+    resume_workspace, resume_launcher, resume_runtime = remote_preflight_workspace(tmp, "dirty-remote-resume")
+    prior = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(resume_workspace),
+            "--runtime-root",
+            str(resume_runtime),
+            "--run-id",
+            "dirty-remote-resume-prior",
+            "--launcher",
+            str(resume_launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "dns"),
+    )
+    if prior.returncode == 0:
+        raise AssertionError("dirty remote resume prior unexpectedly passed")
+    (resume_workspace / "DIRTY.txt").write_text("remote resume must stay clean-tree gated\n", encoding="utf-8")
+    resume_call_log = tmp / "dirty-remote-resume-calls.jsonl"
+    resume = run(
+        [
+            str(RUNNER),
+            "resume",
+            "--status-path",
+            str(resume_runtime / "dirty-remote-resume-prior" / "status.json"),
+            "--runtime-root",
+            str(resume_runtime),
+            "--run-id",
+            "dirty-remote-resume",
+            "--launcher",
+            str(resume_launcher),
+        ],
+        env={**fake_git_env(tmp, "success"), "CHANGERAIL_FAKE_CALL_LOG": str(resume_call_log)},
+    )
+    if resume.returncode == 0:
+        raise AssertionError("dirty remote preflight resume unexpectedly passed")
+    if resume_call_log.exists():
+        raise AssertionError("dirty remote preflight resume launched child despite preflight failure")
+    resume_status = load_status(resume_runtime, "dirty-remote-resume")
+    resume_checks = {check["name"]: check for check in resume_status["preflight"]["checks"]}
+    if resume_checks["resume prior status"]["status"] != "pass":
+        raise AssertionError(f"remote resume prior status should still be accepted: {resume_status}")
+    if resume_checks["workspace dirty state"]["status"] != "fail":
+        raise AssertionError(f"dirty remote resume did not fail clean-tree check: {resume_status}")
 
 
 def check_stale_symlink_preflight(tmp: Path) -> None:
@@ -3076,6 +3517,7 @@ def recovery_previous_status(
     source_state: str = "no-go",
     source_result: str = "NO-GO",
     terminal_reason: str | None = None,
+    retained_recovery: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source: dict[str, Any] = {
         "id": "service-a-card",
@@ -3089,6 +3531,8 @@ def recovery_previous_status(
     }
     if terminal_reason:
         source["terminal_reason"] = terminal_reason
+    if retained_recovery:
+        source["retained_recovery"] = retained_recovery
     return {
         "schema": "changerail.delivery-plan-status.v1",
         "run_id": "queue-recovery",
@@ -3112,6 +3556,153 @@ def recovery_previous_status(
             },
         ],
     }
+
+
+def retained_recovery_fixture(status_path: str = "service-a/.runtime/changerail/delivery-runs/prior/status.json") -> dict[str, Any]:
+    return {
+        "kind": "original-retained-payload",
+        "source_run_id": "prior-service-a-card",
+        "source_run_status_path": status_path,
+        "source_terminal_reason": "investigation_required",
+        "card": {"id": "service-a-card", "path": "openspec/board/3.inprogress/service-a-card.md"},
+        "fingerprint": {
+            "head_commit": "1" * 40,
+            "tree_sha": "2" * 40,
+            "diff_fingerprint": "sha256:" + "3" * 64,
+        },
+        "review_target_kind": "working-tree",
+    }
+
+
+def check_queue_investigation_required_capture_and_original_resume(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-retained-original-consumer")
+    runner = tmp / "fake-queue-retained-original"
+    runtime = tmp / "queue-retained-original-runtime"
+    plan = consumer / "delivery-plan.json"
+    call_log = tmp / "queue-retained-original-calls.jsonl"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    blocked_env = runner_env()
+    blocked_env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    blocked_env["CHANGERAIL_QUEUE_FAKE_MODE"] = "investigation-required"
+    blocked = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-retained-blocked",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=blocked_env,
+    )
+    if blocked.returncode == 0:
+        raise AssertionError("investigation_required queue source unexpectedly delivered")
+    blocked_status = load_status(runtime, "queue-retained-blocked")
+    source = blocked_status["cards"][0]
+    if source.get("terminal_reason") != "investigation_required" or "retained_recovery" not in source:
+        raise AssertionError(f"aggregate status did not retain investigation recovery metadata: {blocked_status}")
+
+    (service_a / "DIRTY.txt").write_text("retained dirty payload\n", encoding="utf-8")
+    resume_env = runner_env()
+    resume_env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    resumed = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-retained-resume",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(runtime / "queue-retained-blocked" / "status.json"),
+            "--no-push",
+            "--json",
+        ],
+        env=resume_env,
+    )
+    require_ok(resumed, "queue retained original resume")
+    calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+    resume_calls = [call for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] == "resume"]
+    if not resume_calls:
+        raise AssertionError(f"queue retained original recovery did not launch child resume: {calls}")
+    if "--status-path" not in resume_calls[0]["argv"]:
+        raise AssertionError(f"child resume did not receive prior status path: {resume_calls[0]}")
+
+
+def check_queue_investigation_required_original_resume_fail_closed(tmp: Path) -> None:
+    cases = {
+        "resume-stale-auth": "authorization_stale",
+        "resume-wrong-card": "card_mismatch",
+        "resume-wrong-workspace": "workspace_mismatch",
+        "resume-fingerprint-drift": "payload_drift",
+    }
+    for mode, expected_reason in cases.items():
+        consumer, service_a, _service_b = create_queue_consumer(tmp, f"queue-retained-{mode}-consumer")
+        runner = tmp / f"fake-queue-retained-{mode}"
+        runtime = tmp / f"queue-retained-{mode}-runtime"
+        plan = consumer / "delivery-plan.json"
+        call_log = tmp / f"queue-retained-{mode}-calls.jsonl"
+        original = queue_plan_fixture()
+        previous_path = runtime / "previous" / "status.json"
+        write_fake_queue_runner(runner)
+        write_queue_plan(plan, original)
+        write_json(
+            previous_path,
+            recovery_previous_status(
+                original,
+                source_state="blocked",
+                source_result="BLOCKED",
+                terminal_reason="investigation_required",
+                retained_recovery=retained_recovery_fixture(),
+            ),
+        )
+        (service_a / "DIRTY.txt").write_text("retained dirty payload\n", encoding="utf-8")
+        env = runner_env()
+        env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+        env["CHANGERAIL_QUEUE_FAKE_MODE"] = mode
+        result = run(
+            [
+                str(RUNNER),
+                "resume-plan",
+                str(plan),
+                "--consumer-root",
+                str(consumer),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"queue-retained-{mode}",
+                "--launcher",
+                str(runner),
+                "--status-path",
+                str(previous_path),
+                "--no-push",
+                "--json",
+            ],
+            env=env,
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"{mode} queue retained resume unexpectedly passed")
+        status = load_status(runtime, f"queue-retained-{mode}")
+        cards = {card["id"]: card for card in status["cards"]}
+        if cards["service-a-card"].get("terminal_reason") != expected_reason:
+            raise AssertionError(f"{mode} reason was not preserved: {status}")
+        calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+        run_cards = [call.get("card") for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] == "run"]
+        if "openspec/board/2.todo/service-b-card.md" in run_cards:
+            raise AssertionError(f"{mode} launched downstream after retained resume failure: {calls}")
 
 
 def check_queue_recovery_resume(tmp: Path) -> None:
@@ -3262,6 +3853,53 @@ def check_queue_recovery_rejects_external_and_unrelated_drift(tmp: Path) -> None
         calls = queue_run_calls(call_log)
         if calls:
             raise AssertionError(f"unsafe recovery plan {name} launched live child: {calls}")
+
+    consumer, dirty_service_a, _dirty_service_b = create_queue_consumer(tmp, "queue-recovery-dirty-retained-consumer")
+    runner = tmp / "fake-queue-runner-recovery-dirty-retained"
+    call_log = tmp / "queue-recovery-dirty-retained-calls.jsonl"
+    runtime = tmp / "queue-recovery-dirty-retained-runtime"
+    plan = consumer / "delivery-plan.json"
+    original, augmented = recovery_plan_fixture()
+    previous_path = runtime / "previous" / "status.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, augmented)
+    write_json(
+        previous_path,
+        recovery_previous_status(
+            original,
+            source_state="blocked",
+            source_result="BLOCKED",
+            terminal_reason="investigation_required",
+            retained_recovery=retained_recovery_fixture(),
+        ),
+    )
+    (dirty_service_a / "DIRTY.txt").write_text("dirty retained payload cannot mix with replacement\n", encoding="utf-8")
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    dirty_result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-recovery-dirty-retained",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    if dirty_result.returncode == 0:
+        raise AssertionError("dirty retained replacement recovery unexpectedly passed")
+    if call_log.exists() and queue_run_calls(call_log):
+        raise AssertionError("dirty retained replacement recovery launched a child")
 
 
 def check_queue_resume_plan(tmp: Path) -> None:
@@ -3431,9 +4069,12 @@ def main() -> int:
         check_publish_target_preflight(workspace)
         check_remote_preflight_failure_classes(workspace)
         check_remote_preflight_resume_success(workspace)
+        check_retained_payload_status_schema_and_single_card_resume(workspace)
+        check_retained_payload_resume_fail_closed(workspace)
         check_preflight_connectivity_failure_redaction(workspace)
         check_explicit_codex_home_preflight(workspace)
         check_run_preflight_failure(workspace)
+        check_single_card_dirty_workspace_blocks_ordinary_launches(workspace)
         check_stale_symlink_preflight(workspace)
         check_queue_plan_preflight(workspace)
         check_queue_preflight_child_failure_compact(workspace)
@@ -3445,6 +4086,8 @@ def main() -> int:
         check_queue_fail_fast_and_locks(workspace)
         check_queue_terminal_reason_and_missing_status(workspace)
         check_queue_resume_plan(workspace)
+        check_queue_investigation_required_capture_and_original_resume(workspace)
+        check_queue_investigation_required_original_resume_fail_closed(workspace)
         check_queue_recovery_resume(workspace)
         check_queue_recovery_fail_closed(workspace)
         check_queue_recovery_rejects_external_and_unrelated_drift(workspace)

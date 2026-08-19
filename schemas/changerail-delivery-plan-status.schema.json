@@ -221,6 +221,9 @@
         "terminal_reason": {
           "$ref": "#/$defs/terminalReason"
         },
+        "retained_recovery": {
+          "$ref": "#/$defs/retainedRecovery"
+        },
         "failure_class": {
           "$ref": "#/$defs/remoteFailureClass"
         },
@@ -273,6 +276,70 @@
     "terminalReason": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9_]*$"
+    },
+    "retainedRecovery": {
+      "type": "object",
+      "required": [
+        "kind",
+        "source_run_id",
+        "source_run_status_path",
+        "source_terminal_reason",
+        "card",
+        "fingerprint",
+        "review_target_kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "original-retained-payload"
+        },
+        "source_run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_run_status_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "source_terminal_reason": {
+          "const": "investigation_required"
+        },
+        "card": {
+          "type": "object",
+          "required": ["id", "path"],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$"
+            },
+            "path": {
+              "$ref": "#/$defs/relativePath"
+            }
+          }
+        },
+        "fingerprint": {
+          "type": "object",
+          "required": ["head_commit", "tree_sha", "diff_fingerprint"],
+          "additionalProperties": false,
+          "properties": {
+            "head_commit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tree_sha": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "diff_fingerprint": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        },
+        "review_target_kind": {
+          "const": "working-tree"
+        }
+      }
     },
     "remoteFailureClass": {
       "enum": ["ssh_config", "dns", "auth", "missing_branch", "timeout", "unknown_remote_failure"]

@@ -1425,3 +1425,115 @@ delivery-fix, implementation-review and live-admission phases.
   implementation payload review
 - **THEN** planning cycles increase independently
 - **AND** implementation review/rescue counters remain unchanged
+
+### Requirement: Retained payload identity status contract
+`changerail.delivery-run.v1` MUST allow an optional `retained_payload` object
+using `schema: changerail.retained-payload-identity.v1`. When present for
+`terminal_reason: investigation_required`, the object MUST include the source
+run id, source status path, captured timestamp, card id/path, workspace root,
+`HEAD` commit, reviewed tree SHA, diff fingerprint and review target kind.
+
+#### Scenario: Schema validates retained identity
+- **WHEN** a delivery-run status records an `investigation_required` retained
+  payload with all required identity fields
+- **THEN** `schemas/changerail-delivery-run.schema.json` validation succeeds
+- **AND** the diff fingerprint matches the canonical `sha256:<hex>` format
+
+#### Scenario: Retained identity is tied to the prior status
+- **WHEN** a retained-payload identity is present
+- **THEN** it names the source run id and source status path that produced the
+  `investigation_required` stop
+- **AND** a later consumer can compare those values with the resume input before
+  evaluating the current working tree
+
+### Requirement: Retained payload identity is public-safe
+The retained-payload identity contract MUST describe only bounded metadata. It
+MUST NOT require raw source content, raw command output, credentials, customer
+data, absolute private project aliases beyond the existing workspace root field
+or ignored runtime evidence content.
+
+#### Scenario: Schema rejects raw retained content fields
+- **WHEN** a retained-payload identity attempts to embed raw source text or raw
+  stdout/stderr as required proof
+- **THEN** the delivery-run schema does not accept those fields as part of the
+  identity contract
+- **AND** consumers rely on canonical fingerprints and explicit runtime path
+  references instead
+
+### Requirement: Retained-payload resume validation contract
+`changerail.delivery-run.v1` resume checks MUST represent retained-payload
+resume validation as structured preflight checks with stable machine reasons.
+The contract MUST distinguish prior-status invalidity, card mismatch, workspace
+mismatch, missing retained identity, payload drift, authorization absence,
+authorization staleness, relation mismatch and authorization ceiling violation.
+
+#### Scenario: Successful retained resume records fresh checks
+- **WHEN** retained-payload resume validation succeeds
+- **THEN** the resumed delivery-run status contains passing checks for prior
+  status validation, retained-payload fingerprint validation and published
+  investigation authorization validation
+- **AND** those checks are fresh for the resumed run rather than copied as pass
+  evidence from the prior blocked status
+
+#### Scenario: Failed retained resume is machine-classified
+- **WHEN** retained-payload resume validation fails for a known unsafe class
+- **THEN** the resumed delivery-run status has `terminal_outcome: BLOCKED`
+- **AND** `terminal_reason` is a stable lowercase machine value describing that
+  class
+
+### Requirement: Published authorization remains source of truth for retained resume
+Retained-payload resume MUST use the published investigation authorization
+contract as the only authority to cross the investigation-required boundary.
+Authorization paths MUST be tracked under `openspec/board/4.done/`, clean at
+`HEAD`, relation-matched to the successor card and within the declared ceiling.
+
+#### Scenario: Stale authorization blocks retained resume
+- **WHEN** the authorization card or investigation card is missing, outside
+  `4.done`, untracked, modified in the index/worktree or stale relative to
+  `HEAD`
+- **THEN** retained-payload resume returns `BLOCKED`
+- **AND** it does not launch review or publish
+
+#### Scenario: Relation mismatch blocks retained resume
+- **WHEN** the authorization source does not bind the exact investigation card,
+  investigation id, successor card, successor id and reciprocal card links
+- **THEN** retained-payload resume returns `BLOCKED`
+- **AND** the status identifies the mismatch as authorization validation failure
+
+### Requirement: Queue retained recovery status metadata
+`changerail.delivery-plan-status.v1` MUST represent
+`investigation_required` recovery with bounded structured metadata. Aggregate
+card status MUST be able to identify the recovery kind, source run status path,
+source terminal reason and retained-payload fingerprint summary without
+embedding raw child logs or raw source payload.
+
+#### Scenario: Aggregate status records retained recovery context
+- **WHEN** `resume-plan` evaluates a prior `investigation_required` child
+- **THEN** aggregate status records a bounded reference to the prior child
+  status and retained-payload fingerprint summary
+- **AND** schema validation succeeds without raw child stdout/stderr content
+
+#### Scenario: Duplicate recovery paths fail closed
+- **WHEN** aggregate status or current plan would attach more than one active
+  recovery path to the same `investigation_required` source
+- **THEN** queue validation records `BLOCKED`
+- **AND** it identifies the duplicate recovery as a stable machine reason
+
+### Requirement: Queue recovery terminal reasons are stable
+Queue retained recovery MUST use stable lowercase machine reasons for rejected
+resume or recovery augmentation. The contract MUST cover missing prior status,
+invalid prior status, wrong card, wrong workspace, missing retained identity,
+fingerprint drift, stale authorization and duplicate recovery path.
+
+#### Scenario: Failed queue recovery is machine-readable
+- **WHEN** `resume-plan` rejects an `investigation_required` recovery
+- **THEN** aggregate status contains `result: BLOCKED`
+- **AND** the affected card status contains a stable terminal reason or reason
+  detail that identifies the rejected class
+
+#### Scenario: Downstream blocked state is explicit
+- **WHEN** a downstream card depends on an `investigation_required` source that
+  is not delivered or recovered
+- **THEN** aggregate status keeps the downstream card pending or blocked
+- **AND** it does not infer success from the presence of an authorization card
+  alone
