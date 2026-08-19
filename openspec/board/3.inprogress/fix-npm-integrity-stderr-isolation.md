@@ -9,6 +9,16 @@ Codex delivery worker
 ## OpenSpec Stage
 implemented and published; lifecycle closure review pending
 
+## Review
+- Risk tier: `critical`
+- Milestone audit: `yes`
+- New authority or wire protocol: `no`
+- Credential or mutation authority: `no`
+- Repeated defect class: `no`
+- Live admission: `no`
+- Final certification: `yes`
+- Published investigation authorization: `none`
+
 ## Source
 - Consumer verification exposed a false integrity mismatch when npm emitted a successful warning to stderr.
 
@@ -72,10 +82,12 @@ review receipt before publishing, so the card stays in `3.inprogress` instead
 of being falsely finalized as `4.done`; no code reimplementation is required.
 
 ## Next
-- Perform an independent retrospective audit of commit `7aab1eb` against the
-  four acceptance criteria and current `36/36` baseline.
-- Record the governance decision for an already-published historical payload,
-  then finalize the card without changing implementation code.
+- Run this card first in the package plan. Delivery MUST NOT reimplement the
+  fix; it prepares only the lifecycle handoff for a fresh final-certification
+  reviewer.
+- The reviewer audits commit `7aab1eb`, current implementation, regression
+  smoke adequacy, all four acceptance criteria and the current `36/36`
+  baseline before the deterministic card-only finalization.
 
 ## Log
 - 2026-08-18T09:25:00Z regression reproduced and implementation prepared.
@@ -84,3 +96,6 @@ of being falsely finalized as `4.done`; no code reimplementation is required.
   of the current published branch and the former baseline blocker is resolved;
   card remains in progress solely because the independent review receipt is
   missing.
+- 2026-08-19T15:36:00Z package preparation declared a one-time critical
+  final-certification milestone so the historical implementation receives a
+  fresh semantic audit instead of a docs-only machine receipt.
