@@ -1,7 +1,7 @@
 # Оптимизировать review fingerprint для больших репозиториев
 
 ## Status
-2.todo
+5.canceled
 
 ## Owner
 ChangeRail maintainer
@@ -93,12 +93,18 @@ repository.
 - `openspec/changes/measure-review-fingerprint-costs/`
 - `openspec/changes/optimize-review-fingerprint-tree-build/`
 - `openspec/changes/share-review-fingerprint-preflight-cache/`
+- `openspec/board/1.backlog/investigate-bounded-review-fingerprint-payload.md`
+- `openspec/board/1.backlog/authorize-bounded-review-fingerprint-payload.md`
+- `openspec/board/1.backlog/deliver-bounded-review-fingerprint-optimization.md`
 
 ## Result
-not started
+SUPERSEDED after the first retained implementation measured 527 added
+production LOC and correctly stopped at deterministic review preflight. The
+bounded replacement preserves this card's acceptance and OpenSpec changes.
 
 ## Next
-- `$changerail-do openspec/board/2.todo/optimize-review-fingerprint-for-large-repositories.md`
+- Resolve `investigate-bounded-review-fingerprint-payload`, then publish its
+  authorization and deliver the bounded replacement.
 
 ## Change 1: `measure-review-fingerprint-costs`
 
@@ -197,3 +203,7 @@ consumers и разрешить validated ignored runtime cache for unchanged pa
   основную часть review gate latency.
 - 2026-08-19T00:00:00Z `$chrl-ff` decomposed story into ordered OpenSpec changes
   and moved card to `2.todo`.
+- 2026-08-19T07:17:52Z first delivery attempt stopped before independent
+  review with `investigation_required`: 527 added production LOC exceeded the
+  ordinary limit 300 and the bounded authorization maximum 500. The retained
+  attempt was not pushed; this card was superseded by a bounded replacement.
