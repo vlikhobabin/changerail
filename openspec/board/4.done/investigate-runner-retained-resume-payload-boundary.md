@@ -1,13 +1,13 @@
 # Investigate runner retained resume payload boundary
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 - none
@@ -67,17 +67,74 @@ preserving the safety properties already verified by the smoke suite.
 - Publishing an authorization object without a bounded successor decision.
 - Raising `MAX_AUTHORIZED_PRODUCTION_LOC_LIMIT`.
 
+## Investigation Decision
+The retained runner-resume implementation is investigation input only. It is
+not published, is not independent review evidence and does not authorize itself.
+
+The public-safe preflight breakdown is:
+
+- `bin/changerail-delivery-runner`: 562 added production-counted lines.
+- Source classification: built-in production source, line-count strategy.
+- Complexity reasons: added production LOC exceeds 300, and a new runner/status
+  protocol boundary requires published investigation authorization.
+
+The smallest safe boundary is simplification inside the existing successor
+card, not a replacement card. The exact successor remains
+`support-runner-resume-after-investigation-required`; its current queue path is
+`openspec/board/2.todo/support-runner-resume-after-investigation-required.md`,
+and its authorization-time target path is
+`openspec/board/3.inprogress/support-runner-resume-after-investigation-required.md`.
+
+The successor may use a later published investigation authorization only if its
+implementation is simplified to at most 500 added production-counted LOC. That
+authorization must be a separate clean tracked `4.done` source, must bind this
+published investigation and the exact successor, and must set
+`allow_new_authority_or_wire_protocol` to true because the retained-resume
+contract changes the runner/status protocol boundary.
+
+The successor should reduce at least 63 production-counted lines without
+weakening fail-closed behavior by sharing retained-payload validation between
+single-card and queue resume paths, reusing existing manifest/review-preflight
+authorization helpers, avoiding duplicate status construction and keeping plan
+recovery metadata compact. If the simplified implementation cannot stay at or
+below 500 production-counted LOC, this decision does not authorize it and a
+replacement investigation or split decision is required.
+
+The successor verification floor remains:
+
+- retained identity schema acceptance and rejection;
+- single-card retained resume success;
+- wrong card and wrong workspace rejection;
+- stale authorization rejection;
+- relation mismatch rejection;
+- over-ceiling rejection;
+- fingerprint drift rejection;
+- queue original resume success;
+- queue replacement recovery success;
+- duplicate recovery rejection.
+
 ## Change Set
 - `decide-runner-retained-resume-payload-boundary`
 
 ## Verify
-- not started
+- GREEN: `./bin/openspec validate "decide-runner-retained-resume-payload-boundary" --strict`
+- GREEN: `./bin/openspec validate "changerail-contracts" --strict`
+- GREEN: `./bin/openspec validate --all --strict` -> 27/27 passed.
+- GREEN: `python3 scripts/public-surface-scan.py` -> 1080 files scanned, 0
+  findings.
+- GREEN: `git diff --check`
+- GREEN: untracked-file trailing-whitespace scan over `git ls-files --others
+  --exclude-standard`
+- GREEN: `bin/changerail-delivery-manifest scope-check
+  .runtime/changerail/delivery-manifests/investigate-runner-retained-resume-payload-boundary.json
+  --workspace . --target working-tree --json`
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-decide-runner-retained-resume-payload-boundary/`
 
 ## Related
-- `openspec/board/3.inprogress/support-runner-resume-after-investigation-required.md`
+- `openspec/changes/archive/2026-08-19-decide-runner-retained-resume-payload-boundary/`
+- `openspec/board/2.todo/support-runner-resume-after-investigation-required.md`
 - `bin/changerail-delivery-runner`
 - `schemas/changerail-delivery-run.schema.json`
 - `schemas/changerail-delivery-plan-status.schema.json`
@@ -85,10 +142,12 @@ preserving the safety properties already verified by the smoke suite.
 - `scripts/smoke-contract-schemas.py`
 
 ## Result
-not started
+published; investigation decision complete
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$changerail-deliver openspec/board/2.todo/investigate-runner-retained-resume-payload-boundary.md`
+- done
 
 ## Change 1: `decide-runner-retained-resume-payload-boundary`
 
@@ -131,3 +190,10 @@ verification floor needed for fail-closed retained-resume recovery.
 - 2026-08-19T16:55:00Z created after `$changerail-deliver` stopped
   `support-runner-resume-after-investigation-required` at deterministic review
   preflight with `investigation-required`.
+- 2026-08-19T17:11:09Z `$changerail-ff` created
+  `decide-runner-retained-resume-payload-boundary`, completed apply-ready
+  proposal/design/spec/tasks artifacts and validated the change set.
+- 2026-08-19T17:13:35Z `$changerail-do` recorded the bounded investigation
+  decision, synced `changerail-contracts`, archived
+  `decide-runner-retained-resume-payload-boundary` and prepared review handoff.
+- 2026-08-19T17:34:09Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
