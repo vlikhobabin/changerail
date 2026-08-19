@@ -63,6 +63,9 @@ checkpoint commit as review evidence.
   remains `BLOCKED` with a stable machine reason.
 - Focused synthetic smokes cover successful recovery and adversarial dirty,
   stale authorization, wrong card, wrong workspace and fingerprint drift cases.
+- Deterministic review preflight measures at most 500 added
+  production-counted LOC and accepts the exact published authorization for this
+  successor and runner/status protocol boundary.
 
 ## Non-Goals
 - Automatically authorizing a large payload.
