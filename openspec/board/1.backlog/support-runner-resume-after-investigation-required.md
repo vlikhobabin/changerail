@@ -84,9 +84,22 @@ checkpoint commit as review evidence.
 not started
 
 ## Next
-- triage after the current bounded replacement is delivered
+- Highest-priority backlog defect. Запустить `$chrl-ff` после закрытия
+  process-state карточки `fix-npm-integrity-stderr-isolation`.
+- Planning должно сохранить critical/new-wire review route и разбить работу
+  на retained payload identity, single-card resume и queue recovery smokes.
+
+## Triage Decision
+- Keep в `1.backlog`: bounded replacement уже delivered, но исходная
+  невозможность продолжить exact retained payload через package runner не
+  устранена.
+- Priority: high. Это единственная открытая карточка, которая уже блокировала
+  реальный delivery flow и потребовала ручную recovery-ветку.
 
 ## Log
 - 2026-08-19T07:17:52Z created after package-runner delivery could not resume a
   retained `investigation_required` payload through either `resume` or a fresh
   clean-tree launch.
+- 2026-08-19T14:05:00Z post-delivery triage confirmed the bounded replacement
+  succeeded but did not add runner resume support; card remains the first
+  implementation candidate after current in-progress closure.

@@ -4,7 +4,7 @@
 1.backlog
 
 ## Owner
-unassigned
+ChangeRail maintainer
 
 ## OpenSpec Stage
 story
@@ -93,7 +93,17 @@ reliability gates, не переносить полный каталог maturit
 not started
 
 ## Next
-- explore минимальный contract и проверить его на generic Python consumer
+- Оставить exploration до появления конкретного воспроизводимого случая, где
+  project-declared verification floor и acceptance mapping дали false-green.
+- После такого evidence выполнить `$chrl-explore` на минимальном generic
+  contract и одном Python proof.
+
+## Triage Decision
+- Keep в `1.backlog`, но не переводить в `2.todo` без доказанного verification
+  gap: новая schema не должна дублировать OpenSpec tasks и review acceptance.
+- Priority: strategic/deferred. Доставленная source classification учитывает
+  BSL и Designer XML в complexity guard, но не связывает changed surface с
+  invariant, oracle и required evidence, поэтому не supersede эту exploration.
 
 ## Change Plan Notes
 Карточка намеренно остается exploration story. До перевода в `2.todo` нужно
@@ -105,3 +115,7 @@ acceptance mapping. Первая реализация, если она буде�
 ## Log
 - 2026-08-12T09:30:49Z карточка создана по итогам сравнения ChangeRail с Orca;
   полный reliability catalog и domain-specific core явно исключены из scope.
+- 2026-08-19T14:05:00Z triage оставил карточку как deferred exploration:
+  `changerail.source-classification.v1` закрыл source complexity, но не
+  verification coverage; реализация без concrete false-green пока не
+  обоснована.

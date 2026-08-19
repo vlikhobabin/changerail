@@ -7,7 +7,7 @@
 Codex delivery worker
 
 ## OpenSpec Stage
-implemented; awaiting independent review
+implemented and published; lifecycle closure review pending
 
 ## Source
 - Consumer verification exposed a false integrity mismatch when npm emitted a successful warning to stderr.
@@ -51,11 +51,11 @@ stdout успешной команды, сохраняя stderr для диаг�
 - GREEN: real consumer `bin/verify-project` without npm log-level overrides -> 0 failures.
 - GREEN: `bin/openspec validate --all --strict` -> 23/23 passed.
 - GREEN: public-surface current-tree and history scans -> 972 files, 0 findings.
-- BASELINE BLOCKER: `python3 scripts/run-release-baseline.py` stopped at the
-  unchanged generated-bootstrap fixture because `AGENTS.md` reaches 27,866 of
-  32,768 bytes and crosses the 85% warning threshold. The owning source and
-  template are unchanged from `origin/main`; resolve in a separate change.
-- NOT RUN: Ruff is unavailable in the selected Python environment.
+- HISTORICAL BLOCKER RESOLVED: the unrelated generated-bootstrap instruction
+  budget was repaired later; current `python3 scripts/run-release-baseline.py`
+  passes all `36/36` steps and Ruff passes inside the baseline.
+- CURRENT: `python3 scripts/smoke-verify-project.py` passes `60/60` in the
+  current branch baseline.
 
 ## Archive
 - `openspec/changes/archive/2026-08-18-fix-npm-integrity-stderr-isolation/`
@@ -66,12 +66,21 @@ stdout успешной команды, сохраняя stderr для диаг�
 - `openspec/specs/changerail-project-verification/spec.md`
 
 ## Result
-Implementation and scoped verification complete. Independent review remains;
-the unrelated instruction-budget baseline blocker is recorded above.
+Implementation is present in published commit `7aab1eb` and remains in the
+current branch. The original session did not produce a canonical independent
+review receipt before publishing, so the card stays in `3.inprogress` instead
+of being falsely finalized as `4.done`; no code reimplementation is required.
 
 ## Next
-- Run full verification, commit the scoped branch, then request independent review before PR.
+- Perform an independent retrospective audit of commit `7aab1eb` against the
+  four acceptance criteria and current `36/36` baseline.
+- Record the governance decision for an already-published historical payload,
+  then finalize the card without changing implementation code.
 
 ## Log
 - 2026-08-18T09:25:00Z regression reproduced and implementation prepared.
 - 2026-08-18T09:35:16Z scoped verification passed; unrelated baseline debt recorded.
+- 2026-08-19T14:05:00Z board triage confirmed commit `7aab1eb` is an ancestor
+  of the current published branch and the former baseline blocker is resolved;
+  card remains in progress solely because the independent review receipt is
+  missing.

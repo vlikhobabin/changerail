@@ -4,7 +4,7 @@
 1.backlog
 
 ## Owner
-unassigned
+ChangeRail maintainer
 
 ## OpenSpec Stage
 story
@@ -17,6 +17,9 @@ story
 
 ## Source
 - Сравнение ChangeRail с Orca от 2026-08-12.
+- Наблюдение за package-runner delivery от 2026-08-19: aggregate
+  `status-plan` был полезен, но single-card состояние пришлось определять по
+  process tree и отдельным runtime paths.
 - [Orca CLI guide](https://github.com/stablyai/orca/blob/main/skill-guides/orca-cli.md)
 - `bin/changerail-delivery-runner`
 - `schemas/changerail-delivery-run.schema.json`
@@ -92,7 +95,15 @@ records.
 not started
 
 ## Next
-- triage
+- Выполнять после `support-runner-resume-after-investigation-required`.
+- Перед реализацией запустить `$chrl-ff` и выбрать минимальный read-only
+  single-card CLI без нового runtime writer.
+
+## Triage Decision
+- Keep в `1.backlog`: capability отсутствует и подтвердила ценность в реальном
+  длительном package-runner delivery.
+- Priority: medium. Сначала закрыть невозможность resume после
+  `investigation_required`, затем улучшать operator visibility.
 
 ## Change Plan Notes
 Перед переводом в `2.todo` выбрать минимальную CLI-форму и проверить, можно ли
@@ -102,3 +113,6 @@ not started
 ## Log
 - 2026-08-12T09:30:49Z карточка создана по итогам сравнения ChangeRail с Orca;
   scope ограничен operator visibility поверх существующих runtime records.
+- 2026-08-19T14:05:00Z triage подтвердил актуальность: `status-plan` покрывает
+  aggregate plan, но отдельного schema-valid single-card reader нет; карточка
+  оставлена в backlog после runner resume fix.
