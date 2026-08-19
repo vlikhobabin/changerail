@@ -1,13 +1,13 @@
 # Добавить безопасную миграцию lockless consumer wiring
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
-unassigned
+ChangeRail
 
 ## OpenSpec Stage
-story
+artifacts
 
 ## Series
 - none
@@ -61,10 +61,14 @@ wiring остается lockless compatibility path.
 - Неявное повышение Codex authority profile.
 
 ## Change Set
-- none yet
+- `adopt-lockless-consumer-wiring`
 
 ## Verify
-- not started
+- `./bin/openspec validate "adopt-lockless-consumer-wiring" --strict`
+- focused bootstrap and verify smoke commands for lockless adoption fixtures
+- `./bin/openspec validate --all --strict`
+- `git diff --check`
+- `python3 scripts/public-surface-scan.py`
 
 ## Archive
 - not started
@@ -75,13 +79,57 @@ wiring остается lockless compatibility path.
 - `schemas/changerail-consumer-lock.schema.json`
 - `docs/consumer-adoption-runbook.md`
 - `scripts/smoke-bootstrap-project.py`
+- `openspec/changes/adopt-lockless-consumer-wiring/`
 
 ## Result
 not started
 
 ## Next
-- triage
+- `$changerail-do openspec/board/2.todo/migrate-lockless-consumer-wiring.md`
+
+## Change 1: `adopt-lockless-consumer-wiring`
+
+### Why
+Legacy consumers without `openspec/changerail-consumer-lock.json` need a safe
+opt-in path from lockless compatibility to lock-owned refresh without treating
+project-owned files as ChangeRail-owned.
+
+### Goal
+Add explicit lockless wiring adoption that inventories existing ChangeRail
+surface, blocks ambiguous ownership, creates schema-valid lock/manifest data and
+adds missing helpers through the inferred owned backend.
+
+### Scope
+- Extend `bin/bootstrap-project --configure-existing` with an explicit
+  lockless adoption mode and dry-run inventory.
+- Preserve normal `--refresh-wiring` fail-closed behavior when no consumer lock
+  exists.
+- Update `bin/verify-project` diagnostics for lockless, adoptable, unsafe and
+  adopted consumers.
+- Add focused smoke fixtures for success, negative ownership gates, missing
+  helper addition and idempotency.
+- Update consumer adoption migration and rollback docs.
+
+### Acceptance
+- Plain `--refresh-wiring` without consumer lock still stops before mutation and
+  points to explicit adoption.
+- Dry-run reports keep/add/reject decisions for allowlisted ChangeRail-owned
+  wiring only.
+- Adoption writes schema-valid lock/manifest only after single-root ownership,
+  backend/path mode and clean source revision are proven.
+- Dangling, mixed-root, regular-file, project-owned, unsupported Windows and
+  dirty unrelated states block without partial mutation.
+- Successful adoption can be verified as lock-backed and a second adoption run
+  is idempotent.
+
+### Depends On
+- none
+
+### Related
+- `openspec/changes/adopt-lockless-consumer-wiring/`
 
 ## Log
 - 2026-08-18T17:39:30Z создана после fail-closed ответа refresh-wiring на
   корректно работающем, но созданном до consumer-lock legacy wiring.
+- 2026-08-19T06:29:33Z decomposed by `$chrl-ff` into one OpenSpec change and
+  moved to `2.todo`.
