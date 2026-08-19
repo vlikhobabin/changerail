@@ -743,7 +743,12 @@ git status или publish metadata. Отсутствующее optional timing �
 - `wall_time_seconds`;
 - `event_counts` и `agent_message_count`;
 - `command_execution_count`, `commands` и `slowest_commands` с
-  runner-observed `started_at`, `ended_at` и `duration_seconds`;
+  runner-observed `started_at`, `ended_at`, `duration_seconds` и optional
+  bounded `output` metadata: stdout/stderr bytes, total bytes, threshold,
+  threshold-exceeded flag, truncation flag и classification;
+- `command_output` aggregate summary с documented threshold, observed/oversized
+  command counts, largest observed command bytes и bounded top oversized
+  command labels;
 - `file_change_count`;
 - `timeline` с bounded runner-observed событиями;
 - `review.cycle_count`, `review.first_review_latency_seconds`,
@@ -761,6 +766,10 @@ canonical source, а run summary только как fallback без history.
 `uncached_input_tokens`, `output_tokens`, `reasoning_tokens` и `total_tokens`.
 Если explicit `total_tokens` отсутствует, metrics может вычислять display-only
 total как `input_tokens + output_tokens`, не меняя runtime record.
+Command output bytes не являются token usage estimate: это runner-observed
+metadata из structured child command events. Если token usage недоступен, metrics
+показывает token fields как `unknown`, но все равно может показать output-byte
+amplification, когда `performance.command_output` присутствует.
 
 Tracked runner:
 
@@ -775,7 +784,12 @@ bin/changerail-delivery-runner resume \
 
 Runner запускает `codex exec` через настроенный launcher, закрывает stdin
 child-процесса, выполняет child в effective workspace и экспортирует
-`CODEX_WORKDIR=<workspace>`. Для ChangeRail source checkout default launcher -
+`CODEX_WORKDIR=<workspace>`. Runner также передает child-у compact discovery
+policy через prompt и environment: начинать с scoped paths, `rg -l`, counts,
+top-level file lists или bounded excerpts, считать truncated output и exit `130`
+inconclusive evidence, а raw stdout/stderr оставлять ignored runtime evidence.
+Default per-command output threshold - 65536 bytes, с override через
+`CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES`. Для ChangeRail source checkout default launcher -
 tracked `/opt/changerail/bin/codex`; consumer repository не обязан иметь
 tracked `bin/codex`, если оператор запускает ChangeRail runner извне или
 передает supported launcher через `--launcher`. Если `--workspace` не указан, workspace

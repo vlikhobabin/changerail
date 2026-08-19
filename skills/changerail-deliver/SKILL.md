@@ -79,6 +79,24 @@ If no path is provided and it cannot be inferred, ask for it.
   with safety stop `awaiting external review`.
 - Preserve phase safety stops, manifest handling, evidence expectations and
   scoped publish rules.
+- Start discovery with bounded, low-output evidence before reading broad
+  repository content. Prefer scoped paths from the card or OpenSpec artifacts,
+  `rg -l`, counts, top-level file lists or explicitly bounded excerpts. Narrow
+  follow-up reads to the files or ranges needed for the current card-owned
+  change.
+- If search scope is still unknown, first collect bounded discovery evidence
+  such as targeted spec references, file-name matches or counts. Do not use
+  unbounded matching-line output as the first proof in large or generated
+  source trees.
+- Treat truncated command output as inconclusive evidence. This includes
+  output cut off by the runner or UI and commands that exit with status `130`
+  after truncation. Before recording implementation presence, absence,
+  acceptance or verification claims, collect narrower structured evidence.
+- Reviewable examples of acceptable discovery evidence include: "3 candidate
+  files from `rg -l <symbol> <scoped-path>`", "12 matches from
+  `rg --count <pattern> <scoped-path>`", or "`sed -n '40,90p' <file>` confirms
+  the checked branch". Do not embed broad source output in cards, manifests or
+  review handoffs.
 - When `CHANGERAIL_ACTIVE_RUN_DIR` is set, treat that directory as parent-owned
   write-only runtime evidence until the child exits. Do not read, search, tail
   or summarize its `status.json`, `stdout.jsonl` or `stderr.log`; exclude the

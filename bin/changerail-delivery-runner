@@ -52,6 +52,8 @@ BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 MAX_TIMELINE_EVENTS = 100
 MAX_COMMANDS = 50
 MAX_SLOW_COMMANDS = 5
+MAX_OVERSIZED_COMMANDS = 5
+MAX_COMMAND_LABEL_LENGTH = 120
 REMOTE_REACHABILITY_TIMEOUT_SECONDS = float(os.environ.get("CHANGERAIL_REMOTE_REACHABILITY_TIMEOUT_SECONDS", "10.0"))
 REMOTE_PREFLIGHT_MAX_ATTEMPTS = 2
 REMOTE_PREFLIGHT_BACKOFF_SECONDS = 0.05
@@ -66,6 +68,24 @@ REMOTE_FAILURE_CLASSES = (
 TRANSIENT_REMOTE_FAILURE_CLASSES = {"dns", "timeout", "unknown_remote_failure"}
 URL_USERINFO_RE = re.compile(r"([a-z][a-z0-9+.-]*://)([^/@\s]+)@", re.IGNORECASE)
 TOKEN_VALUE_RE = re.compile(r"(?i)(token|password|passwd|secret|access_key|api_key|authorization)=([^\s&]+)")
+DEFAULT_COMMAND_OUTPUT_THRESHOLD_BYTES = 64 * 1024
+
+
+def positive_int_from_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+COMMAND_OUTPUT_THRESHOLD_BYTES = positive_int_from_env(
+    "CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES",
+    DEFAULT_COMMAND_OUTPUT_THRESHOLD_BYTES,
+)
 
 
 @dataclass
@@ -205,7 +225,20 @@ def child_environment(args: argparse.Namespace) -> dict[str, str]:
     env["CODEX_HOME"] = str(effective_codex_home(args))
     env["CHANGERAIL_ACTIVE_RUN_ID"] = args.run_id
     env["CHANGERAIL_ACTIVE_RUN_DIR"] = str((args.runtime_root / args.run_id).resolve(strict=False))
+    env["CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES"] = str(COMMAND_OUTPUT_THRESHOLD_BYTES)
+    env["CHANGERAIL_DISCOVERY_POLICY"] = child_discovery_policy()
     return env
+
+
+def child_discovery_policy() -> str:
+    return (
+        "Start discovery with scoped paths, rg -l, counts, top-level file lists "
+        "or bounded excerpts before broad matching-line output. Treat truncated "
+        "output, including exit 130 after truncation, as inconclusive and collect "
+        "narrower structured evidence before acceptance or verification claims. "
+        f"Per-command output threshold: {COMMAND_OUTPUT_THRESHOLD_BYTES} bytes. "
+        "Raw stdout/stderr evidence remains ignored runtime state, not committable payload."
+    )
 
 
 def stale_symlinks(root: Path) -> list[str]:
@@ -614,6 +647,215 @@ def compact_reason(value: Any, limit: int = 160) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def nonnegative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    return None
+
+
+def structured_output_sources(item: dict[str, Any]) -> list[dict[str, Any]]:
+    sources = [item]
+    for key in ("output", "outputs", "metadata"):
+        value = item.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+    return sources
+
+
+def stream_payload(source: dict[str, Any], stream: str) -> Any:
+    for key in (stream, f"{stream}_text", f"{stream}_output"):
+        if key in source:
+            return source[key]
+    return None
+
+
+def structured_stream_bytes(item: dict[str, Any], stream: str) -> int | None:
+    keys = (
+        f"{stream}_bytes",
+        f"{stream}_byte_count",
+        f"{stream}Bytes",
+        f"{stream}ByteCount",
+    )
+    for source in structured_output_sources(item):
+        for key in keys:
+            value = nonnegative_int(source.get(key))
+            if value is not None:
+                return value
+        payload = stream_payload(source, stream)
+        if isinstance(payload, dict):
+            for key in ("bytes", "byte_count", "size_bytes"):
+                value = nonnegative_int(payload.get(key))
+                if value is not None:
+                    return value
+        elif isinstance(payload, str):
+            return len(payload.encode("utf-8"))
+    return None
+
+
+def structured_total_output_bytes(item: dict[str, Any], stdout_bytes: int | None, stderr_bytes: int | None) -> int | None:
+    for source in structured_output_sources(item):
+        for key in ("output_bytes", "output_byte_count", "total_output_bytes", "total_bytes"):
+            value = nonnegative_int(source.get(key))
+            if value is not None:
+                return value
+    known = [value for value in (stdout_bytes, stderr_bytes) if value is not None]
+    if known:
+        return sum(known)
+    return None
+
+
+def structured_bool(item: dict[str, Any], keys: tuple[str, ...]) -> bool | None:
+    for source in structured_output_sources(item):
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, bool):
+                return value
+        for stream in ("stdout", "stderr"):
+            payload = stream_payload(source, stream)
+            if isinstance(payload, dict):
+                for key in keys:
+                    value = payload.get(key)
+                    if isinstance(value, bool):
+                        return value
+    return None
+
+
+def structured_truncated(item: dict[str, Any]) -> bool | None:
+    return structured_bool(
+        item,
+        (
+            "truncated",
+            "is_truncated",
+            "output_truncated",
+            "runner_truncated",
+            "stdout_truncated",
+            "stderr_truncated",
+        ),
+    )
+
+
+def command_output_metadata(item: dict[str, Any], exit_code: int | None) -> dict[str, Any] | None:
+    stdout_bytes = structured_stream_bytes(item, "stdout")
+    stderr_bytes = structured_stream_bytes(item, "stderr")
+    total_bytes = structured_total_output_bytes(item, stdout_bytes, stderr_bytes)
+    truncated = structured_truncated(item)
+    if stdout_bytes is None and stderr_bytes is None and total_bytes is None and truncated is None:
+        return None
+
+    threshold_exceeded = bool(total_bytes is not None and total_bytes > COMMAND_OUTPUT_THRESHOLD_BYTES)
+    classification = "unknown"
+    if truncated:
+        classification = "runner_truncated"
+    elif isinstance(exit_code, int) and exit_code != 0:
+        classification = "process_failure"
+    elif isinstance(exit_code, int) and exit_code == 0 and total_bytes is not None:
+        classification = "success_oversized" if threshold_exceeded else "success_bounded"
+
+    metadata: dict[str, Any] = {
+        "threshold_bytes": COMMAND_OUTPUT_THRESHOLD_BYTES,
+        "threshold_exceeded": threshold_exceeded,
+        "classification": classification,
+    }
+    if stdout_bytes is not None:
+        metadata["stdout_bytes"] = stdout_bytes
+    if stderr_bytes is not None:
+        metadata["stderr_bytes"] = stderr_bytes
+    if total_bytes is not None:
+        metadata["total_bytes"] = total_bytes
+    if truncated is not None:
+        metadata["truncated"] = truncated
+    return metadata
+
+
+def command_total_bytes(command: dict[str, Any]) -> int:
+    output = command.get("output")
+    if isinstance(output, dict):
+        value = output.get("total_bytes")
+        if isinstance(value, int) and value >= 0:
+            return value
+    return 0
+
+
+def sanitize_command_label(command: Any, root: Path) -> str:
+    label = sanitize_remote_detail(str(command or "unknown command"))
+    runtime = root / ".runtime" / "changerail"
+    label = label.replace(str(runtime), ".runtime/changerail/<runtime>")
+    label = re.sub(r"(?<!\S)\.runtime/changerail/\S+", ".runtime/changerail/<runtime>", label)
+    label = label.replace(str(root), "<workspace>")
+    return compact_reason(label, MAX_COMMAND_LABEL_LENGTH)
+
+
+def oversized_command_summary(command: dict[str, Any], root: Path) -> dict[str, Any]:
+    output = command.get("output") if isinstance(command.get("output"), dict) else {}
+    summary: dict[str, Any] = {
+        "command": sanitize_command_label(command.get("command"), root),
+        "total_bytes": command_total_bytes(command),
+        "threshold_bytes": output.get("threshold_bytes", COMMAND_OUTPUT_THRESHOLD_BYTES),
+        "classification": output.get("classification", "unknown"),
+    }
+    command_id = command.get("command_id")
+    if isinstance(command_id, str) and command_id:
+        summary["command_id"] = command_id
+    for key in ("stdout_bytes", "stderr_bytes"):
+        value = output.get(key)
+        if isinstance(value, int) and value >= 0:
+            summary[key] = value
+    if isinstance(output.get("truncated"), bool):
+        summary["truncated"] = output["truncated"]
+    return summary
+
+
+def command_output_summary(commands: list[dict[str, Any]], root: Path) -> dict[str, Any] | None:
+    observed = [command for command in commands if isinstance(command.get("output"), dict)]
+    if not observed:
+        return None
+    oversized = [
+        command
+        for command in observed
+        if isinstance(command.get("output"), dict) and command["output"].get("threshold_exceeded") is True
+    ]
+    largest = max((command_total_bytes(command) for command in observed), default=0)
+    summary: dict[str, Any] = {
+        "threshold_bytes": COMMAND_OUTPUT_THRESHOLD_BYTES,
+        "observed_command_count": len(observed),
+        "oversized_command_count": len(oversized),
+        "largest_command_bytes": largest,
+    }
+    if oversized:
+        top = sorted(oversized, key=command_total_bytes, reverse=True)[:MAX_OVERSIZED_COMMANDS]
+        summary["top_oversized_commands"] = [oversized_command_summary(command, root) for command in top]
+    return summary
+
+
+def oversized_command_lines(record: dict[str, Any]) -> list[str]:
+    performance = record.get("performance")
+    if not isinstance(performance, dict):
+        return []
+    output = performance.get("command_output")
+    if not isinstance(output, dict) or not output.get("oversized_command_count"):
+        return []
+    threshold = output.get("threshold_bytes", COMMAND_OUTPUT_THRESHOLD_BYTES)
+    largest = output.get("largest_command_bytes", "unknown")
+    lines = [
+        f"oversized_commands: count={output.get('oversized_command_count')} threshold_bytes={threshold} largest_command_bytes={largest}"
+    ]
+    top = output.get("top_oversized_commands")
+    if isinstance(top, list):
+        for command in top:
+            if not isinstance(command, dict):
+                continue
+            lines.append(
+                "oversized_command: "
+                f"bytes={command.get('total_bytes', 'unknown')} "
+                f"classification={command.get('classification', 'unknown')} "
+                f"command={command.get('command', 'unknown command')}"
+            )
+    lines.append("remediation: use scoped paths, rg -l, counts, or bounded excerpts; treat truncated output as inconclusive.")
+    return lines
 
 
 def parse_key_value(value: str, label: str) -> tuple[str | None, str | None, str | None]:
@@ -1255,7 +1497,8 @@ def publish_timing(root: Path, card: str, started_at: str) -> dict[str, Any] | N
 
 
 class PerformanceCollector:
-    def __init__(self) -> None:
+    def __init__(self, root: Path) -> None:
+        self.root = root
         self.started_monotonic = time.monotonic()
         self.event_counts: dict[str, int] = {}
         self.agent_message_count = 0
@@ -1318,7 +1561,7 @@ class PerformanceCollector:
         command = item.get("command")
         timeline_entry["command_id"] = command_id
         if isinstance(command, str) and command:
-            timeline_entry["command"] = command
+            timeline_entry["command"] = sanitize_command_label(command, self.root)
         status = item.get("status")
         if event_type.endswith(".started") or status == "in_progress":
             self.command_starts[command_id] = {
@@ -1333,7 +1576,7 @@ class PerformanceCollector:
             summary: dict[str, Any] = {"command_id": command_id}
             command_value = command if isinstance(command, str) else start.get("command")
             if isinstance(command_value, str) and command_value:
-                summary["command"] = command_value
+                summary["command"] = sanitize_command_label(command_value, self.root)
             started_at = start.get("started_at")
             if isinstance(started_at, str):
                 summary["started_at"] = started_at
@@ -1346,6 +1589,9 @@ class PerformanceCollector:
             exit_code = item.get("exit_code")
             if isinstance(exit_code, int):
                 summary["exit_code"] = exit_code
+            output = command_output_metadata(item, exit_code if isinstance(exit_code, int) else None)
+            if output:
+                summary["output"] = output
             self.commands.append(summary)
 
     def append_timeline(self, entry: dict[str, Any]) -> None:
@@ -1382,6 +1628,9 @@ class PerformanceCollector:
                 key=lambda command: command.get("duration_seconds", -1),
                 reverse=True,
             )[:MAX_SLOW_COMMANDS]
+            output_summary = command_output_summary(self.commands, root)
+            if output_summary:
+                data["command_output"] = output_summary
         if self.timeline:
             data["timeline"] = self.timeline
         review = review_timing(root, card, started_at)
@@ -1505,6 +1754,7 @@ def build_command(args: argparse.Namespace) -> list[str]:
     prompt = "$changerail-deliver " + args.card
     for value in args.deliver_arg:
         prompt += " " + value
+    prompt += "\n\nChangeRail child discovery policy:\n" + child_discovery_policy()
     command = [str(args.launcher), "exec", "--json"]
     if args.model:
         command.extend(["-m", args.model])
@@ -1780,7 +2030,7 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         return 1
     atomic_write_json(status_path(args), record)
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    performance = PerformanceCollector()
+    performance = PerformanceCollector(root)
     with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
         process = subprocess.Popen(
             command,
@@ -1821,6 +2071,8 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     print(f"terminal_outcome: {outcome}")
     if terminal_signal.reason:
         print(f"terminal_reason: {terminal_signal.reason}")
+    for line in oversized_command_lines(record):
+        print(line)
     print(f"status: {status_path(args)}")
     return 0 if outcome == "DELIVERED" else 1
 

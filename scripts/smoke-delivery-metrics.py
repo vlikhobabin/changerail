@@ -132,6 +132,23 @@ def main() -> int:
                         {"command": "/bin/echo one", "duration_seconds": 1.5, "exit_code": 0},
                         {"command": "/bin/echo two", "duration_seconds": 0.25, "exit_code": 0},
                     ],
+                    "command_output": {
+                        "threshold_bytes": 65536,
+                        "observed_command_count": 2,
+                        "oversized_command_count": 1,
+                        "largest_command_bytes": 90000,
+                        "top_oversized_commands": [
+                            {
+                                "command_id": "cmd-big",
+                                "command": "rg --count example openspec/specs",
+                                "stdout_bytes": 90000,
+                                "stderr_bytes": 0,
+                                "total_bytes": 90000,
+                                "threshold_bytes": 65536,
+                                "classification": "success_oversized",
+                            }
+                        ],
+                    },
                     "review": {
                         "cycle_count": 2,
                         "first_review_latency_seconds": 11.0,
@@ -245,6 +262,10 @@ def main() -> int:
             "cached_input_tokens=4",
             "uncached_input_tokens=6",
             "reasoning_tokens=2",
+            "oversized_command_count=1",
+            "largest_command_output_bytes=90000",
+            "command_output_threshold_bytes=65536",
+            "top_oversized_command=rg --count example openspec/specs:90000b:success_oversized",
             "slowest_commands=/bin/echo one:1.5s;/bin/echo two:0.25s",
             "review_timeline=1:no-go@2026-07-11T00:00:11Z;2:go@2026-07-11T00:00:19Z",
             "card=card-a result=DELIVERED first_review=no-go latest_review=go review_cycles=2 wall_time_seconds=10.5 rescue_budget_limit=5 rescue_budget_used=1 rescue_budget_remaining=4 rescue_budget_exhausted=no",
@@ -266,6 +287,12 @@ def main() -> int:
             raise AssertionError(f"run fallback rescue budget missing in JSON metrics: {json_result.stdout}")
         if rows_by_card["card-b"]["rescue_budget_limit"] != "unknown":
             raise AssertionError(f"legacy rescue budget should be unknown: {json_result.stdout}")
+        if rows_by_card["card-a"]["oversized_command_count"] != "1":
+            raise AssertionError(f"oversized command count missing in JSON metrics: {json_result.stdout}")
+        if rows_by_card["card-b"]["largest_command_output_bytes"] != "unknown":
+            raise AssertionError(f"legacy output metadata should be unknown: {json_result.stdout}")
+        if json_payload["aggregate"]["oversized_command_count"] != 1:
+            raise AssertionError(f"oversized aggregate missing from JSON metrics: {json_result.stdout}")
 
         csv_result = run([str(METRICS), "--runs-dir", str(runs), "--reviews-dir", str(reviews), "--plans-dir", str(plans), "--csv"])
         require_ok(csv_result, "metrics csv")
@@ -273,6 +300,10 @@ def main() -> int:
         for header in (
             "total_tokens",
             "cached_input_tokens",
+            "oversized_command_count",
+            "largest_command_output_bytes",
+            "command_output_threshold_bytes",
+            "top_oversized_command",
             "slowest_commands",
             "review_timeline",
             "rescue_budget_limit",
@@ -284,6 +315,8 @@ def main() -> int:
                 raise AssertionError(f"CSV header missing {header}: {csv_result.stdout}")
         if "run-1,card-a,DELIVERED,10.5,10,4,6,5,2,15" not in csv_result.stdout:
             raise AssertionError(f"CSV did not render derived/breakdown usage: {csv_result.stdout}")
+        if "1,90000,65536,rg --count example openspec/specs:90000b:success_oversized" not in csv_result.stdout:
+            raise AssertionError(f"CSV did not render output amplification metrics: {csv_result.stdout}")
         if "run-2,card-b,DELIVERED,10,unknown,unknown,unknown,unknown,unknown,unknown" not in csv_result.stdout:
             raise AssertionError(f"CSV did not render missing usage as unknown: {csv_result.stdout}")
         if "unknown,unknown,unknown,unknown,unknown,unknown" not in csv_result.stdout:

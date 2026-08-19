@@ -47,7 +47,15 @@ def run(
 
 def runner_env(mode: str | None = None) -> dict[str, str]:
     env = os.environ.copy()
-    for name in ("CODEX_HOME", "CODEX_WORKDIR", "CODEX_AUTH_TOKEN", "OPENAI_API_KEY", "CHANGERAIL_FAKE_MODE"):
+    for name in (
+        "CODEX_HOME",
+        "CODEX_WORKDIR",
+        "CODEX_AUTH_TOKEN",
+        "OPENAI_API_KEY",
+        "CHANGERAIL_FAKE_MODE",
+        "CHANGERAIL_DISCOVERY_POLICY",
+        "CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES",
+    ):
         env.pop(name, None)
     if mode:
         env["CHANGERAIL_FAKE_MODE"] = mode
@@ -129,7 +137,7 @@ def write_fake_launcher(path: Path) -> None:
                 "    with open(call_log, 'a', encoding='utf-8') as handle:",
                 "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
                 "stdin = sys.stdin.read()",
-                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR')}))",
+                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR'), 'CHANGERAIL_DISCOVERY_POLICY': os.environ.get('CHANGERAIL_DISCOVERY_POLICY'), 'CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES': os.environ.get('CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES')}))",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
                 "if mode == 'non-terminal-error':",
                 "    print(json.dumps({'type': 'tool/result', 'data': {'status': 'failed', 'message': 'error'}}))",
@@ -153,11 +161,21 @@ def write_fake_launcher(path: Path) -> None:
                 "if mode == 'performance':",
                 "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'in_progress'}}), flush=True)",
                 "    time.sleep(0.01)",
-                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'completed', 'exit_code': 0}}), flush=True)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'completed', 'exit_code': 0, 'stdout_bytes': 10, 'stderr_bytes': 0}}), flush=True)",
                 "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'in_progress'}}), flush=True)",
                 "    time.sleep(0.01)",
-                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'completed', 'exit_code': 0}}), flush=True)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-2', 'type': 'command_execution', 'command': '/bin/echo two', 'status': 'completed', 'exit_code': 0, 'stdout_bytes': 0, 'stderr_bytes': 0}}), flush=True)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-1', 'type': 'agent_message', 'text': 'done'}}), flush=True)",
+                "if mode == 'oversized-output':",
+                "    raw = ('OVERSIZED_RAW_PAYLOAD_SHOULD_NOT_APPEAR ' * 4096).strip()",
+                "    token_arg = 'api' + '_key' + '=' + 'oversized-value'",
+                "    url = 'https://' + 'user:pass' + '@example.invalid/path'",
+                "    runtime_path = os.path.join(os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR', '.runtime/changerail/delivery-runs/oversized-output'), 'stdout.jsonl')",
+                "    command = '/usr/bin/rg ' + token_arg + ' ' + url + ' ' + runtime_path",
+                "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-big', 'type': 'command_execution', 'command': command, 'status': 'in_progress'}}), flush=True)",
+                "    time.sleep(0.01)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-big', 'type': 'command_execution', 'command': command, 'status': 'completed', 'exit_code': 0, 'stdout': raw, 'stdout_bytes': len(raw.encode('utf-8')), 'stderr_bytes': 0, 'stdout_truncated': True}}), flush=True)",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-oversized', 'type': 'agent_message', 'text': 'done'}}), flush=True)",
                 "if mode not in {'unstructured-success', 'safety-stop-no-go', 'fix-budget-exhausted', 'external-blocker', 'malformed-terminal-reason', 'marker-like-prose', 'no-go', 'awaiting-review', 'ordered-conflict'}:",
                 "    print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'cached_input_tokens': 1, 'uncached_input_tokens': 2, 'output_tokens': 5, 'reasoning_tokens': 1, 'total_tokens': 8}}))",
@@ -1358,6 +1376,15 @@ def check_success_run(tmp: Path) -> None:
         raise AssertionError(f"active runner id was not passed to the child: {first}")
     if first.get("CHANGERAIL_ACTIVE_RUN_DIR") != str(runtime / "success"):
         raise AssertionError(f"active runner directory was not passed to the child: {first}")
+    policy = first.get("CHANGERAIL_DISCOVERY_POLICY")
+    if not isinstance(policy, str) or "scoped paths" not in policy or "exit 130" not in policy:
+        raise AssertionError(f"child discovery policy was not passed to the child: {first}")
+    threshold = first.get("CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES")
+    if threshold != "65536":
+        raise AssertionError(f"child output threshold was not passed to the child: {first}")
+    prompt = " ".join(str(part) for part in argv)
+    if "ChangeRail child discovery policy:" not in prompt or "bounded excerpts" not in prompt:
+        raise AssertionError(f"child prompt did not include discovery policy: {argv}")
     if "terminal_outcome: DELIVERED" not in result.stdout:
         raise AssertionError(f"terminal outcome was not printed: {result.stdout}")
 
@@ -1428,6 +1455,18 @@ def check_performance_summary_run(tmp: Path) -> None:
     commands = performance.get("commands")
     if not isinstance(commands, list) or len(commands) != 2:
         raise AssertionError(f"command summaries missing: {performance}")
+    first_output = commands[0].get("output")
+    if not isinstance(first_output, dict) or first_output.get("classification") != "success_bounded":
+        raise AssertionError(f"bounded command output metadata missing: {commands}")
+    if first_output.get("stdout_bytes") != 10 or first_output.get("threshold_exceeded") is not False:
+        raise AssertionError(f"bounded byte accounting missing: {first_output}")
+    command_output = performance.get("command_output")
+    if not isinstance(command_output, dict):
+        raise AssertionError(f"command output summary missing: {performance}")
+    if command_output.get("oversized_command_count") != 0 or command_output.get("largest_command_bytes") != 10:
+        raise AssertionError(f"command output aggregate was not captured: {command_output}")
+    if command_output.get("threshold_bytes") != 65536:
+        raise AssertionError(f"default command output threshold missing: {command_output}")
     durations = [command.get("duration_seconds") for command in commands]
     if not all(isinstance(duration, (int, float)) and duration >= 0 for duration in durations):
         raise AssertionError(f"command durations were not measurable: {commands}")
@@ -1445,6 +1484,77 @@ def check_performance_summary_run(tmp: Path) -> None:
         raise AssertionError(f"terminal outcome timing missing from timeline: {timeline}")
     if status["usage"].get("cached_input_tokens") != 1 or status["usage"].get("reasoning_tokens") != 1:
         raise AssertionError(f"usage breakdown was not parsed: {status['usage']}")
+
+
+def check_oversized_output_summary_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "oversized-output-workspace")
+    launcher = tmp / "fake-codex-oversized-output"
+    runtime = workspace / ".runtime" / "changerail" / "delivery-runs"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "oversized-output",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("oversized-output"),
+    )
+    require_ok(result, "runner oversized output")
+    status = load_status(runtime, "oversized-output")
+    performance = status.get("performance")
+    if not isinstance(performance, dict):
+        raise AssertionError(f"performance summary missing from oversized output status: {status}")
+    command_output = performance.get("command_output")
+    if not isinstance(command_output, dict):
+        raise AssertionError(f"oversized command output summary missing: {performance}")
+    if command_output.get("oversized_command_count") != 1:
+        raise AssertionError(f"oversized command count missing: {command_output}")
+    if command_output.get("largest_command_bytes", 0) <= command_output.get("threshold_bytes", 0):
+        raise AssertionError(f"largest command did not exceed threshold: {command_output}")
+    top = command_output.get("top_oversized_commands")
+    if not isinstance(top, list) or len(top) != 1:
+        raise AssertionError(f"top oversized command missing: {command_output}")
+    top_command = top[0]
+    if top_command.get("classification") != "runner_truncated" or top_command.get("truncated") is not True:
+        raise AssertionError(f"truncation classification missing: {top_command}")
+    label = top_command.get("command")
+    if not isinstance(label, str):
+        raise AssertionError(f"sanitized command label missing: {top_command}")
+    for forbidden in ("user:pass", "oversized-value", str(runtime / "oversized-output")):
+        if forbidden in label:
+            raise AssertionError(f"oversized command label leaked sensitive detail: {label}")
+    status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    raw_fragment = "OVERSIZED_RAW_PAYLOAD_SHOULD_NOT_APPEAR"
+    if raw_fragment in status_text:
+        raise AssertionError("raw oversized payload was copied into status.json")
+    status_path = runtime / "oversized-output" / "status.json"
+    if status_path.stat().st_size >= 20000:
+        raise AssertionError(f"status.json was not bounded: {status_path.stat().st_size} bytes")
+    raw_stdout = Path(status["logs"]["stdout"])
+    raw_text = raw_stdout.read_text(encoding="utf-8")
+    if raw_fragment not in raw_text:
+        raise AssertionError("raw oversized output was not retained in ignored stdout evidence")
+    check_ignore = subprocess.run(
+        ["git", "-C", str(workspace), "check-ignore", ".runtime/changerail/delivery-runs/oversized-output/stdout.jsonl"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if check_ignore.returncode != 0:
+        raise AssertionError(f"raw stdout evidence is not ignored runtime state: {check_ignore.stderr or check_ignore.stdout}")
+    if "oversized_commands: count=1" not in result.stdout or "remediation: use scoped paths" not in result.stdout:
+        raise AssertionError(f"operator oversized output summary missing: {result.stdout}")
+    for forbidden in ("OVERSIZED_RAW_PAYLOAD_SHOULD_NOT_APPEAR", "user:pass", "oversized-value"):
+        if forbidden in result.stdout:
+            raise AssertionError(f"operator summary leaked raw or sensitive content: {result.stdout}")
 
 
 def check_no_go_run(tmp: Path) -> None:
@@ -3301,6 +3411,7 @@ def main() -> int:
         check_success_run(workspace)
         check_default_workspace_run(workspace)
         check_performance_summary_run(workspace)
+        check_oversized_output_summary_run(workspace)
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
         check_supervisor_stops_after_fallback_no_go(workspace)

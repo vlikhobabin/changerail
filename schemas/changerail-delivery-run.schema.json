@@ -240,6 +240,9 @@
             "$ref": "#/$defs/commandTiming"
           }
         },
+        "command_output": {
+          "$ref": "#/$defs/commandOutputSummary"
+        },
         "timeline": {
           "type": "array",
           "items": {
@@ -282,6 +285,109 @@
         },
         "exit_code": {
           "type": "integer"
+        },
+        "output": {
+          "$ref": "#/$defs/commandOutputMetadata"
+        }
+      }
+    },
+    "commandOutputMetadata": {
+      "type": "object",
+      "required": ["threshold_bytes", "threshold_exceeded", "classification"],
+      "additionalProperties": false,
+      "properties": {
+        "stdout_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stderr_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "threshold_exceeded": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "classification": {
+          "enum": ["process_failure", "runner_truncated", "success_bounded", "success_oversized", "unknown"]
+        }
+      }
+    },
+    "commandOutputSummary": {
+      "type": "object",
+      "required": ["threshold_bytes", "observed_command_count", "oversized_command_count", "largest_command_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "threshold_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "observed_command_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "oversized_command_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "largest_command_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "top_oversized_commands": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "$ref": "#/$defs/oversizedCommand"
+          }
+        }
+      }
+    },
+    "oversizedCommand": {
+      "type": "object",
+      "required": ["command", "total_bytes", "threshold_bytes", "classification"],
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "stdout_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stderr_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "classification": {
+          "enum": ["process_failure", "runner_truncated", "success_bounded", "success_oversized", "unknown"]
         }
       }
     },

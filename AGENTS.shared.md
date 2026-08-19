@@ -185,8 +185,10 @@ pre-step перед `$changerail-deliver <card>`.
 ## Delivery
 
 Во время `do` работайте с одним change за раз. Перед coding прочитайте
-релевантный project context: `openspec/config.yaml`, `AGENTS.md`, board rules,
-target card и change artifacts.
+`openspec/config.yaml`, `AGENTS.md`, board rules, target card и artifacts.
+
+Discovery: scoped paths, `rg -l`, counts и excerpts first; broad/truncated
+output или exit `130` inconclusive и требует narrow follow-up.
 
 Обязательный verification floor собирается из project-declared sources:
 `AGENTS.md`, `openspec/config.yaml`, `tasks.md`, `design.md` и затронутого

@@ -276,7 +276,11 @@ evidence.
 `bin/changerail-delivery-metrics` читает `.runtime/changerail/delivery-runs/*/status.json`
 и `.runtime/changerail/reviews/*.history.json`, чтобы показать first-pass go rate,
 same-card rescue budget (`limit`, `used`, `remaining`, `exhausted`), findings
-по severity, acceptance outcomes, wall-time и доступный token usage.
+по severity, acceptance outcomes, wall-time, доступный token usage и
+command-output amplification metadata. Output bytes приходят из structured child
+command events и показываются отдельно от cached/uncached/total token fields;
+если token usage недоступен, metrics оставляет token fields `unknown`, но может
+все равно показать oversized command count, largest output bytes и threshold.
 CSV mode предназначен для внешней аналитики; отсутствующие optional поля
 отображаются как `unknown`.
 

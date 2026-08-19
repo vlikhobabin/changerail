@@ -83,6 +83,110 @@ events and workspace runtime evidence in the delivery run status record.
   summary without changing the existing `DELIVERED`, `NO-GO` or `BLOCKED`
   semantics
 
+### Requirement: Runner provides child discovery budget policy
+The delivery runner MUST provide runner-launched children with a compact
+public-safe discovery budget or policy that describes bounded output
+expectations.
+
+#### Scenario: Runner launches delivery child
+- **WHEN** the runner starts a non-interactive delivery child
+- **THEN** the child receives a discovery policy through prompt text,
+  environment or another structured handoff available to the child
+- **AND** the policy identifies bounded discovery patterns and the documented
+  per-command output threshold
+
+#### Scenario: Policy is generic across consumer repositories
+- **WHEN** the runner prepares the child discovery policy
+- **THEN** the policy avoids codebase-language assumptions, private workspace
+  names and raw runtime log content
+- **AND** the policy does not require shell interception to be enforceable
+
+#### Scenario: Raw evidence is retained separately
+- **WHEN** command stdout or stderr is retained for runtime evidence
+- **THEN** the discovery policy does not make ignored raw evidence committable
+- **AND** the child-facing policy remains a bounded summary of expected
+  behavior rather than a copy of raw command output
+
+### Requirement: Runner records bounded command output metadata
+The delivery runner MUST record bounded per-command output metadata in delivery
+run status when structured child events provide sufficient data.
+
+#### Scenario: Command event reports output bytes
+- **WHEN** child JSONL exposes command completion data with stdout or stderr
+  byte counts
+- **THEN** `status.json` records bounded command output-byte metadata for that
+  command
+- **AND** the record does not copy raw stdout or stderr payload text into the
+  structured status
+
+#### Scenario: Command exceeds output threshold
+- **WHEN** a command's observed output bytes exceed the documented
+  per-command threshold
+- **THEN** `status.json` marks that command as threshold-exceeded
+- **AND** the status retains only bounded metadata and references to ignored raw
+  evidence when such references are available
+
+### Requirement: Runner distinguishes command result and truncation states
+The delivery runner MUST distinguish command process failure, runner-observed
+truncation and successful bounded result when structured child events provide
+enough fields.
+
+#### Scenario: Command fails without truncation
+- **WHEN** a command completion event reports a non-zero exit code without a
+  truncation indicator
+- **THEN** the command metadata records a process-failure classification
+
+#### Scenario: Command output is runner-truncated
+- **WHEN** a command event or runner observation reports output truncation
+- **THEN** the command metadata records a truncation classification separate
+  from process failure
+
+#### Scenario: Command succeeds within budget
+- **WHEN** a command completion event reports success and output bytes within
+  the threshold
+- **THEN** the command metadata records a successful bounded result
+
+#### Scenario: Structured output fields are unavailable
+- **WHEN** child JSONL lacks sufficient fields to classify command output
+- **THEN** the runner reports the optional output classification as unknown or
+  absent instead of scraping arbitrary stdout/stderr text
+
+### Requirement: Runner reports oversized command summary
+The delivery runner MUST print a sanitized operator-facing summary of top
+oversized commands when command output metadata exceeds the documented
+threshold.
+
+#### Scenario: Oversized commands exist
+- **WHEN** a delivery run records commands whose output exceeds the threshold
+- **THEN** runner terminal output identifies the top oversized commands with
+  sanitized labels, byte counts and threshold information
+- **AND** it provides remediation that points operators toward scoped paths,
+  file-name discovery, counts or bounded excerpts
+
+#### Scenario: Command label contains sensitive-looking material
+- **WHEN** an oversized command label contains URL userinfo, token-like
+  assignments or local runtime paths
+- **THEN** the operator-facing summary redacts or omits those values before
+  printing or writing structured summary fields
+
+### Requirement: Oversized output smoke remains bounded
+ChangeRail delivery runner smoke MUST prove that oversized command output is
+accounted for without copying raw payloads into status records.
+
+#### Scenario: Synthetic child emits oversized command output
+- **WHEN** the delivery runner smoke launches a synthetic child that emits
+  oversized command output
+- **THEN** the runner status records byte accounting and threshold metadata
+- **AND** the status record remains below the documented bounded size
+- **AND** the raw oversized payload does not appear in `status.json`
+
+#### Scenario: Raw evidence remains ignored
+- **WHEN** the synthetic oversized output smoke retains raw stdout or stderr
+  evidence
+- **THEN** the evidence path remains under ignored runtime state
+- **AND** delivery manifest or scoped publish helpers do not treat it as a
+  committable path
+
 ### Requirement: Runner timestamps observed JSONL events
 The delivery runner MUST preserve runner-observed timing for child JSONL events
 used in performance summaries.

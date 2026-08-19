@@ -1,13 +1,13 @@
 # Ограничить discovery output и token amplification delivery child
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -60,19 +60,33 @@ amplification без чтения raw logs вручную.
 - Жесткий один threshold для всех repository sizes без измерений.
 
 ## Change Set
-- `bound-delivery-discovery-policy`
-- `record-delivery-command-output-metadata`
-- `report-oversized-delivery-output`
+- `bound-delivery-discovery-policy` (archived)
+- `record-delivery-command-output-metadata` (archived)
+- `report-oversized-delivery-output` (archived)
 
 ## Verify
-- `./bin/openspec validate "bound-delivery-discovery-policy" --strict`
-- `./bin/openspec validate "record-delivery-command-output-metadata" --strict`
-- `./bin/openspec validate "report-oversized-delivery-output" --strict`
-- `./bin/openspec validate --all --strict`
-- `git diff --check`
+- 2026-08-19T09:29:31Z `python3 -m py_compile bin/changerail-delivery-runner bin/changerail-delivery-metrics scripts/changerail_contract_schema.py` -> passed.
+- 2026-08-19T09:29:31Z `python3 scripts/smoke-contract-schemas.py` -> `SMOKE_CONTRACT_SCHEMAS_OK (20 schemas)`.
+- 2026-08-19T09:29:31Z `python3 scripts/smoke-delivery-metrics.py` -> passed.
+- 2026-08-19T09:29:31Z `python3 scripts/smoke-delivery-runner.py` -> passed.
+- 2026-08-19T09:29:31Z `./bin/openspec validate "bound-delivery-discovery-policy" --strict` -> passed.
+- 2026-08-19T09:29:31Z `./bin/openspec validate "record-delivery-command-output-metadata" --strict` -> passed.
+- 2026-08-19T09:29:31Z `./bin/openspec validate "report-oversized-delivery-output" --strict` -> passed.
+- 2026-08-19T09:29:31Z `./bin/openspec validate --all --strict` -> 30 passed, 0 failed before archive.
+- 2026-08-19T09:29:31Z `git diff --check` -> passed.
+- 2026-08-19T09:29:31Z `python3 scripts/public-surface-scan.py` -> pass, 1050 files scanned, 0 findings.
+- Test adequacy: runner smoke asserts child prompt/environment receives the
+  discovery policy, structured command byte metadata is captured, oversized
+  output is summarized without raw payload in `status.json`, and raw stdout
+  evidence remains ignored under `.runtime/changerail/`. Schema smoke rejects
+  `raw_stdout` inside command output metadata. Metrics smoke asserts text, JSON
+  and CSV render oversized output fields and preserve `unknown` for legacy
+  records.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-bound-delivery-discovery-policy/`
+- `openspec/changes/archive/2026-08-19-record-delivery-command-output-metadata/`
+- `openspec/changes/archive/2026-08-19-report-oversized-delivery-output/`
 
 ## Related
 - `bin/changerail-delivery-runner`
@@ -80,15 +94,20 @@ amplification без чтения raw logs вручную.
 - `scripts/smoke-delivery-runner.py`
 - `schemas/changerail-delivery-run.schema.json`
 - `openspec/specs/changerail-delivery-observability/spec.md`
-- `openspec/changes/bound-delivery-discovery-policy/`
-- `openspec/changes/record-delivery-command-output-metadata/`
-- `openspec/changes/report-oversized-delivery-output/`
+- `openspec/changes/archive/2026-08-19-bound-delivery-discovery-policy/`
+- `openspec/changes/archive/2026-08-19-record-delivery-command-output-metadata/`
+- `openspec/changes/archive/2026-08-19-report-oversized-delivery-output/`
 
 ## Result
-not started
+Implemented bounded discovery policy, runner child policy handoff,
+structured command output metadata, oversized output summaries and metrics/docs
+coverage. The three OpenSpec changes are synced, verified, reviewed and
+archived.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- `$changerail-do openspec/board/2.todo/bound-delivery-child-discovery-output.md`
+- done
 
 ## Change 1: `bound-delivery-discovery-policy`
 
@@ -117,7 +136,7 @@ bounded excerpts and inconclusive handling for truncated output.
 - none
 
 ### Related
-- `openspec/changes/bound-delivery-discovery-policy/`
+- `openspec/changes/archive/2026-08-19-bound-delivery-discovery-policy/`
 
 ## Change 2: `record-delivery-command-output-metadata`
 
@@ -148,7 +167,7 @@ threshold flags and command result/truncation classification.
 - `bound-delivery-discovery-policy`
 
 ### Related
-- `openspec/changes/record-delivery-command-output-metadata/`
+- `openspec/changes/archive/2026-08-19-record-delivery-command-output-metadata/`
 
 ## Change 3: `report-oversized-delivery-output`
 
@@ -178,10 +197,13 @@ synthetic smoke coverage.
 - `record-delivery-command-output-metadata`
 
 ### Related
-- `openspec/changes/report-oversized-delivery-output/`
+- `openspec/changes/archive/2026-08-19-report-oversized-delivery-output/`
 
 ## Log
 - 2026-08-18T17:39:30Z создана после supervised run, где delivery завершился,
   но unbounded discovery output вызвал непропорциональную token amplification.
 - 2026-08-19T06:22:24Z decomposed by `$chrl-ff` into three ordered OpenSpec
   changes and moved to `2.todo`.
+- 2026-08-19T09:29:31Z delivery implemented, synced specs, archived all three
+  changes and prepared independent review handoff.
+- 2026-08-19T10:14:10Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

@@ -232,6 +232,15 @@ def delivery_run() -> dict[str, Any]:
                 "ended_at": DATE,
                 "duration_seconds": 0.2,
                 "exit_code": 0,
+                "output": {
+                    "stdout_bytes": 128,
+                    "stderr_bytes": 0,
+                    "total_bytes": 128,
+                    "threshold_bytes": 65536,
+                    "threshold_exceeded": False,
+                    "classification": "success_bounded",
+                    "truncated": False,
+                },
             }
         ],
         "slowest_commands": [
@@ -240,8 +249,34 @@ def delivery_run() -> dict[str, Any]:
                 "command": "python3 scripts/smoke-contract-schemas.py",
                 "duration_seconds": 0.2,
                 "exit_code": 0,
+                "output": {
+                    "stdout_bytes": 128,
+                    "stderr_bytes": 0,
+                    "total_bytes": 128,
+                    "threshold_bytes": 65536,
+                    "threshold_exceeded": False,
+                    "classification": "success_bounded",
+                },
             }
         ],
+        "command_output": {
+            "threshold_bytes": 65536,
+            "observed_command_count": 1,
+            "oversized_command_count": 1,
+            "largest_command_bytes": 70000,
+            "top_oversized_commands": [
+                {
+                    "command_id": "cmd-big",
+                    "command": "rg --count example openspec/specs",
+                    "stdout_bytes": 70000,
+                    "stderr_bytes": 0,
+                    "total_bytes": 70000,
+                    "threshold_bytes": 65536,
+                    "truncated": True,
+                    "classification": "runner_truncated",
+                }
+            ],
+        },
         "timeline": [
             {
                 "observed_at": DATE,
@@ -1005,6 +1040,10 @@ def main() -> int:
             invalid_alias["status"] = "BLOCKED"
             if not validator(invalid_alias):
                 failures.append(f"{name}: duplicate top-level status alias unexpectedly passed")
+            invalid_output = delivery_run()
+            invalid_output["performance"]["commands"][0]["output"]["raw_stdout"] = "raw payload must not be accepted"
+            if not validator(invalid_output):
+                failures.append(f"{name}: raw command output payload unexpectedly passed")
         if name == "changerail-consumer-lock.schema.json":
             unsafe_source = consumer_lock()
             unsafe_source["changerail"]["source"] = "https://user:secret@example.invalid/changerail.git"
