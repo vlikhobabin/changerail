@@ -41,7 +41,11 @@ checkpoint commit as review evidence.
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-runner-retained-resume-payload.md","authorization_id":"authorize-bounded-runner-retained-resume-payload"}`
+
+## Depends On
+- `investigate-runner-retained-resume-payload-boundary`
+- `authorize-bounded-runner-retained-resume-payload`
 
 ## Acceptance
 - Runner records enough schema-backed retained-payload identity at the
@@ -90,6 +94,8 @@ checkpoint commit as review evidence.
 - `schemas/changerail-delivery-plan-status.schema.json`
 - `openspec/specs/changerail-delivery-runner/spec.md`
 - `openspec/specs/changerail-contracts/spec.md`
+- `openspec/board/4.done/investigate-runner-retained-resume-payload-boundary.md`
+- `openspec/board/2.todo/authorize-bounded-runner-retained-resume-payload.md`
 - `openspec/changes/record-investigation-required-payload-identity/`
 - `openspec/changes/resume-investigation-required-single-card/`
 - `openspec/changes/support-investigation-required-queue-recovery/`
@@ -98,12 +104,11 @@ checkpoint commit as review evidence.
 not started
 
 ## Next
-- After retrospective lifecycle closure for
-  `openspec/board/3.inprogress/fix-npm-integrity-stderr-isolation.md`, run
-  `$changerail-do openspec/board/2.todo/support-runner-resume-after-investigation-required.md`.
-- Preserve the critical/new-wire review route. If deterministic review preflight
-  requires a published investigation authorization for this implementation,
-  stop there instead of treating the direct runner resume as a waiver.
+- Deliver `authorize-bounded-runner-retained-resume-payload`, then run
+  `$changerail-deliver openspec/board/2.todo/support-runner-resume-after-investigation-required.md`.
+- Simplify the retained implementation to at most 500 added
+  production-counted LOC without weakening the investigation verification
+  floor; the WIP checkpoint remains investigation input only.
 
 ## Change 1: `record-investigation-required-payload-identity`
 
