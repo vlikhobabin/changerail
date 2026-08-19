@@ -105,8 +105,24 @@ projects and reports stay under `.runtime`.
 ## Post-Bootstrap And Git
 
 `--configure-existing` is a separate no-template mode for idempotent
-`--link-codex-auth` and lock-owned POSIX `--refresh-wiring`. It refuses
-project-owned destinations, undeclared links and unrelated Git dirty state.
+`--link-codex-auth`, lock-owned POSIX `--refresh-wiring`, and explicit
+lockless wiring adoption. Plain `--refresh-wiring` remains fail-closed when
+`openspec/changerail-consumer-lock.json` is missing.
+
+For a legacy lockless consumer, preview before apply:
+
+```bash
+bin/bootstrap-project . --configure-existing --adopt-lockless-wiring --dry-run
+bin/bootstrap-project . --configure-existing --adopt-lockless-wiring
+bin/verify-project .
+```
+
+The dry-run inventory reports keep/add/reject decisions for allowlisted
+ChangeRail-owned skills, commands and helpers. Adoption creates
+`openspec/changerail-consumer-lock.json` only after ownership is proven; for
+generated-copy/fallback wiring it may also update `openspec/changerail-wiring.json`.
+Project-owned instructions, config, auth, application source, board cards and
+unrelated Git state stay outside the migration scope.
 
 `--init-git` may set `--default-branch` and configure `origin` through
 `--remote`. It does not stage, commit, push or create remote repositories.

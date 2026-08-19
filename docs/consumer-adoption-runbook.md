@@ -184,8 +184,8 @@ git -C /opt/changerail status --short
 Обычный `bin/bootstrap-project` предназначен для нового или пустого проекта.
 Для живого проекта он полезен как source of truth по templates, но migration
 нужно делать как аккуратный adoption. Отдельный `--configure-existing` не
-рендерит templates и допускает только `--link-codex-auth` и
-`--refresh-wiring`:
+рендерит templates и допускает только explicit auth link, lock-owned
+`--refresh-wiring` и `--adopt-lockless-wiring`:
 
 - сохранить существующие `AGENTS.md`, `CLAUDE.md`, `.mcp.json`,
   `.codex/config.toml`, `.gitignore` и локальные правила;
@@ -289,15 +289,47 @@ consumer должен выбрать `--lock-enforcement strict`. Lock гене�
 из clean tracked ChangeRail checkout с semantic `VERSION`, exact Git revision и
 public remote без credentials; machine-local source root не записывается.
 
-Existing lockless consumers продолжают проходить legacy verification. При
-плановой migration сначала создайте lock в отдельном clean/disposable checkout,
-просмотрите artifact inventory, затем используйте lock-owned repair. Не
-подменяйте project-owned files:
+Existing lockless consumers продолжают проходить legacy verification, но
+обычный `--refresh-wiring` без `openspec/changerail-consumer-lock.json`
+остается fail-closed. Плановая migration использует отдельный explicit
+adoption flow: сначала dry-run показывает inventory только allowlisted
+ChangeRail-owned wiring, затем apply создает consumer lock и добавляет только
+missing owned helpers через доказанный backend/path mode.
 
 ```bash
 /opt/changerail/bin/bootstrap-project /opt/example-project \
   --changerail-root /opt/changerail \
-  --configure-existing --refresh-wiring --skip-verify
+  --configure-existing --adopt-lockless-wiring --dry-run --skip-verify
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --changerail-root /opt/changerail \
+  --configure-existing --adopt-lockless-wiring
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+POSIX adoption принимает только symlink-и, которые resolve under одного
+выбранного ChangeRail checkout и используют один path mode. Dangling links,
+mixed roots, mixed absolute/relative targets, regular files, undeclared
+destinations, scope escapes и unrelated Git dirty state блокируют migration до
+первой мутации. Native Windows generated-copy adoption требует existing
+`openspec/changerail-wiring.json` ownership metadata; Windows symlink fallback
+требует explicit proof, а junction inference без достаточного proof не
+принимается.
+
+Rollback boundary после successful adoption ограничен созданными tracked
+ChangeRail-owned файлами: `openspec/changerail-consumer-lock.json`, при
+generated-copy/fallback wiring также `openspec/changerail-wiring.json`, и
+missing helper/surface artifacts, перечисленными в dry-run как `add`.
+Project-owned `AGENTS.md`, `.codex/config.toml`, `.mcp.json`, auth files,
+application source, board cards и unrelated Git state не входят в migration
+scope и не должны меняться adoption flow.
+
+После adoption повторный запуск explicit adoption идемпотентен и переходит к
+lock-owned repair. Для обычного обновления уже adopted consumer используйте:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --changerail-root /opt/changerail \
+  --refresh-wiring --skip-verify
 /opt/changerail/bin/verify-project /opt/example-project
 ```
 
@@ -342,8 +374,8 @@ set PROJECT=C:\opt\example-project
 "%CHANGERAIL_ROOT%\bin\verify-project.cmd" "%PROJECT%"
 ```
 
-После обновления ChangeRail refresh должен менять только generated-owned
-artifacts и не трогать project-owned files:
+После обновления ChangeRail refresh должен менять только lock-owned
+generated-owned artifacts и не трогать project-owned files:
 
 ```bat
 "%CHANGERAIL_ROOT%\bin\bootstrap-project.cmd" "%PROJECT%" --refresh-wiring --skip-verify

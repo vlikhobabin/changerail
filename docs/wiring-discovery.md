@@ -163,9 +163,12 @@ Windows generated wiring rules:
   `openspec/changerail-wiring.json`. Each artifact entry uses project-relative
   `path`, `kind` (`file` or `directory`), ChangeRail-relative `source`,
   `digest` and `owner: generated`.
-- `bin/bootstrap-project <project> --refresh-wiring` refreshes generated-owned
-  artifacts from the ChangeRail source of truth and refuses project-owned
-  divergence.
+- `bin/bootstrap-project <project> --refresh-wiring` is lock-owned. It requires
+  `openspec/changerail-consumer-lock.json`, refreshes generated-owned artifacts
+  from the ChangeRail source of truth and refuses project-owned divergence.
+- Legacy generated-copy consumers without a consumer lock use explicit
+  `--configure-existing --adopt-lockless-wiring` migration after reviewing the
+  dry-run keep/add/reject inventory.
 - Drift gate consumes `verify-project --json`; stale, missing or project-owned
   generated wiring is reported as `broken_wiring` with failed verifier check
   details and refresh remediation instead of being treated as current

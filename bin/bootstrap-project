@@ -168,6 +168,30 @@ class BootstrapProfiles:
         return "on-request", "workspace-write"
 
 
+@dataclass(frozen=True)
+class AdoptionDecision:
+    action: str
+    artifact: WiringArtifact
+    reason: str
+
+
+@dataclass(frozen=True)
+class LocklessAdoptionPlan:
+    platform: str
+    backend: str
+    path_mode: str
+    profiles: BootstrapProfiles
+    enforcement: str
+    artifacts: list[WiringArtifact]
+    decisions: list[AdoptionDecision]
+    lock_payload: dict[str, object]
+    fallback_proof: dict[str, object] | None = None
+
+    @property
+    def blocked(self) -> bool:
+        return any(decision.action == "reject" for decision in self.decisions)
+
+
 def normalize_profiles(args: argparse.Namespace) -> BootstrapProfiles:
     if args.profile and args.kind and args.profile != args.kind:
         raise BootstrapError(
@@ -396,6 +420,21 @@ def write_consumer_lock(target: Path, payload: dict[str, object] | None) -> None
         json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def consumer_lock_missing_message() -> str:
+    return (
+        f"consumer lock missing at {CONSUMER_LOCK_REL}; plain --refresh-wiring "
+        "is lock-owned only. Preview explicit migration with: "
+        "bin/bootstrap-project <project> --configure-existing "
+        "--adopt-lockless-wiring --dry-run"
+    )
+
+
+def require_consumer_lock(target: Path, changerail_root: Path) -> dict[str, object]:
+    if not (target / CONSUMER_LOCK_REL).is_file():
+        raise BootstrapError(consumer_lock_missing_message())
+    return load_consumer_lock(target, changerail_root)
 
 
 def render_text(
@@ -1019,6 +1058,199 @@ def refresh_consumer_wiring(
     apply_consumer_wiring_refresh(planned, path_mode)
 
 
+def manifest_artifact(manifest: dict[str, object] | None, rel_path: str) -> dict[str, object] | None:
+    artifacts = manifest.get("artifacts") if manifest else None
+    if not isinstance(artifacts, list):
+        return None
+    return next((entry for entry in artifacts if isinstance(entry, dict) and entry.get("path") == rel_path), None)
+
+
+def source_root_from_resolved(resolved: Path, source_rel: Path) -> Path | None:
+    rel_parts = source_rel.parts
+    if not rel_parts or len(resolved.parts) < len(rel_parts) or resolved.parts[-len(rel_parts) :] != rel_parts:
+        return None
+    root_parts = resolved.parts[: -len(rel_parts)]
+    return Path(*root_parts) if root_parts else Path(resolved.anchor or ".")
+
+
+def generated_copy_decision(artifact: WiringArtifact, changerail_root: Path, target: Path, manifest: dict[str, object] | None) -> AdoptionDecision:
+    rel_path = rel_to_root(artifact.destination, target)
+    if not artifact.destination.exists() and not artifact.destination.is_symlink():
+        return AdoptionDecision("add", artifact, "missing generated-owned wiring will be added")
+    if artifact.destination.is_symlink():
+        return AdoptionDecision("reject", artifact, "symlink cannot prove generated-copy ownership")
+    if (artifact.kind == "directory" and not artifact.destination.is_dir()) or (artifact.kind == "file" and not artifact.destination.is_file()):
+        return AdoptionDecision("reject", artifact, "generated destination has incompatible type")
+    entry = manifest_artifact(manifest, rel_path)
+    source_rel = rel_to_root(artifact.source, changerail_root)
+    if not entry or entry.get("owner") != "generated" or entry.get("source") != source_rel or not isinstance(entry.get("digest"), str):
+        return AdoptionDecision("reject", artifact, "missing or invalid generated ownership metadata")
+    try:
+        destination_digest = digest_path(artifact.destination)
+        source_digest = digest_path(artifact.source)
+    except OSError:
+        return AdoptionDecision("reject", artifact, "generated digest cannot be computed")
+    if destination_digest != entry["digest"] and destination_digest != source_digest:
+        return AdoptionDecision("reject", artifact, "project-owned generated divergence")
+    return AdoptionDecision("keep", artifact, "generated ownership metadata proves the artifact")
+
+
+def plan_lockless_wiring_adoption(*, changerail_root: Path, target: Path, platform: str, backend: str, profiles: BootstrapProfiles, enforcement: str, fallback_proof: dict[str, object] | None) -> LocklessAdoptionPlan:
+    if enforcement == "none":
+        raise BootstrapError("--adopt-lockless-wiring requires advisory or strict --lock-enforcement")
+    if (target / CONSUMER_LOCK_REL).is_file():
+        raise BootstrapError("consumer lock already exists; use --refresh-wiring for lock-owned repair")
+
+    artifacts = wiring_artifacts(changerail_root, target, include_windows_helpers=platform == "windows", include_maintenance_helpers=False, include_claude_surface=profiles.include_claude)
+    if backend == "generated-copy":
+        if platform != "windows":
+            raise BootstrapError("generated-copy lockless adoption is a Windows platform policy")
+        if not (target / WIRING_MANIFEST_REL).is_file():
+            raise BootstrapError("Windows generated-copy adoption requires openspec/changerail-wiring.json metadata")
+    manifest = load_wiring_manifest(target) if (target / WIRING_MANIFEST_REL).is_file() else None
+    decisions: list[AdoptionDecision] = []
+    path_modes: set[str] = set()
+    source_roots: set[Path] = set()
+    source_root = changerail_root.resolve(strict=False)
+
+    if backend == "junction":
+        raise BootstrapError("lockless adoption cannot infer Windows junction ownership; regenerate or use generated-copy metadata")
+    if backend == "symlink" and platform == "windows" and fallback_proof is None:
+        raise BootstrapError("Windows symlink adoption requires explicit --windows-fallback-proof")
+    if backend == "generated-copy" and (not manifest or manifest.get("backend") != "generated-copy"):
+        raise BootstrapError("generated-copy adoption requires a generated-copy wiring manifest")
+
+    for artifact in artifacts:
+        rel_path = Path(rel_to_root(artifact.destination, target))
+        if parent_chain_has_symlink(target, rel_path):
+            decisions.append(AdoptionDecision("reject", artifact, "symlink parent escapes owned wiring path"))
+        elif not artifact.source.exists():
+            decisions.append(AdoptionDecision("reject", artifact, "ChangeRail source artifact is missing"))
+        elif backend == "generated-copy":
+            decisions.append(generated_copy_decision(artifact, changerail_root, target, manifest))
+        elif not artifact.destination.exists() and not artifact.destination.is_symlink():
+            decisions.append(AdoptionDecision("add", artifact, "missing allowlisted wiring will be added"))
+        elif not artifact.destination.is_symlink():
+            decisions.append(AdoptionDecision("reject", artifact, "project-owned non-symlink content"))
+        else:
+            path_modes.add("absolute" if Path(os.readlink(artifact.destination)).is_absolute() else "relative")
+            try:
+                resolved = artifact.destination.resolve(strict=True)
+            except OSError:
+                decisions.append(AdoptionDecision("reject", artifact, "dangling symlink"))
+                continue
+            root = source_root_from_resolved(resolved, Path(rel_to_root(artifact.source, changerail_root)))
+            normalized = root.resolve(strict=False) if root else None
+            if normalized is None:
+                decisions.append(AdoptionDecision("reject", artifact, "undeclared symlink target"))
+            elif normalized != source_root:
+                source_roots.add(normalized)
+                decisions.append(AdoptionDecision("reject", artifact, "mixed ChangeRail source root"))
+            else:
+                source_roots.add(normalized)
+                decisions.append(AdoptionDecision("keep", artifact, "existing symlink matches the selected ChangeRail root"))
+
+    if backend == "symlink":
+        if len(source_roots) > 1:
+            decisions.append(AdoptionDecision("reject", artifacts[0], "mixed ChangeRail source roots"))
+        if len(path_modes) > 1:
+            decisions.append(AdoptionDecision("reject", artifacts[0], "mixed POSIX symlink path modes"))
+        path_mode = next(iter(path_modes)) if len(path_modes) == 1 else "absolute"
+    else:
+        path_mode = "not-applicable"
+    if not any(decision.action == "keep" for decision in decisions):
+        decisions.append(AdoptionDecision("reject", artifacts[0], f"no existing allowlisted {backend} wiring to adopt"))
+
+    owned_paths = {
+        rel_to_root(decision.artifact.destination, target)
+        for decision in decisions
+        if decision.action in {"keep", "add"}
+    }
+    owned_paths.add(CONSUMER_LOCK_REL.as_posix())
+    if backend == "generated-copy" or (platform == "windows" and fallback_proof is not None):
+        owned_paths.add(WIRING_MANIFEST_REL.as_posix())
+    unrelated = [path for path in project_dirty_paths(target) if path not in owned_paths]
+    if unrelated:
+        decisions.append(AdoptionDecision("reject", artifacts[0], "unrelated dirty state: " + ", ".join(sorted(unrelated)[:8])))
+
+    lock_payload = consumer_lock_payload(changerail_root=changerail_root, target=target, platform=platform, backend=backend, path_mode=path_mode, profiles=profiles, enforcement=enforcement, include_maintenance_helpers=False)
+    if lock_payload is None:
+        raise BootstrapError("lockless adoption could not build a consumer lock")
+    return LocklessAdoptionPlan(platform=platform, backend=backend, path_mode=path_mode, profiles=profiles, enforcement=enforcement, artifacts=artifacts, decisions=decisions, lock_payload=lock_payload, fallback_proof=fallback_proof)
+
+
+def print_lockless_adoption_plan(plan: LocklessAdoptionPlan, *, target: Path, changerail_root: Path) -> None:
+    print("PLAN configure-existing")
+    print("PLAN adopt-lockless-wiring")
+    print(f"PLAN wiring-platform {plan.platform}")
+    print(f"PLAN wiring-backend {plan.backend}")
+    print(f"PLAN wiring-path-mode {plan.path_mode}")
+    print(f"PLAN lock-enforcement {plan.enforcement}")
+    metadata = plan.lock_payload.get("changerail", {})
+    if isinstance(metadata, dict):
+        print(f"PLAN source {metadata.get('source', 'unknown')}")
+        print(f"PLAN source-revision {metadata.get('revision', 'unknown')}")
+    print(f"PLAN consumer-lock {CONSUMER_LOCK_REL}")
+    if plan.backend == "generated-copy" or (plan.platform == "windows" and plan.fallback_proof is not None):
+        print(f"PLAN generated-manifest {WIRING_MANIFEST_REL}")
+    for line in adoption_plan_lines(plan, target, changerail_root):
+        print(line)
+
+
+def adoption_plan_lines(plan: LocklessAdoptionPlan, target: Path, changerail_root: Path) -> list[str]:
+    lines: list[str] = []
+    for decision in plan.decisions:
+        destination = rel_to_root(decision.artifact.destination, target)
+        source = rel_to_root(decision.artifact.source, changerail_root)
+        lines.append(f"PLAN {decision.action} {plan.backend} {destination} <- {source}: {decision.reason}")
+    return lines
+
+
+def apply_lockless_adoption(plan: LocklessAdoptionPlan, *, changerail_root: Path, target: Path) -> None:
+    if plan.blocked:
+        blockers = [f"{rel_to_root(decision.artifact.destination, target)}: {decision.reason}" for decision in plan.decisions if decision.action == "reject"]
+        raise BootstrapError("lockless adoption blocked: " + "; ".join(blockers[:8]))
+
+    created: list[Path] = []
+    snapshots: dict[Path, bytes | None] = {}
+
+    try:
+        count = 0
+        for decision in plan.decisions:
+            if decision.action != "add":
+                continue
+            if plan.backend == "symlink":
+                create_symlink(decision.artifact.source, decision.artifact.destination, path_mode=plan.path_mode)
+                created.append(decision.artifact.destination)
+            elif plan.backend == "generated-copy":
+                copy_generated_artifact(decision.artifact, created)
+            else:
+                raise BootstrapError(f"unsupported adoption backend: {plan.backend}")
+            count += 1
+            maybe_fail_after_artifact(count)
+
+        manifest_path = target / WIRING_MANIFEST_REL
+        if plan.backend == "generated-copy":
+            snapshots.setdefault(manifest_path, manifest_path.read_bytes() if manifest_path.is_file() else None)
+            write_wiring_manifest(target=target, changerail_root=changerail_root, platform=plan.platform, backend=plan.backend, artifacts=plan.artifacts, fallback_reasons=generated_fallback_reasons(plan.platform, plan.backend))
+        elif plan.platform == "windows" and plan.fallback_proof is not None:
+            snapshots.setdefault(manifest_path, manifest_path.read_bytes() if manifest_path.is_file() else None)
+            write_wiring_manifest(target=target, changerail_root=changerail_root, platform=plan.platform, backend=plan.backend, artifacts=plan.artifacts, fallback_reasons=[], fallback_proof=plan.fallback_proof, artifact_owner=plan.backend)
+
+        lock_path = target / CONSUMER_LOCK_REL
+        snapshots.setdefault(lock_path, lock_path.read_bytes() if lock_path.is_file() else None)
+        write_consumer_lock(target, plan.lock_payload)
+    except Exception:
+        cleanup_created_artifacts(created)
+        for path, content in snapshots.items():
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(content)
+        raise
+
+
 def load_fallback_proof(path: Path) -> dict[str, object]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -1552,6 +1784,13 @@ def supplied_option_names(argv: list[str]) -> set[str]:
     return {item.split("=", 1)[0] for item in argv if item.startswith("--")}
 
 
+def unsupported_configure_options(args: argparse.Namespace, argv: list[str]) -> list[str]:
+    unsupported = supplied_option_names(argv) & CONFIGURE_BOOTSTRAP_ONLY_OPTIONS
+    if args.adopt_lockless_wiring:
+        unsupported -= {"--lock-enforcement", "--wiring-platform", "--wiring-backend", "--windows-fallback-proof"}
+    return sorted(unsupported)
+
+
 def preflight_configure_auth(source: Path, target: Path, *, check_dirty: bool) -> str:
     rel_path = Path(".codex/auth.json")
     destination = target / rel_path
@@ -1581,35 +1820,54 @@ def configure_existing_project(
     changerail_root: Path,
     target: Path,
 ) -> int:
-    unsupported = sorted(supplied_option_names(argv) & CONFIGURE_BOOTSTRAP_ONLY_OPTIONS)
+    unsupported = unsupported_configure_options(args, argv)
     if unsupported:
         raise BootstrapError(
             "--configure-existing accepts only auth/wiring actions; unsupported options: "
             + ", ".join(unsupported)
         )
-    if not args.link_codex_auth and not args.refresh_wiring:
+    if not args.link_codex_auth and not args.refresh_wiring and not args.adopt_lockless_wiring:
         raise BootstrapError(
-            "--configure-existing requires --link-codex-auth or --refresh-wiring"
+            "--configure-existing requires --link-codex-auth, --refresh-wiring or --adopt-lockless-wiring"
         )
+    if args.refresh_wiring and args.adopt_lockless_wiring:
+        raise BootstrapError("--refresh-wiring and --adopt-lockless-wiring are separate flows")
+    if args.adopt_lockless_wiring and args.link_codex_auth:
+        raise BootstrapError("--adopt-lockless-wiring does not modify auth; run auth linking separately")
     if not target.is_dir():
         raise BootstrapError("configure target must be an existing directory")
 
     refresh_plan: tuple[list[tuple[Path, Path]], str] | None = None
+    adoption_plan: LocklessAdoptionPlan | None = None
     if args.refresh_wiring:
-        lock = load_consumer_lock(target, changerail_root)
+        lock = require_consumer_lock(target, changerail_root)
         refresh_plan = plan_consumer_wiring_refresh(changerail_root, target, lock)
+    if args.adopt_lockless_wiring:
+        if (target / CONSUMER_LOCK_REL).is_file():
+            lock = load_consumer_lock(target, changerail_root)
+            refresh_plan = plan_consumer_wiring_refresh(changerail_root, target, lock)
+        else:
+            platform = resolve_wiring_platform(args.wiring_platform)
+            backend = resolve_wiring_backend(platform, args.wiring_backend)
+            if args.wiring_path_mode is not None:
+                raise BootstrapError("--adopt-lockless-wiring infers path mode from existing wiring")
+            fallback_proof = validate_windows_fallback(target=target, platform=platform, backend=backend, proof_path=args.windows_fallback_proof)
+            adoption_plan = plan_lockless_wiring_adoption(changerail_root=changerail_root, target=target, platform=platform, backend=backend, profiles=normalize_profiles(args), enforcement=args.lock_enforcement, fallback_proof=fallback_proof)
 
     auth_source: Path | None = None
     auth_state: str | None = None
     if args.link_codex_auth:
         auth_source = validate_codex_auth_source(args.link_codex_auth, redact=True)
-        auth_state = preflight_configure_auth(
-            auth_source,
-            target,
-            check_dirty=refresh_plan is None,
-        )
+        auth_state = preflight_configure_auth(auth_source, target, check_dirty=refresh_plan is None)
 
     if args.dry_run:
+        if adoption_plan is not None:
+            print_lockless_adoption_plan(adoption_plan, target=target, changerail_root=changerail_root)
+            if not args.skip_verify:
+                print(f"PLAN verify {changerail_root / 'bin' / 'verify-project'} {target}")
+            print("dry-run: no files were written")
+            return 1 if adoption_plan.blocked else 0
+
         print("PLAN configure-existing")
         if refresh_plan is not None:
             print(f"PLAN refresh-wiring {CONSUMER_LOCK_REL}")
@@ -1622,6 +1880,8 @@ def configure_existing_project(
 
     if refresh_plan is not None:
         apply_consumer_wiring_refresh(*refresh_plan)
+    if adoption_plan is not None:
+        apply_lockless_adoption(adoption_plan, changerail_root=changerail_root, target=target)
     if auth_source is not None and auth_state == "create":
         link_codex_auth(auth_source, target)
     if not args.skip_verify:
@@ -1629,6 +1889,10 @@ def configure_existing_project(
     print(f"configured existing project: {target}")
     if refresh_plan is not None:
         print("wiring refreshed from consumer lock")
+    if adoption_plan is not None:
+        print("lockless wiring adopted into consumer lock")
+        print(f"wiring backend: {adoption_plan.backend}")
+        print(f"wiring path mode: {adoption_plan.path_mode}")
     if auth_state == "create":
         print("auth linked: .codex/auth.json")
     elif auth_state == "already-configured":
@@ -1925,6 +2189,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="Refresh generated-owned wiring artifacts from the ChangeRail source of truth.",
     )
+    parser.add_argument("--adopt-lockless-wiring", action="store_true", help="Opt in to adopting existing lockless ChangeRail wiring into a consumer lock.")
     parser.add_argument(
         "--with-maintenance",
         action="store_true",
@@ -1994,10 +2259,7 @@ def main(argv: list[str]) -> int:
                 if args.wiring_path_mode is not None:
                     raise BootstrapError("--wiring-path-mode cannot override a consumer lock during refresh")
             else:
-                manifest = load_wiring_manifest(target)
-                platform = str(manifest.get("platform") or platform)
-                backend = str(manifest.get("backend") or backend)
-                path_mode = resolve_wiring_path_mode(platform, backend, args.wiring_path_mode)
+                raise BootstrapError(consumer_lock_missing_message())
         else:
             path_mode = resolve_wiring_path_mode(platform, backend, args.wiring_path_mode)
         fallback_proof = validate_windows_fallback(
@@ -2060,7 +2322,9 @@ def main(argv: list[str]) -> int:
             return 0
 
         if args.refresh_wiring:
-            if refresh_lock is not None and backend == "symlink":
+            if refresh_lock is None:
+                raise BootstrapError(consumer_lock_missing_message())
+            if backend == "symlink":
                 refresh_consumer_wiring(changerail_root, target, refresh_lock)
             else:
                 refresh_generated_wiring(changerail_root, target)

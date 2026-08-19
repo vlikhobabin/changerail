@@ -1,13 +1,13 @@
 # Добавить безопасную миграцию lockless consumer wiring
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -64,14 +64,23 @@ wiring остается lockless compatibility path.
 - `adopt-lockless-consumer-wiring`
 
 ## Verify
-- `./bin/openspec validate "adopt-lockless-consumer-wiring" --strict`
-- focused bootstrap and verify smoke commands for lockless adoption fixtures
-- `./bin/openspec validate --all --strict`
-- `git diff --check`
-- `python3 scripts/public-surface-scan.py`
+- `python3 -m py_compile bin/bootstrap-project bin/verify-project scripts/smoke-bootstrap-project.py scripts/smoke-verify-project.py scripts/smoke-windows-wiring-git-safety.py` - passed
+- `python3 scripts/smoke-bootstrap-project.py` - passed, 23/23 checks
+- `python3 scripts/smoke-verify-project.py` - passed, 60/60 checks
+- `python3 scripts/smoke-windows-wiring-git-safety.py` - passed, 6/6 checks
+- `./bin/openspec validate "adopt-lockless-consumer-wiring" --strict` - passed
+- `./bin/openspec validate "changerail-project-bootstrap" --strict` - passed
+- `./bin/openspec validate "changerail-project-templates" --strict` - passed
+- `./bin/openspec validate "changerail-project-verification" --strict` - passed
+- `./bin/openspec archive "adopt-lockless-consumer-wiring" --yes --skip-specs` - passed after already-synced duplicate guard aborted the plain archive without changes
+- `./bin/openspec validate --all --strict` - passed, 26 items
+- `git diff --check` - passed
+- `python3 scripts/public-surface-scan.py` - passed, 1050 files scanned, 0 findings
+- `python3 scripts/public-surface-scan.py --history` - passed, 1050 files scanned, 0 findings
+- `python3 scripts/run-release-baseline.py` - passed, 36/36 steps; Windows matrix recorded live two-host smoke as not-run, so no live two-host coverage is claimed
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-19-adopt-lockless-consumer-wiring/`
 
 ## Related
 - `bin/bootstrap-project`
@@ -79,13 +88,15 @@ wiring остается lockless compatibility path.
 - `schemas/changerail-consumer-lock.schema.json`
 - `docs/consumer-adoption-runbook.md`
 - `scripts/smoke-bootstrap-project.py`
-- `openspec/changes/adopt-lockless-consumer-wiring/`
+- `openspec/changes/archive/2026-08-19-adopt-lockless-consumer-wiring/`
 
 ## Result
-not started
+implemented, reviewed and finalized through ChangeRail scoped publish; exact
+payload and published commit ledger is retained in the ignored delivery
+manifest.
 
 ## Next
-- `$changerail-do openspec/board/2.todo/migrate-lockless-consumer-wiring.md`
+- done
 
 ## Change 1: `adopt-lockless-consumer-wiring`
 
@@ -126,10 +137,17 @@ adds missing helpers through the inferred owned backend.
 - none
 
 ### Related
-- `openspec/changes/adopt-lockless-consumer-wiring/`
+- `openspec/changes/archive/2026-08-19-adopt-lockless-consumer-wiring/`
 
 ## Log
 - 2026-08-18T17:39:30Z создана после fail-closed ответа refresh-wiring на
   корректно работающем, но созданном до consumer-lock legacy wiring.
 - 2026-08-19T06:29:33Z decomposed by `$chrl-ff` into one OpenSpec change and
   moved to `2.todo`.
+- 2026-08-19T10:49:06Z `$changerail-do` implemented lockless adoption,
+  synced specs, archived `adopt-lockless-consumer-wiring` and prepared
+  review handoff.
+- 2026-08-19T11:16:10Z publish baseline found and corrected the generated-copy
+  Windows Git-safety smoke expectation for lock-owned refresh; release
+  baseline passed after correction.
+- 2026-08-19T11:40:09Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

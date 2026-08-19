@@ -16,6 +16,7 @@ from pathlib import Path
 
 SCHEMA = "changerail.windows-wiring-git-safety-smoke.v1"
 SENTINEL = "fake-secret-sentinel"
+CONSUMER_LOCK_REL = Path("openspec/changerail-consumer-lock.json")
 GIT_SAFETY_CHECK_NAMES = {
     "git_status_safe",
     "git_add_dry_run_safe",
@@ -214,6 +215,43 @@ def generated_manifest_paths(manifest: dict[str, object]) -> set[str]:
         if isinstance(entry, dict) and entry.get("owner") == "generated" and isinstance(entry.get("path"), str):
             paths.add(entry["path"])
     return paths
+
+
+def write_generated_consumer_lock(project: Path, changerail_root: Path) -> None:
+    manifest = json.loads((project / "openspec" / "changerail-wiring.json").read_text(encoding="utf-8"))
+    backend = str(manifest.get("backend") or "generated-copy")
+    artifacts: list[dict[str, str]] = []
+    for entry in manifest.get("artifacts", []):
+        if not isinstance(entry, dict):
+            continue
+        rel_path = entry.get("path")
+        source = entry.get("source")
+        surface = entry.get("surface")
+        if all(isinstance(value, str) and value for value in (rel_path, source, surface)):
+            artifacts.append({"path": rel_path, "source": source, "kind": backend, "surface": surface})
+    revision = run(["git", "rev-parse", "HEAD"], changerail_root).stdout.strip()
+    payload = {
+        "schema": "changerail.consumer-lock.v1",
+        "changerail": {
+            "version": (changerail_root / "VERSION").read_text(encoding="utf-8").strip(),
+            "revision": revision,
+            "source": "https://github.com/example/changerail.git",
+        },
+        "wiring": {
+            "platform": str(manifest.get("platform") or "windows"),
+            "backend": backend,
+            "path_mode": "not-applicable",
+            "artifacts": artifacts,
+        },
+        "profiles": {
+            "project": "generic",
+            "surfaces": "all-surfaces",
+            "codex_policy": "safe-interactive",
+        },
+        "enforcement": "advisory",
+    }
+    lock_path = project / CONSUMER_LOCK_REL
+    lock_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def remove_path(path: Path) -> None:
@@ -517,11 +555,20 @@ def check_cleanup_and_refresh_boundaries(changerail_root: Path, run_dir: Path) -
         [str(changerail_root / "bin" / "bootstrap-project"), str(refresh_project), "--refresh-wiring", "--skip-verify"],
         changerail_root,
     )
-    if refresh.returncode != 0:
+    if refresh.returncode == 0 or "adopt-lockless-wiring" not in refresh.stdout:
+        return Check("cleanup and refresh boundaries", "fail", refresh.stdout.strip())
+    if (refresh_project / CONSUMER_LOCK_REL).exists():
+        return Check("cleanup and refresh boundaries", "fail", "lockless refresh created a consumer lock")
+    write_generated_consumer_lock(refresh_project, changerail_root)
+    refresh = run(
+        [str(changerail_root / "bin" / "bootstrap-project"), str(refresh_project), "--refresh-wiring", "--skip-verify"],
+        changerail_root,
+    )
+    if refresh.returncode != 0 or "wiring refreshed" not in refresh.stdout:
         return Check("cleanup and refresh boundaries", "fail", refresh.stdout.strip())
     if project_owned.read_text(encoding="utf-8") != "project-owned source\n":
         return Check("cleanup and refresh boundaries", "fail", "refresh modified project-owned source")
-    return Check("cleanup and refresh boundaries", "pass", "cleanup and refresh stayed within owned wiring paths")
+    return Check("cleanup and refresh boundaries", "pass", "cleanup, lockless boundary and lock-backed refresh stayed within owned wiring paths")
 
 
 def check_rename_and_uninstall_boundaries(changerail_root: Path, run_dir: Path) -> Check:

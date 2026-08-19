@@ -2069,6 +2069,22 @@ def check_tracked_runtime(project: Path) -> Check:
     return Check("tracked runtime/auth files", True, "no tracked runtime/auth files")
 
 
+def lockless_adoption_check(check: Check) -> bool:
+    return check.name == str(WIRING_MANIFEST_REL) or check.name.startswith(("bin/", ".codex/skills/", ".claude/"))
+
+
+def lockless_wiring_adoption_advisory(project: Path, checks: list[Check]) -> Advisory:
+    if (project / CONSUMER_LOCK_REL).is_file():
+        return Advisory("lockless wiring adoption", "pass", "consumer lock exists; use lock-owned --refresh-wiring for repair", severity="info")
+    failed = [check.name for check in checks if lockless_adoption_check(check) and check.status == "fail" and check.severity == "blocking"]
+    if failed:
+        return Advisory("lockless wiring adoption", "fail", "lockless wiring is unsafe for automatic adoption: " + ", ".join(failed[:8]), severity="non-blocking")
+    kept = len([check for check in checks if lockless_adoption_check(check) and check.status == "pass"])
+    if kept:
+        return Advisory("lockless wiring adoption", "fail", f"lockless symlink wiring has {kept} accepted artifact(s); preview adoption with: bin/bootstrap-project <project> --changerail-root <changerail-root> --configure-existing --adopt-lockless-wiring --dry-run", severity="non-blocking")
+    return Advisory("lockless wiring adoption", "pass", "no allowlisted lockless ChangeRail wiring detected", severity="info")
+
+
 def delivery_auth_advisory(project: Path, changerail_root: Path) -> Advisory:
     for name in AUTH_ENV_VARS:
         if os.environ.get(name):
@@ -2287,8 +2303,11 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
     return checks
 
 
-def build_advisories(project: Path, changerail_root: Path) -> list[Advisory]:
-    return [delivery_auth_advisory(project, changerail_root)]
+def build_advisories(project: Path, changerail_root: Path, checks: list[Check]) -> list[Advisory]:
+    return [
+        lockless_wiring_adoption_advisory(project, checks),
+        delivery_auth_advisory(project, changerail_root),
+    ]
 
 
 def summarize_results(checks: list[Check], advisories: list[Advisory]) -> dict[str, object]:
@@ -2334,7 +2353,7 @@ def main(argv: list[str]) -> int:
     changerail_root = args.changerail_root.resolve()
     aggregator_root = args.aggregator_root.resolve() if args.aggregator_root else None
     checks = build_checks(project, changerail_root, aggregator_root)
-    advisories = build_advisories(project, changerail_root)
+    advisories = build_advisories(project, changerail_root, checks)
     summary = summarize_results(checks, advisories)
     runtime_diagnostics = run_runtime_diagnostics(project) if args.runtime_diagnostics else None
     warnings = [

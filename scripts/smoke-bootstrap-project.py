@@ -664,6 +664,184 @@ def check_consumer_lock_and_path_modes(
     return Check("consumer lock and POSIX path modes", "pass", "lock and path-mode contracts passed")
 
 
+def check_lockless_wiring_adoption(
+    changerail_root: Path,
+    run_dir: Path,
+    extra_env: dict[str, str],
+) -> Check:
+    clean_root = create_clean_changerail_fixture(changerail_root, run_dir / "adoption-clean-changerail")
+    other_root = create_clean_changerail_fixture(changerail_root, run_dir / "adoption-other-changerail")
+    failures: list[str] = []
+
+    def bootstrap_lockless(project: Path) -> subprocess.CompletedProcess[str]:
+        return run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(project),
+                "--changerail-root",
+                str(clean_root),
+                "--lock-enforcement",
+                "none",
+                "--skip-verify",
+            ],
+            changerail_root,
+            extra_env,
+        )
+
+    def adopt_command(project: Path, *extra: str) -> list[str]:
+        return [
+            str(changerail_root / "bin" / "bootstrap-project"),
+            str(project),
+            "--changerail-root",
+            str(clean_root),
+            "--configure-existing",
+            "--adopt-lockless-wiring",
+            *extra,
+        ]
+
+    project = run_dir / "lockless-adoption-project"
+    initial = bootstrap_lockless(project)
+    missing_helper = project / "bin" / "changerail-evidence"
+    if initial.returncode != 0:
+        failures.append(f"legacy fixture bootstrap failed: {initial.stdout.strip()}")
+    else:
+        legacy_verify = run([str(changerail_root / "bin" / "verify-project"), str(project), "--changerail-root", str(clean_root)], changerail_root, extra_env)
+        if (
+            legacy_verify.returncode != 0
+            or "lockless symlink wiring has" not in legacy_verify.stdout
+            or "adopt-lockless-wiring" not in legacy_verify.stdout
+        ):
+            failures.append(f"lockless verifier did not report adoption advisory: {legacy_verify.stdout.strip()}")
+        missing_helper.unlink()
+        dry_run = run(adopt_command(project, "--dry-run", "--skip-verify"), changerail_root, extra_env)
+        if dry_run.returncode != 0:
+            failures.append(f"adoption dry-run failed: {dry_run.stdout.strip()}")
+        expected_dry_run = (
+            "PLAN adopt-lockless-wiring",
+            "PLAN keep symlink bin/openspec",
+            "PLAN add symlink bin/changerail-evidence",
+            "PLAN consumer-lock openspec/changerail-consumer-lock.json",
+        )
+        missing = [needle for needle in expected_dry_run if needle not in dry_run.stdout]
+        if missing:
+            failures.append("adoption dry-run omitted: " + ", ".join(missing))
+        if (project / "openspec" / "changerail-consumer-lock.json").exists() or missing_helper.exists():
+            failures.append("adoption dry-run mutated lockless consumer")
+
+        applied = run(adopt_command(project), changerail_root, extra_env)
+        verify = run([str(changerail_root / "bin" / "verify-project"), str(project), "--changerail-root", str(clean_root)], changerail_root, extra_env)
+        if (
+            applied.returncode != 0
+            or not missing_helper.is_symlink()
+            or not (project / "openspec" / "changerail-consumer-lock.json").is_file()
+            or verify.returncode != 0
+            or "PASS consumer wiring validity" not in verify.stdout
+            or "consumer lock exists" not in verify.stdout
+        ):
+            failures.append(f"successful adoption did not become lock-backed: {applied.stdout.strip()} {verify.stdout.strip()}")
+
+        repeated = run(adopt_command(project, "--skip-verify"), changerail_root, extra_env)
+        if repeated.returncode != 0 or "wiring refreshed from consumer lock" not in repeated.stdout:
+            failures.append(f"second adoption run was not idempotent: {repeated.stdout.strip()}")
+
+    mixed_project = run_dir / "lockless-mixed-root"
+    mixed_initial = bootstrap_lockless(mixed_project)
+    if mixed_initial.returncode == 0:
+        mixed_link = mixed_project / "bin" / "openspec"
+        mixed_link.unlink()
+        os.symlink(other_root / "bin" / "openspec", mixed_link)
+        mixed = run(adopt_command(mixed_project, "--dry-run", "--skip-verify"), changerail_root, extra_env)
+        if mixed.returncode == 0 or "mixed ChangeRail source root" not in mixed.stdout or str(other_root) in mixed.stdout:
+            failures.append("mixed-root adoption did not fail closed with public-safe diagnostics")
+    else:
+        failures.append(f"mixed-root fixture bootstrap failed: {mixed_initial.stdout.strip()}")
+
+    conflict_project = run_dir / "lockless-regular-conflict"
+    conflict_initial = bootstrap_lockless(conflict_project)
+    if conflict_initial.returncode == 0:
+        conflict_path = conflict_project / "bin" / "openspec"
+        conflict_path.unlink()
+        conflict_path.write_text("project-owned\n", encoding="utf-8")
+        conflict_verify = run(
+            [str(changerail_root / "bin" / "verify-project"), str(conflict_project), "--changerail-root", str(clean_root)],
+            changerail_root,
+            extra_env,
+        )
+        if "lockless wiring is unsafe for automatic adoption" not in conflict_verify.stdout:
+            failures.append("verifier did not report unsafe lockless adoption")
+        conflict = run(adopt_command(conflict_project, "--skip-verify"), changerail_root, extra_env)
+        if (
+            conflict.returncode == 0
+            or conflict_path.read_text(encoding="utf-8") != "project-owned\n"
+            or (conflict_project / "openspec" / "changerail-consumer-lock.json").exists()
+        ):
+            failures.append("regular-file conflict was replaced or adopted")
+    else:
+        failures.append(f"regular-conflict fixture bootstrap failed: {conflict_initial.stdout.strip()}")
+
+    dirty_project = run_dir / "lockless-dirty-unrelated"
+    dirty_initial = bootstrap_lockless(dirty_project)
+    if dirty_initial.returncode == 0:
+        commands = (
+            ["git", "init", "--initial-branch=main"],
+            ["git", "add", "."],
+            [
+                "git",
+                "-c",
+                "user.name=ChangeRail Smoke",
+                "-c",
+                "user.email=smoke@example.invalid",
+                "commit",
+                "-m",
+                "legacy lockless consumer",
+            ],
+        )
+        for command in commands:
+            result = run(command, dirty_project)
+            if result.returncode != 0:
+                failures.append(f"dirty fixture Git setup failed: {result.stdout.strip()}")
+                break
+        else:
+            (dirty_project / "src").mkdir()
+            (dirty_project / "src" / "project-owned.txt").write_text("unrelated\n", encoding="utf-8")
+            dirty = run(adopt_command(dirty_project, "--skip-verify"), changerail_root, extra_env)
+            if dirty.returncode == 0 or "unrelated dirty state" not in dirty.stdout:
+                failures.append("unrelated dirty state did not block adoption")
+            if (dirty_project / "openspec" / "changerail-consumer-lock.json").exists():
+                failures.append("dirty blocked adoption left a consumer lock")
+    else:
+        failures.append(f"dirty fixture bootstrap failed: {dirty_initial.stdout.strip()}")
+
+    windows_project = run_dir / "lockless-windows-unsupported"
+    windows_initial = bootstrap_lockless(windows_project)
+    if windows_initial.returncode == 0:
+        windows = run(
+            adopt_command(
+                windows_project,
+                "--wiring-platform",
+                "windows",
+                "--wiring-backend",
+                "generated-copy",
+                "--dry-run",
+                "--skip-verify",
+            ),
+            changerail_root,
+            extra_env,
+        )
+        if windows.returncode == 0 or "generated-copy adoption requires" not in windows.stdout:
+            failures.append("unsupported Windows generated-copy inference did not fail closed")
+    else:
+        failures.append(f"windows unsupported fixture bootstrap failed: {windows_initial.stdout.strip()}")
+
+    if failures:
+        return Check("lockless wiring adoption", "fail", "; ".join(failures))
+    return Check(
+        "lockless wiring adoption",
+        "pass",
+        "legacy lockless adoption, unsafe ownership gates and idempotency passed",
+    )
+
+
 def check_consumer_ci_opt_in(changerail_root: Path, run_dir: Path) -> Check:
     clean_root = create_clean_changerail_fixture(changerail_root, run_dir / "ci-clean-changerail")
     failures: list[str] = []
@@ -1784,6 +1962,7 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
         check_profile_matrix(changerail_root, run_dir),
         check_profile_fail_before_write(changerail_root, run_dir),
         check_consumer_lock_and_path_modes(changerail_root, run_dir, fake_env),
+        check_lockless_wiring_adoption(changerail_root, run_dir, fake_env),
         check_consumer_ci_opt_in(changerail_root, run_dir),
         check_post_bootstrap_configuration(changerail_root, run_dir),
         check_dry_run(changerail_root, run_dir),

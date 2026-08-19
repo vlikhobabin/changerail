@@ -264,6 +264,59 @@ def write_consumer_lock(
     path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def write_generated_consumer_lock(
+    project: Path,
+    changerail_root: Path,
+    *,
+    enforcement: str = "advisory",
+) -> None:
+    manifest = generated_manifest(project)
+    artifacts: list[dict[str, str]] = []
+    backend = str(manifest.get("backend") or "generated-copy")
+    for entry in manifest.get("artifacts", []):
+        if not isinstance(entry, dict):
+            continue
+        rel_path = entry.get("path")
+        source = entry.get("source")
+        surface = entry.get("surface")
+        if not all(isinstance(value, str) and value for value in (rel_path, source, surface)):
+            continue
+        artifacts.append(
+            {
+                "path": str(rel_path),
+                "source": str(source),
+                "kind": backend,
+                "surface": str(surface),
+            }
+        )
+    actual_revision = run(
+        ["git", "rev-parse", "HEAD"],
+        changerail_root,
+    ).stdout.strip()
+    payload = {
+        "schema": "changerail.consumer-lock.v1",
+        "changerail": {
+            "version": (changerail_root / "VERSION").read_text(encoding="utf-8").strip(),
+            "revision": actual_revision,
+            "source": "https://github.com/example/changerail.git",
+        },
+        "wiring": {
+            "platform": str(manifest.get("platform") or "windows"),
+            "backend": backend,
+            "path_mode": "not-applicable",
+            "artifacts": artifacts,
+        },
+        "profiles": {
+            "project": "generic",
+            "surfaces": "all-surfaces",
+            "codex_policy": "safe-interactive",
+        },
+        "enforcement": enforcement,
+    }
+    path = project / CONSUMER_LOCK
+    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def digest_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -1376,6 +1429,28 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             )
         )
 
+        lockless_refresh = run(
+            [
+                str(changerail_root / "bin" / "bootstrap-project"),
+                str(generated_project),
+                "--refresh-wiring",
+                "--skip-verify",
+            ],
+            changerail_root,
+            fake_env,
+        )
+        checks.append(
+            Check(
+                "lockless generated refresh requires adoption",
+                "pass"
+                if lockless_refresh.returncode != 0
+                and "adopt-lockless-wiring" in lockless_refresh.stdout
+                and not (generated_project / CONSUMER_LOCK).exists()
+                else "fail",
+                lockless_refresh.stdout.strip(),
+            )
+        )
+        write_generated_consumer_lock(generated_project, changerail_root)
         refresh = run(
             [
                 str(changerail_root / "bin" / "bootstrap-project"),
@@ -1712,7 +1787,7 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             if auth_conflict.returncode == 0
             and "WARN delivery runner auth readiness" in auth_conflict.stdout
             and "manual owner review" in auth_conflict.stdout
-            and "--configure-existing" not in auth_conflict.stdout
+            and "--link-codex-auth" not in auth_conflict.stdout
             else "fail",
             auth_conflict.stdout.strip(),
         )

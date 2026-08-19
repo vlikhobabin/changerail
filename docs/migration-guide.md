@@ -6,7 +6,12 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
-- none
+- `bootstrap-project --refresh-wiring` is lock-owned and remains fail-closed
+  when `openspec/changerail-consumer-lock.json` is missing. Legacy lockless
+  consumers use explicit `--configure-existing --adopt-lockless-wiring`
+  migration after reviewing the dry-run inventory.
+- `verify-project` now reports whether lockless wiring appears adoptable or
+  unsafe without recommending overwrite of project-owned surfaces.
 
 ## 0.4.0 -> 0.5.0
 
@@ -24,15 +29,17 @@ credentials, traces или machine-local inventory.
   `validate-catalog`, `render-index --check` and `scan --json`.
 - POSIX bootstrap defaults to absolute symlink targets and can write
   `changerail.consumer-lock.v1` with advisory or strict source enforcement.
-- Existing lockless consumers remain supported. Development fixtures that
-  intentionally use a dirty ChangeRail checkout should pass
-  `--lock-enforcement none` explicitly.
+- Existing lockless consumers remain supported through legacy verification and
+  explicit `--configure-existing --adopt-lockless-wiring` migration.
+  Development fixtures that intentionally use a dirty ChangeRail checkout
+  should pass `--lock-enforcement none` explicitly.
 - Existing relative-layout consumers can retain that topology with
   `--wiring-path-mode relative`; lock-owned repair uses `--refresh-wiring` and
   refuses project-owned paths or unrelated dirty state.
 - Existing wired consumers can run bounded `--configure-existing` with only
-  `--link-codex-auth` and/or lock-owned POSIX `--refresh-wiring`; template and
-  profile flags are rejected before mutation.
+  `--link-codex-auth`, lock-owned POSIX `--refresh-wiring` and explicit
+  `--adopt-lockless-wiring`; template and profile flags are rejected before
+  mutation.
 - Greenfield consumers can explicitly request a minimal README and local Git
   initialization. `--init-git` may set the initial branch and `origin`, but
   never stages, commits, pushes or creates a remote repository.
@@ -60,9 +67,9 @@ python3 -m pip install --disable-pip-version-check -r requirements-runtime.txt
 Restart active Codex/Claude sessions after updating so loaded skill and
 workflow-contract text is refreshed.
 
-For consumers using copied ChangeRail helpers, generated wiring copies or
-local copied runbooks, refresh from the ChangeRail source of truth and rerun
-verification:
+For lock-backed consumers using copied ChangeRail helpers, generated wiring
+copies or local copied runbooks, refresh from the ChangeRail source of truth
+and rerun verification. Lockless consumers must first use explicit adoption.
 
 ```bash
 /opt/changerail/bin/bootstrap-project /opt/example-project --refresh-wiring --skip-verify
