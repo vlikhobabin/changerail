@@ -119,3 +119,9 @@ acceptance mapping. Первая реализация, если она буде�
   `changerail.source-classification.v1` закрыл source complexity, но не
   verification coverage; реализация без concrete false-green пока не
   обоснована.
+- 2026-08-20T17:30:00Z field validation supplied the missing concrete case:
+  three critical 1C deliveries reached independent review with retained
+  evidence, but reviewers still found an unproved positive route, a timeout
+  assertion that did not exercise the published boundary, and a renderer/form
+  proof that used disconnected paths. Promote this from strategic/deferred to
+  high-priority exploration of a deterministic pre-review acceptance ledger.

@@ -66,3 +66,8 @@ not started
 ## Log
 - 2026-08-20T09:54:00Z card created from sanitized supervised delivery
   evidence.
+- 2026-08-20T17:30:00Z a later single-card delivery ran for 103 minutes and
+  emitted 455 command executions, while its public status remained at the
+  coarse delivery phase. The orchestrator could not distinguish source
+  authoring, platform build, runtime proof, review wait, rescue or publish.
+  Treat this as high priority before the next multi-card 1C package run.

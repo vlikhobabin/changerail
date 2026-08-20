@@ -61,3 +61,8 @@ not started
 ## Log
 - 2026-08-20T07:55:00Z card created from a sanitized package-runner recovery
   finding.
+- 2026-08-20T17:30:00Z the same delivery program required three manually
+  launched recovery sessions. They preserved useful JSONL evidence but had no
+  delivery-run status, parent attempt id, structured blocker transition or
+  aggregate token/timing record. Promote recovery lineage and status parity to
+  high priority; the retained-payload authorization model remains unchanged.
