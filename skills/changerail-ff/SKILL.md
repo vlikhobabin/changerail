@@ -81,7 +81,7 @@ If no card path is provided and it cannot be inferred, ask for it.
 
 1. Run:
    ```bash
-   openspec list --json
+   bin/openspec list --json
    ```
 2. Read the target card or backlog file.
 3. Identify:
@@ -163,17 +163,17 @@ For each selected planned change:
 1. If archived, record it and skip.
 2. If active, inspect current state:
    ```bash
-   openspec status --change "<change>" --json
+   bin/openspec status --change "<change>" --json
    ```
 3. If pending, create it:
    ```bash
-   openspec new change "<change>"
+   bin/openspec new change "<change>"
    ```
 4. Create artifacts in dependency order until all apply-required artifacts are
    done:
    ```bash
-   openspec status --change "<change>" --json
-   openspec instructions <artifact-id> --change "<change>" --json
+   bin/openspec status --change "<change>" --json
+   bin/openspec instructions <artifact-id> --change "<change>" --json
    ```
 5. For each artifact:
    - read dependency artifacts first;
@@ -186,7 +186,7 @@ For each selected planned change:
    done.
 7. Validate:
    ```bash
-   openspec validate "<change>" --strict
+   bin/openspec validate "<change>" --strict
    git diff --check
    ```
 
@@ -211,7 +211,7 @@ After all selected changes are apply-ready:
    surface is installed.
 4. Run:
    ```bash
-   openspec validate --all --strict
+   bin/openspec validate --all --strict
    git diff --check
    ```
 

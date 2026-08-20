@@ -2,7 +2,7 @@
 name: openspec-bulk-archive-change
 description: Archive multiple completed changes at once. Use when archiving several parallel changes.
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires bin/openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
@@ -19,7 +19,7 @@ This skill allows you to batch-archive changes, handling spec conflicts intellig
 
 1. **Get active changes**
 
-   Run `openspec list --json` to get all active changes.
+   Run `bin/openspec list --json` to get all active changes.
 
    If no active changes exist, inform user and stop.
 
@@ -36,7 +36,7 @@ This skill allows you to batch-archive changes, handling spec conflicts intellig
 
    For each selected change, collect:
 
-   a. **Artifact status** - Run `openspec status --change "<name>" --json`
+   a. **Artifact status** - Run `bin/openspec status --change "<name>" --json`
       - Parse `schemaName` and `artifacts` list
       - Note which artifacts are `done` vs other states
 

@@ -96,7 +96,7 @@ If no card path is provided and it cannot be inferred, ask for it.
 1. Run:
    ```bash
    git status --short
-   openspec list --json
+   bin/openspec list --json
    ```
 2. Read the card and extract ordered change ids from `## Change N:` sections
    and `Change Set`.
@@ -119,12 +119,12 @@ Process one card-owned pending or active change at a time.
 Use OpenSpec status as the source of truth:
 
 ```bash
-openspec status --change "<change>" --json
+bin/openspec status --change "<change>" --json
 ```
 
 If apply-required artifacts are missing, follow the `openspec-ff-change`
 procedure: create artifacts in dependency order using
-`openspec instructions <artifact-id> --change "<change>" --json`. Stop if an
+`bin/openspec instructions <artifact-id> --change "<change>" --json`. Stop if an
 artifact cannot be produced without clarification.
 
 ### 2. Apply Implementation
@@ -132,7 +132,7 @@ artifact cannot be produced without clarification.
 Use the `openspec-apply-change` procedure:
 
 ```bash
-openspec instructions apply --change "<change>" --json
+bin/openspec instructions apply --change "<change>" --json
 ```
 
 Read every context file returned by the CLI. Implement tasks in order and mark
@@ -149,9 +149,9 @@ record why RED evidence is not applicable.
 Minimum verification for every change:
 
 ```bash
-openspec status --change "<change>" --json
-openspec instructions apply --change "<change>" --json
-openspec validate "<change>" --strict
+bin/openspec status --change "<change>" --json
+bin/openspec instructions apply --change "<change>" --json
+bin/openspec validate "<change>" --strict
 git diff --check
 ```
 
@@ -161,7 +161,7 @@ verification floor from project-declared sources: `AGENTS.md`,
 `openspec/config.yaml`, OpenSpec `tasks.md`/`design.md` and the affected
 toolchain. Formatter, strict typing and clean/ambient environment matrices are
 mandatory only when those sources declare them or the changed surface requires
-them. For docs/config-only changes, `openspec validate` plus whitespace/config
+them. For docs/config-only changes, `bin/openspec validate` plus whitespace/config
 parsing checks are normally sufficient.
 
 Every verification claim recorded in the card, tasks or manifest must name the
@@ -235,8 +235,8 @@ spec under `openspec/specs/<capability>/spec.md` idempotently.
 Run:
 
 ```bash
-openspec validate "<capability>" --strict
-openspec validate --all --strict
+bin/openspec validate "<capability>" --strict
+bin/openspec validate --all --strict
 ```
 
 Do not archive a change whose delta specs have not been synced unless the user
@@ -248,8 +248,8 @@ Use the `openspec-archive-change` procedure after successful verification and
 spec sync:
 
 ```bash
-openspec archive "<change>" --yes
-openspec validate --all --strict
+bin/openspec archive "<change>" --yes
+bin/openspec validate --all --strict
 git diff --check
 ```
 
@@ -271,7 +271,7 @@ Stop and report clearly when:
 - a dependency is missing or another active change owns the same files;
 - artifacts or implementation need product clarification;
 - verification cannot be made clean within the fix-cycle limit;
-- `openspec validate --all` fails after sync or archive;
+- `bin/openspec validate --all` fails after sync or archive;
 - the dirty tree contains unrelated edits in files the next change must touch;
 - implementation would require another repository;
 - a destructive git operation would be needed;

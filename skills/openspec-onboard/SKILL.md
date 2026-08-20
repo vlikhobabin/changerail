@@ -2,7 +2,7 @@
 name: openspec-onboard
 description: Guided onboarding for OpenSpec - walk through a complete workflow cycle with narration and real codebase work.
 license: MIT
-compatibility: Requires openspec CLI.
+compatibility: Requires bin/openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
@@ -19,9 +19,9 @@ Before starting, check if the OpenSpec CLI is installed:
 
 ```bash
 # Unix/macOS
-openspec --version 2>&1 || echo "CLI_NOT_INSTALLED"
+bin/openspec --version 2>&1 || echo "CLI_NOT_INSTALLED"
 # Windows (PowerShell)
-# if (Get-Command openspec -ErrorAction SilentlyContinue) { openspec --version } else { echo "CLI_NOT_INSTALLED" }
+# if (Get-Command bin/openspec -ErrorAction SilentlyContinue) { bin/openspec --version } else { echo "CLI_NOT_INSTALLED" }
 ```
 
 **If CLI not installed:**
@@ -174,7 +174,7 @@ Let me create one for our task.
 
 **DO:** Create the change with a derived kebab-case name:
 ```bash
-openspec new change "<derived-name>"
+bin/openspec new change "<derived-name>"
 ```
 
 **SHOW:**
@@ -243,7 +243,7 @@ Does this capture the intent? I can adjust before we save it.
 
 After approval, save the proposal:
 ```bash
-openspec instructions proposal --change "<name>" --json
+bin/openspec instructions proposal --change "<name>" --json
 ```
 Then write the content to `openspec/changes/<name>/proposal.md`.
 
@@ -432,7 +432,7 @@ Archived changes become your project's decision history—you can always find th
 
 **DO:**
 ```bash
-openspec archive "<name>"
+bin/openspec archive "<name>"
 ```
 
 **SHOW:**

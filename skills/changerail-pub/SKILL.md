@@ -94,7 +94,7 @@ Run:
 git status --short
 git branch --show-current
 git remote -v
-openspec list --json
+bin/openspec list --json
 ```
 
 Read the target card, delivery manifest when present, and archived change
@@ -132,7 +132,7 @@ Run:
 
 ```bash
 git diff --check
-openspec validate --all --strict
+bin/openspec validate --all --strict
 ```
 
 Also run focused checks required by tasks, project config or affected code.
