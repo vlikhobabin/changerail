@@ -12,6 +12,12 @@ credentials, traces или machine-local inventory.
   migration after reviewing the dry-run inventory.
 - `verify-project` now reports whether lockless wiring appears adoptable or
   unsafe without recommending overwrite of project-owned surfaces.
+- `bootstrap-project --refresh-wiring` ремонтирует только wiring для lock,
+  который уже совпадает с текущим ChangeRail source revision. Если consumer
+  lock указывает на старую revision, текущий checkout намеренно останавливается
+  с source-drift диагностикой: сначала используйте checkout, совпадающий с
+  lock, или заведите отдельный explicit migration на принятие новой ChangeRail
+  revision в consumer lock.
 
 ## 0.4.0 -> 0.5.0
 
@@ -67,9 +73,12 @@ python3 -m pip install --disable-pip-version-check -r requirements-runtime.txt
 Restart active Codex/Claude sessions after updating so loaded skill and
 workflow-contract text is refreshed.
 
-For lock-backed consumers using copied ChangeRail helpers, generated wiring
-copies or local copied runbooks, refresh from the ChangeRail source of truth
-and rerun verification. Lockless consumers must first use explicit adoption.
+For lock-backed consumers whose lock already matches the active ChangeRail
+checkout, refresh generated-owned wiring and rerun verification. If the lock
+pins an older ChangeRail revision, do not run the current checkout as a blind
+repair: install the locked revision in a disposable path for lock-owned repair,
+or run an explicit consumer migration that accepts the new source revision.
+Lockless consumers must first use explicit adoption.
 
 ```bash
 /opt/changerail/bin/bootstrap-project /opt/example-project --refresh-wiring --skip-verify

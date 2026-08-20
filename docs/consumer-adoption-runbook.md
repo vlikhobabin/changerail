@@ -335,6 +335,11 @@ lock-owned repair. Для обычного обновления уже adopted c
 
 Advisory source drift дает visible diagnostic; strict drift и любое broken
 wiring блокируют verifier.
+`--refresh-wiring` не обновляет `openspec/changerail-consumer-lock.json` на
+новую ChangeRail revision: он требует, чтобы lock уже совпадал с активным
+checkout. Если consumer lock указывает на старую revision, используйте
+checkout этой revision для lock-owned repair или заводите отдельную explicit
+migration, которая принимает новую ChangeRail revision в lock.
 
 ### Pinned consumer CI
 
