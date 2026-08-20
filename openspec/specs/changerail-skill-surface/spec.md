@@ -333,6 +333,22 @@ the independent review phase.
 - **AND** the orchestrator validates the resulting verdict with `--check-fresh`
   before continuing to publish
 
+### Requirement: Reviewer protects parent-owned active runner evidence
+`changerail-review` and the fresh-review launch contract MUST treat an active
+runner directory identified by `CHANGERAIL_ACTIVE_RUN_DIR` as parent-owned
+evidence until the child delivery run terminates.
+
+#### Scenario: Reviewer runs inside a live delivery child
+- **WHEN** an independent reviewer is launched while the parent delivery run is
+  still active
+- **THEN** the reviewer excludes the active runner directory from discovery
+- **AND** it does not read, search, tail, cite or summarize `status.json`, raw
+  runtime logs or other files under that directory
+- **AND** it audits the card, manifest, preflight, reviewed tree and retained
+  card-owned evidence outside the protected directory
+- **AND** a mandatory claim backed only by protected active-run output is
+  recorded as unbacked rather than justified from that output
+
 ### Requirement: Publish finalizes board metadata deterministically
 `changerail-pub` MUST define deterministic board finalization behavior for
 review-gated cards after the reviewed payload commit succeeds, while keeping

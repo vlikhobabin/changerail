@@ -3501,6 +3501,35 @@ def check_queue_launcher_docs() -> None:
         raise AssertionError(f"queue launcher docs expectations missing: {missing}")
 
 
+def check_active_run_reviewer_contract() -> None:
+    expected = {
+        "skills/changerail-review/SKILL.md": (
+            "CHANGERAIL_ACTIVE_RUN_DIR",
+            "Do not read, search, tail, cite or summarize",
+        ),
+        "skills/changerail-deliver/SKILL.md": (
+            "CHANGERAIL_ACTIVE_RUN_DIR",
+            "parent-owned active runtime evidence",
+        ),
+        "skills/changerail-review/references/changerail-review-verdict.md": (
+            "CHANGERAIL_ACTIVE_RUN_DIR",
+            "active parent delivery run",
+        ),
+        "openspec/specs/changerail-skill-surface/spec.md": (
+            "Reviewer protects parent-owned active runner evidence",
+            "raw runtime logs",
+        ),
+    }
+    missing: list[str] = []
+    for relative_path, phrases in expected.items():
+        content = " ".join((ROOT / relative_path).read_text(encoding="utf-8").split())
+        for phrase in phrases:
+            if phrase not in content:
+                missing.append(f"{relative_path}: {phrase}")
+    if missing:
+        raise AssertionError(f"active-run reviewer contract expectations missing: {missing}")
+
+
 def check_queue_preflight_failures(tmp: Path) -> None:
     cases: list[tuple[str, Any]] = [
         (
@@ -4356,6 +4385,7 @@ def check_queue_no_push_requires_ahead(tmp: Path) -> None:
 
 
 def main() -> int:
+    check_active_run_reviewer_contract()
     with tempfile.TemporaryDirectory(prefix="changerail-delivery-runner-") as tmp:
         workspace = Path(tmp)
         check_single_card_status_reader(workspace)

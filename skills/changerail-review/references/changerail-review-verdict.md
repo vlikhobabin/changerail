@@ -35,6 +35,15 @@ for an explicitly deterministic/process card with no added production code.
 Ordinary and critical cards still require this independent verdict; process
 preflight failures never become verdict findings or review cycles.
 
+During an active parent delivery run, `CHANGERAIL_ACTIVE_RUN_DIR` identifies
+parent-owned runtime evidence that is write-only from the child review
+perspective. A reviewer must not read, search, tail, cite or summarize files in
+that directory, including raw runtime logs such as `stdout.jsonl` and
+`stderr.log`. The review must use the card, manifest, preflight, reviewed tree
+and retained card-owned evidence outside the active run directory. Evidence
+available only in the protected directory remains unbacked until the parent run
+terminates and exposes it through an allowed handoff.
+
 ## Producing And Validating
 
 Only a fresh reviewer context may write a verdict. The implementing session

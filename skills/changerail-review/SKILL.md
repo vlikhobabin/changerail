@@ -52,6 +52,21 @@ Resolve the repository root from the current working directory or
 4. Archived OpenSpec changes referenced by the card.
 5. `.runtime/changerail/delivery-manifests/<card-id>.json` when present.
 
+## Parent-Owned Active Runner Evidence
+
+When `CHANGERAIL_ACTIVE_RUN_DIR` is set, that directory belongs to the parent
+delivery runner until the child exits. Do not read, search, tail, cite or
+summarize files under `CHANGERAIL_ACTIVE_RUN_DIR` while the parent run is
+active. This includes `status.json`, `stdout.jsonl`, `stderr.log` and any other
+file created inside that directory. Exclude the directory from broad workspace
+discovery commands.
+
+Review the card, manifest, preflight, tracked payload and retained card-owned
+evidence outside the protected active-run directory. If a mandatory claim is
+backed only by protected active-run output, record it as unbacked instead of
+reading the raw log. The parent orchestrator may inspect the structured run
+status and may expose retained evidence after the child terminates.
+
 ## Shared Review Verdict
 
 Read `references/changerail-review-verdict.md` before writing a verdict. The verdict

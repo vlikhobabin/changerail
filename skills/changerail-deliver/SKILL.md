@@ -310,6 +310,10 @@ Run the fresh-context review gate for:
 Boundaries:
 - You did not plan or implement this payload.
 - Do not stage, commit, push or modify tracked reviewed payload files.
+- When `CHANGERAIL_ACTIVE_RUN_DIR` is set, treat it as parent-owned active
+  runtime evidence: do not read, search, tail, cite or summarize any file
+  under that directory, including `status.json`, `stdout.jsonl` and
+  `stderr.log`; use card-owned evidence outside it instead.
 - Read AGENTS.md, AGENTS.shared.md, skills/changerail-review/SKILL.md and
   skills/changerail-review/references/changerail-review-verdict.md before
   writing a verdict.
