@@ -170,13 +170,32 @@ def utc_run_id() -> str:
     return f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(4)}"
 
 
-def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def ensure_private_directory(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.chmod(0o700)
+
+
+def atomic_write_json(path: Path, data: dict[str, Any], *, private: bool = True) -> None:
+    if private:
+        ensure_private_directory(path.parent)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         tmp_path = Path(handle.name)
+        if private:
+            os.fchmod(handle.fileno(), 0o600)
         json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
     os.replace(tmp_path, path)
+    if private:
+        path.chmod(0o600)
+
+
+def open_private_text(path: Path):
+    ensure_private_directory(path.parent)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, "w", encoding="utf-8")
 
 
 def parse_utc(value: str | None) -> datetime | None:
@@ -2159,9 +2178,8 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         print(f"status: {status_path(args)}")
         return 1
     atomic_write_json(status_path(args), record)
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
     performance = PerformanceCollector(root)
-    with stdout_path.open("w", encoding="utf-8") as stdout, stderr_path.open("w", encoding="utf-8") as stderr:
+    with open_private_text(stdout_path) as stdout, open_private_text(stderr_path) as stderr:
         process = subprocess.Popen(
             command,
             cwd=root,
@@ -2452,9 +2470,21 @@ def create_workspace_lock(args: argparse.Namespace, workspace: dict[str, Any]) -
             "reason": "lock already exists; remove it only after proving no live queue child owns this workspace",
         }
         return lock, lock["reason"]
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"workspace": workspace["alias"], "run_id": args.run_id, "created_at": utc_now()}
-    path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    ensure_private_directory(path.parent)
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        lock = {
+            "workspace": workspace["alias"],
+            "path": repository_relative(path, args.consumer_root),
+            "state": "stale",
+            "reason": "lock already exists; remove it only after proving no live queue child owns this workspace",
+        }
+        return lock, lock["reason"]
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(json.dumps(payload, ensure_ascii=True, indent=2) + "\n")
     return {
         "workspace": workspace["alias"],
         "path": repository_relative(path, args.consumer_root),
@@ -3031,7 +3061,7 @@ def command_generate_plan(args: argparse.Namespace) -> int:
         print(json.dumps({"result": "BLOCKED", "errors": errors}, ensure_ascii=False, indent=2, sort_keys=True), file=sys.stderr)
         return 1
     if args.output:
-        atomic_write_json(args.output, plan)
+        atomic_write_json(args.output, plan, private=False)
         print(f"wrote: {args.output}")
     else:
         print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))

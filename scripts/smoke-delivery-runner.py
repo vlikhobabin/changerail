@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -813,6 +814,12 @@ def write_fake_queue_runner(path: Path) -> None:
 
 def load_status(runtime_root: Path, run_id: str) -> dict[str, Any]:
     return json.loads((runtime_root / run_id / "status.json").read_text(encoding="utf-8"))
+
+
+def require_private_mode(path: Path, expected: int) -> None:
+    actual = stat.S_IMODE(path.stat().st_mode)
+    if actual != expected:
+        raise AssertionError(f"private runtime mode mismatch for {path.name}: expected {expected:o}, got {actual:o}")
 
 
 def single_card_status_payload(
@@ -2009,6 +2016,11 @@ def check_success_run(tmp: Path) -> None:
     )
     require_ok(result, "runner success")
     status = load_status(runtime, "success")
+    run_dir = runtime / "success"
+    require_private_mode(run_dir, 0o700)
+    require_private_mode(run_dir / "status.json", 0o600)
+    require_private_mode(run_dir / "stdout.jsonl", 0o600)
+    require_private_mode(run_dir / "stderr.log", 0o600)
     argv = status["command"]["argv"]
     if status["result"] != "DELIVERED":
         raise AssertionError(f"unexpected result: {status['result']}")
