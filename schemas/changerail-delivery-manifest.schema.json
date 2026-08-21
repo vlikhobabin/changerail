@@ -22,6 +22,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "episode": {
+      "$ref": "#/$defs/episodeLineage"
+    },
     "workspace": {
       "type": "object",
       "required": ["root"],
@@ -145,6 +148,45 @@
         },
         "target_substitution_policy": {
           "const": "forbid"
+        }
+      }
+    },
+    "episodeLineage": {
+      "type": "object",
+      "required": ["schema", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-episode-lineage.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "attemptLineage": {
+      "type": "object",
+      "required": ["schema", "id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-attempt.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "publish"
+        },
+        "parent_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "previous_attempt_id": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -345,6 +387,9 @@
           "description": "Legacy ambiguous commit field retained for older runtime records. New publish flows should use payload_commit and published_commit.",
           "type": "string",
           "minLength": 1
+        },
+        "attempt": {
+          "$ref": "#/$defs/attemptLineage"
         },
         "remote": {
           "type": "string",

@@ -99,6 +99,28 @@ delivery run records and review-cycle evidence without scraping raw logs.
 - **WHEN** a delivery run record lacks optional performance fields
 - **THEN** metrics output renders the missing values as `unknown`
 
+### Requirement: Episode-aware delivery metrics
+The delivery metrics helper MUST aggregate explicitly linked attempts by
+episode and MUST join review history only through matching episode lineage.
+
+#### Scenario: Recovered episode is one row
+- **WHEN** one episode contains an initial blocked delivery attempt and a
+  linked recovery attempt that later delivers
+- **THEN** text, JSON and CSV metrics report one episode row with attempt count,
+  recovery count and additive usage/performance totals
+
+#### Scenario: Preflight-only record is excluded from delivery rates
+- **WHEN** runtime contains a preflight-only status for a card
+- **THEN** metrics reports the preflight-only episode count
+- **AND** it does not include that row in delivery success or first-pass-review
+  denominators
+
+#### Scenario: Later same-card review belongs to another episode
+- **WHEN** an earlier run for a card lacks matching episode lineage and a later
+  review history exists for another episode of the same card
+- **THEN** metrics leaves the earlier row review values as `unknown`
+- **AND** it does not join by card id or timestamp inference
+
 ### Requirement: Delivery metrics reports token breakdown
 The delivery metrics helper MUST report available token usage breakdowns and
 derive display totals when enough structured usage data exists.
@@ -126,6 +148,12 @@ metadata from delivery run records without scraping raw logs.
 #### Scenario: Output metadata is unavailable
 - **WHEN** a delivery run record lacks command output metadata
 - **THEN** metrics renders the output amplification fields as `unknown`
+
+#### Scenario: Detail sample metadata is available
+- **WHEN** a delivery run reports command sample observed count, retained
+  count, limit and truncation state
+- **THEN** metrics exposes those values in text, JSON and CSV output
+- **AND** it does not reduce command totals to the retained sample size
 
 ### Requirement: Output size and token usage semantics are documented
 ChangeRail observability documentation MUST distinguish command output byte
@@ -258,3 +286,21 @@ state.
   `rescue_budget_used`, `rescue_budget_remaining` and
   `rescue_budget_exhausted`
 - **AND** each row renders unavailable values as `unknown`
+
+### Requirement: Recovery-aware episode telemetry
+ChangeRail MUST публиковать canonical structured episode, связывающий initial
+delivery, blocked/recovery attempts, review/rescue cycles и publish через
+explicit ids, а не log parsing, timestamp inference или один card id.
+
+#### Scenario: Оператор проверяет completed recovered delivery
+- **WHEN** card блокируется, возобновляется, получает no-go/rescue/re-review и
+  затем publish
+- **THEN** episode показывает ordered typed attempts, links, durations, usage и
+  final outcome
+- **AND** report строится без чтения raw child logs
+
+#### Scenario: Attempt оставлен
+- **WHEN** recovery attempt не достигает publish и ни один successor attempt его
+  не supersede
+- **THEN** episode остается terminal/incomplete с explicit last known outcome
+- **AND** не считается delivered по inference

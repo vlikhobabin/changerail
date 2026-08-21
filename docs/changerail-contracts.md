@@ -12,6 +12,7 @@
 - `changerail.evidence-index.v1`
 - `changerail.external-blocker.v1`
 - `changerail.delivery-run.v1`
+- `changerail.delivery-episode.v1`
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
 - `changerail.execution-target.v1`
@@ -38,6 +39,7 @@ schemas/changerail-review-preflight-result.schema.json
 schemas/changerail-delivery-manifest.schema.json
 schemas/changerail-evidence-index.schema.json
 schemas/changerail-delivery-run.schema.json
+schemas/changerail-delivery-episode.schema.json
 schemas/changerail-delivery-plan.schema.json
 schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-execution-target.schema.json
@@ -813,19 +815,30 @@ launch, при queue resume и retained dirty resume. Drift, rebind или от�
 git status или publish metadata. Отсутствующее optional timing значение означает
 `unknown`, а не `0`.
 
+Новые status records также могут содержать optional `episode` и `attempt`.
+Новый single-card delivery начинает episode с `episode.id == run_id` и
+`attempt.kind == delivery`; supported resume наследует source episode и пишет
+`attempt.kind == recovery` с `previous_attempt_id` и `source_status_path`.
+Legacy records без этих fields остаются valid и отображаются как isolated
+legacy rows.
+
 `performance` может содержать:
 
 - `wall_time_seconds`;
+- `active_seconds`, `wait_seconds` и `operator_wait_seconds`, derived только
+  из accepted value-free progress events;
 - `event_counts` и `agent_message_count`;
 - `command_execution_count`, `commands` и `slowest_commands` с
   runner-observed `started_at`, `ended_at`, `duration_seconds` и optional
   bounded `output` metadata: stdout/stderr bytes, total bytes, threshold,
   threshold-exceeded flag, truncation flag и classification;
+- `command_duration_seconds` и `command_samples` с observed/retained count,
+  limit и truncation flag;
 - `command_output` aggregate summary с documented threshold, observed/oversized
   command counts, largest observed command bytes и bounded top oversized
   command labels;
 - `file_change_count`;
-- `timeline` с bounded runner-observed событиями;
+- `timeline` с bounded runner-observed событиями и `timeline_samples`;
 - `review.cycle_count`, `review.first_review_latency_seconds`,
   `review.time_to_final_go_seconds`, optional `review.rescue_budget` и
   per-cycle timing;
@@ -1200,8 +1213,12 @@ bin/changerail-delivery-metrics
 bin/changerail-delivery-metrics --csv
 ```
 
-Он читает structured run records и review-cycle history, печатает per-run и
-aggregate metrics, including `first_pass_go` and rescue budget
+Он читает structured run records и review-cycle history, печатает episode rows
+и aggregate metrics. Review history присоединяется только через matching
+`episode.id`; card-id-only и timestamp inference не используются.
+Preflight-only records отображаются отдельным count и не входят в delivery
+success или first-pass review denominator. Output включает `first_pass_go`,
+attempt/recovery counts, command sample metadata и rescue budget
 `limit`/`used`/`remaining`/`exhausted`; отсутствующие optional fields выводит
 как `unknown`.
 

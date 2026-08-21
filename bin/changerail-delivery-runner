@@ -40,6 +40,8 @@ from typing import Any
 SCHEMA = "changerail.delivery-run.v1"
 PLAN_SCHEMA = "changerail.delivery-plan.v1"
 PLAN_STATUS_SCHEMA = "changerail.delivery-plan-status.v1"
+EPISODE_LINEAGE_SCHEMA = "changerail.delivery-episode-lineage.v1"
+ATTEMPT_SCHEMA = "changerail.delivery-attempt.v1"
 AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 AUTH_REMEDIATION = (
@@ -1715,6 +1717,7 @@ def plan_status_record(
                 "depends_on",
                 "recovery_for",
                 "run_id",
+                "episode_id",
                 "run_status_path",
                 "result",
                 "terminal_reason",
@@ -1809,6 +1812,54 @@ def load_json_object(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def sample_summary(observed_count: int, retained_count: int, limit: int) -> dict[str, Any]:
+    return {
+        "observed_count": observed_count,
+        "retained_count": retained_count,
+        "limit": limit,
+        "truncated": observed_count > retained_count,
+    }
+
+
+def prior_lineage(args: argparse.Namespace) -> tuple[str | None, str | None, str | None]:
+    status_arg = getattr(args, "status_path", None)
+    if not isinstance(status_arg, Path):
+        return None, None, None
+    prior = load_json_object(status_arg)
+    if not isinstance(prior, dict):
+        return None, None, None
+    episode = prior.get("episode")
+    episode_id = episode.get("id") if isinstance(episode, dict) and isinstance(episode.get("id"), str) else None
+    attempt = prior.get("attempt")
+    attempt_id = attempt.get("id") if isinstance(attempt, dict) and isinstance(attempt.get("id"), str) else None
+    if not episode_id and isinstance(prior.get("run_id"), str):
+        episode_id = prior["run_id"]
+    if not attempt_id and isinstance(prior.get("run_id"), str):
+        attempt_id = prior["run_id"]
+    source_status_path = repo_relative_or_none(status_arg.resolve(strict=False), args.workspace.resolve(strict=False))
+    return episode_id, attempt_id, source_status_path or str(status_arg)
+
+
+def lineage_for_record(args: argparse.Namespace, phase: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    prior_episode_id, prior_attempt_id, source_status_path = prior_lineage(args)
+    if phase == "preflight":
+        kind = "preflight"
+    elif prior_attempt_id:
+        kind = "recovery"
+    else:
+        kind = "delivery"
+    attempt: dict[str, Any] = {
+        "schema": ATTEMPT_SCHEMA,
+        "id": args.run_id,
+        "kind": kind,
+    }
+    if prior_attempt_id:
+        attempt["previous_attempt_id"] = prior_attempt_id
+    if source_status_path:
+        attempt["source_status_path"] = source_status_path
+    return {"schema": EPISODE_LINEAGE_SCHEMA, "id": prior_episode_id or args.run_id}, attempt
+
+
 def review_timing(root: Path, card: str, started_at: str) -> dict[str, Any] | None:
     history = load_json_object(review_history_path(root, card))
     cycles = history.get("cycles") if history else None
@@ -1878,6 +1929,207 @@ def publish_timing(root: Path, card: str, started_at: str) -> dict[str, Any] | N
     return summary
 
 
+def lineage_for_status(status: dict[str, Any]) -> str | None:
+    episode = status.get("episode")
+    return episode.get("id") if isinstance(episode, dict) and isinstance(episode.get("id"), str) else None
+
+
+def owner_artifact(kind: str, path: Path, root: Path) -> dict[str, str]:
+    return {"kind": kind, "path": repository_relative(path, root)}
+
+
+def delivery_attempt_summary(status: dict[str, Any], path: Path, root: Path) -> dict[str, Any] | None:
+    attempt = status.get("attempt")
+    if not isinstance(attempt, dict) or not isinstance(attempt.get("id"), str) or not isinstance(attempt.get("kind"), str):
+        return None
+    timestamps = status.get("timestamps") if isinstance(status.get("timestamps"), dict) else {}
+    usage = status.get("usage") if isinstance(status.get("usage"), dict) else {}
+    performance = status.get("performance") if isinstance(status.get("performance"), dict) else {}
+    summary: dict[str, Any] = {"id": attempt["id"], "kind": attempt["kind"], "owner_artifact": owner_artifact("delivery-run", path, root)}
+    for field in ("parent_attempt_id", "previous_attempt_id"):
+        value = attempt.get(field)
+        if isinstance(value, str) and value:
+            summary[field] = value
+    for field in ("started_at", "ended_at"):
+        value = timestamps.get(field)
+        if isinstance(value, str) and value:
+            summary[field] = value
+    summary["terminal_state"] = {"DELIVERED": "delivered", "BLOCKED": "blocked", "NO-GO": "no-go", "RUNNING": "running"}.get(status.get("result"), "unknown")
+    reason = status.get("terminal_reason")
+    if isinstance(reason, str) and reason:
+        summary["blocker_class"] = reason
+    compact_usage = {key: usage[key] for key in ("available", "input_tokens", "output_tokens", "total_tokens", "reason") if key in usage}
+    if isinstance(compact_usage.get("available"), bool):
+        summary["usage"] = compact_usage
+    compact_perf = {
+        key: performance[key]
+        for key in ("wall_time_seconds", "command_execution_count", "command_samples", "timeline_samples")
+        if key in performance
+    }
+    if compact_perf:
+        summary["performance"] = compact_perf
+    return summary
+
+
+def card_episode_statuses(root: Path, runtime_root: Path, card: str, episode_id: str | None) -> tuple[str | None, list[tuple[Path, dict[str, Any]]]]:
+    grouped: dict[str, list[tuple[Path, dict[str, Any]]]] = {}
+    for path in sorted(runtime_root.glob("*/status.json")):
+        status = load_json_object(path)
+        if not isinstance(status, dict) or status.get("schema") != SCHEMA:
+            continue
+        if schema_errors(status, "changerail-delivery-run.schema.json"):
+            continue
+        card_ref = status.get("card") if isinstance(status.get("card"), dict) else {}
+        if card_ref.get("id") != card_id(card) or card_ref.get("path") != card:
+            continue
+        current_episode = lineage_for_status(status)
+        if current_episode:
+            grouped.setdefault(current_episode, []).append((path, status))
+    if episode_id:
+        return episode_id, grouped.get(episode_id, [])
+    if len(grouped) == 1:
+        key = next(iter(grouped))
+        return key, grouped[key]
+    return None, []
+
+
+def add_attempt(attempts: list[dict[str, Any]], seen: dict[str, dict[str, Any]], attempt: dict[str, Any], diagnostics: list[str]) -> None:
+    attempt_id = attempt.get("id")
+    if not isinstance(attempt_id, str):
+        return
+    comparable = {key: value for key, value in attempt.items() if key != "owner_artifact"}
+    previous = seen.get(attempt_id)
+    if previous and previous != comparable:
+        diagnostics.append(f"conflicting duplicate attempt id: {attempt_id}")
+        return
+    if previous:
+        return
+    seen[attempt_id] = comparable
+    attempts.append(attempt)
+
+
+def review_episode_attempts(root: Path, card: str, episode_id: str, attempts: list[dict[str, Any]], seen: dict[str, dict[str, Any]], diagnostics: list[str]) -> None:
+    path = review_history_path(root, card)
+    history = load_json_object(path)
+    if not isinstance(history, dict) or history.get("schema") != "changerail.review-cycle-history.v1":
+        return
+    if schema_errors(history, "changerail-review-cycle-history.schema.json"):
+        diagnostics.append("review history failed schema validation")
+        return
+    if lineage_for_status(history) != episode_id:
+        return
+    cycles = history.get("cycles") if isinstance(history.get("cycles"), list) else []
+    for cycle in cycles:
+        if not isinstance(cycle, dict):
+            continue
+        attempt = cycle.get("attempt") if isinstance(cycle.get("attempt"), dict) else {}
+        attempt_id = attempt.get("id") if isinstance(attempt.get("id"), str) else f"review-{cycle.get('review_cycle')}"
+        summary = {
+            "id": attempt_id,
+            "kind": attempt.get("kind") if attempt.get("kind") in {"review", "rescue"} else "review",
+            "ended_at": cycle.get("reviewed_at"),
+            "terminal_state": "delivered" if cycle.get("result") == "go" else "no-go",
+            "owner_artifact": owner_artifact("review-history", path, root),
+        }
+        for field in ("parent_attempt_id", "previous_attempt_id"):
+            value = attempt.get(field)
+            if isinstance(value, str) and value:
+                summary[field] = value
+        add_attempt(attempts, seen, {key: value for key, value in summary.items() if value is not None}, diagnostics)
+
+
+def publish_episode_attempt(root: Path, card: str, episode_id: str, attempts: list[dict[str, Any]], seen: dict[str, dict[str, Any]], diagnostics: list[str]) -> None:
+    path = delivery_manifest_path(root, card)
+    manifest = load_json_object(path)
+    if not isinstance(manifest, dict) or manifest.get("schema") != "changerail.delivery-manifest.v1":
+        return
+    if schema_errors(manifest, "changerail-delivery-manifest.schema.json"):
+        diagnostics.append("delivery manifest failed schema validation")
+        return
+    if lineage_for_status(manifest) != episode_id:
+        return
+    publish = manifest.get("publish") if isinstance(manifest.get("publish"), dict) else {}
+    attempt = publish.get("attempt") if isinstance(publish.get("attempt"), dict) else {}
+    attempt_id = attempt.get("id") if isinstance(attempt.get("id"), str) else None
+    if not attempt_id:
+        commit = publish.get("published_commit") or publish.get("payload_commit")
+        attempt_id = f"publish-{str(commit)[:12]}" if commit else None
+    if not attempt_id:
+        return
+    state = "delivered" if publish.get("status") in {"pushed", "skipped"} else "blocked" if publish.get("status") == "failed" else "unknown"
+    add_attempt(
+        attempts,
+        seen,
+        {
+            "id": attempt_id,
+            "kind": "publish",
+            "ended_at": publish.get("pushed_at") or publish.get("committed_at"),
+            "terminal_state": state,
+            "owner_artifact": owner_artifact("delivery-manifest", path, root),
+        },
+        diagnostics,
+    )
+
+
+def final_episode_outcome(attempts: list[dict[str, Any]], diagnostics: list[str]) -> str:
+    if diagnostics:
+        return "invalid"
+    if not any(attempt.get("kind") in {"delivery", "recovery"} for attempt in attempts):
+        return "preflight-only"
+    if any(attempt.get("kind") == "publish" and attempt.get("terminal_state") == "delivered" for attempt in attempts):
+        return "delivered"
+    terminal_states = [attempt.get("terminal_state") for attempt in attempts if attempt.get("terminal_state")]
+    if "no-go" in terminal_states:
+        return "no-go"
+    if "blocked" in terminal_states:
+        return "blocked"
+    return "unknown"
+
+
+def command_refresh_episode(args: argparse.Namespace) -> int:
+    root = args.workspace.resolve(strict=False)
+    episode_id, statuses = card_episode_statuses(root, args.runtime_root, args.card, args.episode_id)
+    diagnostics: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+    if not episode_id:
+        diagnostics.append("ambiguous or missing episode lineage for card")
+    for path, status in statuses:
+        summary = delivery_attempt_summary(status, path, root)
+        if summary:
+            add_attempt(attempts, seen, summary, diagnostics)
+    if episode_id:
+        review_episode_attempts(root, args.card, episode_id, attempts, seen, diagnostics)
+        publish_episode_attempt(root, args.card, episode_id, attempts, seen, diagnostics)
+    if not attempts:
+        diagnostics.append("no schema-valid owner attempts found")
+    output_dir = root / ".runtime" / "changerail" / "delivery-episodes"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": "changerail.delivery-episode.v1",
+        "episode_id": episode_id or "unknown",
+        "updated_at": utc_now(),
+        "workspace": {"root": str(root), "repository": root.name},
+        "card": {"id": card_id(args.card), "path": args.card},
+        "attempts": attempts or [{"id": "unknown", "kind": "delivery", "terminal_state": "unknown", "owner_artifact": {"kind": "derived-episode", "path": repository_relative(output_dir, root)}}],
+        "final_outcome": final_episode_outcome(attempts, diagnostics),
+    }
+    if diagnostics:
+        record["diagnostics"] = diagnostics
+    errors = schema_errors(record, "changerail-delivery-episode.schema.json")
+    if errors:
+        record["final_outcome"] = "invalid"
+        record["diagnostics"] = sorted(set(diagnostics + errors))
+    output_path = output_dir / f"{safe_generated_id(record['episode_id'])}.json"
+    atomic_write_json(output_path, record)
+    if args.json:
+        print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"episode: {record['episode_id']} outcome={record['final_outcome']} attempts={len(record['attempts'])}")
+        print(f"path: {repository_relative(output_path, root)}")
+    return 0 if record["final_outcome"] != "invalid" else 1
+
+
 class PerformanceCollector:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -1887,6 +2139,8 @@ class PerformanceCollector:
         self.command_starts: dict[str, dict[str, Any]] = {}
         self.commands: list[dict[str, Any]] = []
         self.timeline: list[dict[str, Any]] = []
+        self.timeline_observed_count = 0
+        self.command_duration_seconds = 0.0
 
     def observe_line(self, line: str) -> None:
         observed_at = utc_now()
@@ -1968,6 +2222,7 @@ class PerformanceCollector:
                 duration = round(max(0.0, observed_monotonic - float(started_monotonic)), 6)
                 summary["duration_seconds"] = duration
                 timeline_entry["duration_seconds"] = duration
+                self.command_duration_seconds += duration
             exit_code = item.get("exit_code")
             if isinstance(exit_code, int):
                 summary["exit_code"] = exit_code
@@ -1977,6 +2232,7 @@ class PerformanceCollector:
             self.commands.append(summary)
 
     def append_timeline(self, entry: dict[str, Any]) -> None:
+        self.timeline_observed_count += 1
         if len(self.timeline) >= MAX_TIMELINE_EVENTS:
             self.timeline.pop(0)
         self.timeline.append(entry)
@@ -2004,6 +2260,8 @@ class PerformanceCollector:
             data["file_change_count"] = changed
         if self.commands:
             commands = self.commands[-MAX_COMMANDS:]
+            data["command_duration_seconds"] = round(self.command_duration_seconds, 6)
+            data["command_samples"] = sample_summary(len(self.commands), len(commands), MAX_COMMANDS)
             data["commands"] = commands
             data["slowest_commands"] = sorted(
                 commands,
@@ -2013,8 +2271,11 @@ class PerformanceCollector:
             output_summary = command_output_summary(self.commands, root)
             if output_summary:
                 data["command_output"] = output_summary
+        else:
+            data["command_samples"] = sample_summary(0, 0, MAX_COMMANDS)
         if self.timeline:
             data["timeline"] = self.timeline
+            data["timeline_samples"] = sample_summary(self.timeline_observed_count, len(self.timeline), MAX_TIMELINE_EVENTS)
         review = review_timing(root, card, started_at)
         if review:
             data["review"] = review
@@ -2027,10 +2288,13 @@ class PerformanceCollector:
 def base_record(args: argparse.Namespace, phase: str, result: str) -> dict[str, Any]:
     root = args.workspace.resolve(strict=False)
     identity, _identity_error = execution_target_identity(root)
+    episode, attempt = lineage_for_record(args, phase)
     record: dict[str, Any] = {
         "schema": SCHEMA,
         "run_id": args.run_id,
         "updated_at": utc_now(),
+        "episode": episode,
+        "attempt": attempt,
         "workspace": {
             "root": str(root),
             "repository": root.name,
@@ -2167,6 +2431,7 @@ class ProgressTracker:
         self.last_write_monotonic = 0.0
         self.last_health_state: str | None = None
         self.heartbeat_interval = progress_heartbeat_interval_seconds()
+        self.accepted_events: list[dict[str, Any]] = []
 
     def initialize(self, record: dict[str, Any]) -> None:
         now = utc_now()
@@ -2210,6 +2475,7 @@ class ProgressTracker:
             )
             if normalized is None:
                 continue
+            self.accepted_events.append(normalized)
             self.last_sequence = int(normalized["event_counter"])
             record["progress"] = progress_base(
                 str(normalized["phase"]),
@@ -2232,6 +2498,19 @@ class ProgressTracker:
             atomic_write_json(status_path(self.args), record)
             self.last_write_monotonic = now
             self.last_health_state = str(health.get("state"))
+
+    def performance_summary(self) -> dict[str, Any]:
+        totals = {"active_seconds": 0.0, "wait_seconds": 0.0, "operator_wait_seconds": 0.0}
+        parsed = [(event, parse_utc(str(event.get("heartbeat_at")))) for event in self.accepted_events]
+        parsed = [(event, at) for event, at in parsed if at is not None]
+        for (event, started), (_next_event, ended) in zip(parsed, parsed[1:]):
+            seconds = max(0.0, (ended - started).total_seconds())
+            if event.get("stage") == "waiting":
+                key = "wait_seconds" if event.get("phase") == "review" else "operator_wait_seconds"
+            else:
+                key = "active_seconds"
+            totals[key] += seconds
+        return {key: round(value, 3) for key, value in totals.items()} if parsed else {}
 
     def mark_terminal(self, record: dict[str, Any]) -> None:
         self.consume_events(record)
@@ -2760,6 +3039,7 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["usage"] = parse_usage(stdout_path)
     performance.record_terminal(outcome, terminal_signal.reason)
     record["performance"] = performance.summary(root, args.card, args.started_at)
+    record["performance"].update(progress.performance_summary())
     record["timestamps"]["ended_at"] = utc_now()
     record["updated_at"] = utc_now()
     record_commit(record, root)
@@ -3574,9 +3854,12 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
     for card in cards:
         card["state"] = "pending"
         card["run_id"] = child_run_id(args, card)
+        card["episode_id"] = card.get("episode_id") or card["run_id"]
         workspace = workspace_by_alias[card["workspace"]]
         card["run_status_path"] = repository_relative(child_status_path_for(args, card, workspace), args.consumer_root)
         previous_card = previous_cards.get(card["id"])
+        if resume and isinstance(previous_card, dict) and isinstance(previous_card.get("episode_id"), str):
+            card["episode_id"] = previous_card["episode_id"]
         if resume and isinstance(previous_card, dict) and previous_card.get("state") == "delivered":
             ok, reason, details = queue_success_check(workspace, card, mode)
             card.update(details)
@@ -4266,6 +4549,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=command_status)
 
+    refresh_episode = subparsers.add_parser("refresh-episode", help="materialize an ignored delivery episode index")
+    refresh_episode.add_argument("card", help="single repository-relative board card path")
+    refresh_episode.add_argument("--workspace", type=Path)
+    refresh_episode.add_argument("--runtime-root", type=Path)
+    refresh_episode.add_argument("--episode-id")
+    refresh_episode.add_argument("--json", action="store_true")
+    refresh_episode.set_defaults(func=command_refresh_episode)
+
     progress_event = subparsers.add_parser("progress-event", help="append a value-free lifecycle progress event")
     progress_event.add_argument("phase", choices=PROGRESS_PHASES)
     progress_event.add_argument("stage", choices=PROGRESS_STAGES)
@@ -4318,7 +4609,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status_plan.set_defaults(func=command_status_plan, no_push=False, plan=Path("delivery-plan.json"))
 
     args = parser.parse_args(argv)
-    if args.command in {"run", "preflight", "resume"}:
+    if args.command in {"run", "preflight", "resume", "refresh-episode"}:
         workspace_arg = args.workspace
         if args.command == "resume":
             args.status_path = resolve_path(args.status_path)
@@ -4340,7 +4631,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
         if getattr(args, "evidence_index", None):
             args.evidence_index = resolve_path(args.evidence_index, args.workspace)
-        args.launcher = resolve_path(args.launcher)
+        if hasattr(args, "launcher"):
+            args.launcher = resolve_path(args.launcher)
     elif args.command == "status":
         args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
         if args.runtime_root:

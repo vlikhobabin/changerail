@@ -93,6 +93,7 @@ def delivery_manifest() -> dict[str, Any]:
     return {
         "schema": "changerail.delivery-manifest.v1",
         "updated_at": DATE,
+        "episode": {"schema": "changerail.delivery-episode-lineage.v1", "id": "episode-example"},
         "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
         "execution_target": dict(TARGET),
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
@@ -142,11 +143,72 @@ def delivery_manifest() -> dict[str, Any]:
             "status": "pushed",
             "payload_commit": "payload123",
             "published_commit": "published456",
+            "attempt": {"schema": "changerail.delivery-attempt.v1", "id": "publish-published456", "kind": "publish"},
             "remote": "origin",
             "branch": "main",
             "pushed_at": DATE,
             "mode": "review-gated",
         },
+    }
+
+
+def delivery_episode() -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-episode.v1",
+        "episode_id": "episode-example",
+        "updated_at": DATE,
+        "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "attempts": [
+            {
+                "id": "example-run",
+                "kind": "delivery",
+                "started_at": DATE,
+                "ended_at": DATE,
+                "terminal_state": "delivered",
+                "usage": {"available": True, "input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                "performance": {
+                    "wall_time_seconds": 12.5,
+                    "command_execution_count": 2,
+                    "tool_call_count": 0,
+                    "command_samples": {"observed_count": 2, "retained_count": 1, "limit": 50, "truncated": True},
+                    "timeline_samples": {"observed_count": 101, "retained_count": 100, "limit": 100, "truncated": True},
+                },
+                "owner_artifact": {
+                    "kind": "delivery-run",
+                    "path": ".runtime/changerail/delivery-runs/example-run/status.json",
+                },
+            },
+            {
+                "id": "review-1",
+                "kind": "review",
+                "parent_attempt_id": "example-run",
+                "terminal_state": "delivered",
+                "owner_artifact": {
+                    "kind": "review-history",
+                    "path": ".runtime/changerail/reviews/example-card.history.json",
+                },
+            },
+            {
+                "id": "publish-published456",
+                "kind": "publish",
+                "parent_attempt_id": "review-1",
+                "terminal_state": "delivered",
+                "owner_artifact": {
+                    "kind": "delivery-manifest",
+                    "path": ".runtime/changerail/delivery-manifests/example-card.json",
+                },
+            },
+        ],
+        "final_outcome": "delivered",
+        "sampling": {
+            "commands": {"observed_count": 2, "retained_count": 1, "limit": 50, "truncated": True}
+        },
+        "owner_artifacts": [
+            {"kind": "delivery-run", "path": ".runtime/changerail/delivery-runs/example-run/status.json"},
+            {"kind": "review-history", "path": ".runtime/changerail/reviews/example-card.history.json"},
+            {"kind": "delivery-manifest", "path": ".runtime/changerail/delivery-manifests/example-card.json"},
+        ],
     }
 
 
@@ -185,6 +247,8 @@ def delivery_run_minimal() -> dict[str, Any]:
         "schema": "changerail.delivery-run.v1",
         "run_id": "example-run",
         "updated_at": DATE,
+        "episode": {"schema": "changerail.delivery-episode-lineage.v1", "id": "episode-example"},
+        "attempt": {"schema": "changerail.delivery-attempt.v1", "id": "example-run", "kind": "delivery"},
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
         "execution_target": dict(TARGET),
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
@@ -285,6 +349,8 @@ def delivery_run() -> dict[str, Any]:
         "event_counts": {"exec_command": 2, "agent_message": 1},
         "agent_message_count": 1,
         "command_execution_count": 2,
+        "command_duration_seconds": 0.2,
+        "command_samples": {"observed_count": 2, "retained_count": 1, "limit": 50, "truncated": True},
         "file_change_count": 3,
         "commands": [
             {
@@ -349,6 +415,7 @@ def delivery_run() -> dict[str, Any]:
                 "duration_seconds": 0.2,
             }
         ],
+        "timeline_samples": {"observed_count": 101, "retained_count": 1, "limit": 100, "truncated": True},
         "review": {
             "cycle_count": 1,
             "first_review_latency_seconds": 10.0,
@@ -433,6 +500,7 @@ def delivery_plan_status() -> dict[str, Any]:
                 "state": "delivered",
                 "wave": 1,
                 "run_id": "child-a",
+                "episode_id": "episode-child-a",
                 "run_status_path": ".runtime/changerail/delivery-runs/child-a/status.json",
                 "result": "DELIVERED",
                 "progress": delivery_progress("publish", "complete", 5),
@@ -447,6 +515,7 @@ def delivery_plan_status() -> dict[str, Any]:
                 "wave": 2,
                 "depends_on": ["service-a-card"],
                 "run_id": "child-b",
+                "episode_id": "episode-child-b",
                 "run_status_path": ".runtime/changerail/delivery-runs/child-b/status.json",
                 "result": "DELIVERED",
             },
@@ -477,6 +546,7 @@ def review_cycle_history() -> dict[str, Any]:
     return {
         "schema": "changerail.review-cycle-history.v1",
         "updated_at": DATE,
+        "episode": {"schema": "changerail.delivery-episode-lineage.v1", "id": "episode-example"},
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
         "rescue_budget": {"limit": 2, "used": 0, "remaining": 2, "exhausted": False},
@@ -490,6 +560,7 @@ def review_cycle_history() -> dict[str, Any]:
             {
                 "review_cycle": 1,
                 "same_card_rescue_attempt": 0,
+                "attempt": {"schema": "changerail.delivery-attempt.v1", "id": "review-1", "kind": "review"},
                 "result": "go",
                 "reviewed_at": DATE,
                 "verdict_path": ".runtime/changerail/reviews/example-card.json",
@@ -1052,6 +1123,10 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         schema_validator("changerail-review-preflight-result.schema.json"),
     ),
     "changerail-delivery-manifest.schema.json": (delivery_manifest, validate_manifest),
+    "changerail-delivery-episode.schema.json": (
+        delivery_episode,
+        schema_validator("changerail-delivery-episode.schema.json"),
+    ),
     "changerail-delivery-run.schema.json": (delivery_run, schema_validator("changerail-delivery-run.schema.json")),
     "changerail-delivery-plan.schema.json": (delivery_plan, validate_delivery_plan),
     "changerail-delivery-plan-status.schema.json": (delivery_plan_status, validate_delivery_plan_status),
@@ -1162,6 +1237,12 @@ def main() -> int:
             minimal_errors = validator(delivery_run_minimal())
             if minimal_errors:
                 failures.append(f"{name}: minimal fixture without performance failed: {minimal_errors}")
+            legacy_lineage = delivery_run_minimal()
+            legacy_lineage.pop("episode")
+            legacy_lineage.pop("attempt")
+            legacy_errors = validator(legacy_lineage)
+            if legacy_errors:
+                failures.append(f"{name}: legacy fixture without lineage failed: {legacy_errors}")
             reason_fixture = delivery_run_minimal()
             reason_fixture["result"] = "BLOCKED"
             reason_fixture["terminal_outcome"] = "BLOCKED"

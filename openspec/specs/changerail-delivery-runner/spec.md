@@ -290,6 +290,39 @@ enough fields.
 - **THEN** the runner reports the optional output classification as unknown or
   absent instead of scraping arbitrary stdout/stderr text
 
+### Requirement: Runner records episode and attempt lineage
+The delivery runner MUST write stable episode identity and typed attempt
+identity into new single-card run status records.
+
+#### Scenario: New delivery starts an episode
+- **WHEN** the runner starts a new single-card delivery without a supported
+  source status
+- **THEN** status records contain an `episode.id` and a `delivery` attempt id
+  matching the run id
+
+#### Scenario: Resume links to source attempt
+- **WHEN** the runner resumes from a schema-valid blocked status
+- **THEN** the new status keeps the source episode id
+- **AND** it records a `recovery` attempt with previous/source-status linkage
+
+### Requirement: Runner reports complete totals with bounded samples
+The delivery runner MUST keep aggregate command/timeline totals independent of
+bounded retained detail samples.
+
+#### Scenario: Command details are sampled
+- **WHEN** observed commands exceed the retained command detail limit
+- **THEN** status records include observed count, retained count, limit and
+  truncation state
+- **AND** `command_execution_count` and aggregate duration still represent all
+  observed completed commands
+
+#### Scenario: Progress events define wait intervals
+- **WHEN** accepted value-free lifecycle progress events describe active stages
+  and waiting stages
+- **THEN** status records can expose active, wait and operator-wait duration
+  totals
+- **AND** rejected content-bearing progress events do not affect those totals
+
 ### Requirement: Runner reports oversized command summary
 The delivery runner MUST print a sanitized operator-facing summary of top
 oversized commands when command output metadata exceeds the documented
@@ -1342,3 +1375,37 @@ recovery как authority на создание, переподключение 
 - **THEN** dirty retained resume недоступен
 - **AND** оператор начинает новый clean delivery attempt с новой verification
   lineage.
+
+### Requirement: Delivery episode and attempt lineage
+ChangeRail runner MUST назначать stable episode id одному card execution и
+unique typed attempt id каждому preflight, delivery или recovery process.
+Resume MUST наследовать source episode и ссылаться на source attempt;
+unrelated new execution той же карточки MUST начинать другой episode.
+
+#### Scenario: Blocked child возобновляется
+- **WHEN** schema-valid blocked attempt возобновляется через supported
+  single-card или plan workflow
+- **THEN** resumed status сохраняет source `episode_id`, использует новый
+  recovery attempt id и связывает previous/source attempt
+- **AND** card/workspace/episode identity проверяется до launch
+
+#### Scenario: Та же карточка начинает unrelated execution
+- **WHEN** оператор запускает new run без authorized source status
+- **THEN** runner создает новый episode id
+- **AND** prior attempts и review cycles не присоединяются только по card id
+
+### Requirement: Complete aggregate performance with bounded samples
+Runner MUST сохранять aggregate counts и durations всех observed commands,
+tools и structured phases, даже когда detailed samples bounded. Он MUST
+указывать observed count, retained count, sample limit и truncation state.
+
+#### Scenario: Long run превышает detail limits
+- **WHEN** command или timeline details превышают configured retained limits
+- **THEN** aggregate counts и durations по-прежнему включают каждый observed
+  item
+- **AND** sample metadata сообщает truncation и effective limits
+
+#### Scenario: Наблюдается structured operator wait
+- **WHEN** lifecycle записывает value-free external/operator wait transition
+- **THEN** performance totals классифицируют duration отдельно от active time
+- **AND** entered value, screen content и external response не сохраняются

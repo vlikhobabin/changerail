@@ -13,6 +13,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "episode": {
+      "$ref": "#/$defs/episodeLineage"
+    },
     "card": {
       "type": "object",
       "required": ["id", "path"],
@@ -74,6 +77,45 @@
         "live_admission_reviews": {"type": "integer", "minimum": 0}
       }
     },
+    "episodeLineage": {
+      "type": "object",
+      "required": ["schema", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-episode-lineage.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "attemptLineage": {
+      "type": "object",
+      "required": ["schema", "id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-attempt.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["review", "rescue"]
+        },
+        "parent_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "previous_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "rescueBudget": {
       "type": "object",
       "required": ["limit", "used", "remaining", "exhausted"],
@@ -123,6 +165,9 @@
         "same_card_rescue_attempt": {
           "type": "integer",
           "minimum": 0
+        },
+        "attempt": {
+          "$ref": "#/$defs/attemptLineage"
         },
         "result": {
           "enum": ["go", "no-go"]

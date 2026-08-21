@@ -49,6 +49,12 @@
       "type": "string",
       "format": "date-time"
     },
+    "episode": {
+      "$ref": "#/$defs/episodeLineage"
+    },
+    "attempt": {
+      "$ref": "#/$defs/attemptLineage"
+    },
     "workspace": {
       "type": "object",
       "required": ["root"],
@@ -245,6 +251,18 @@
           "type": "number",
           "minimum": 0
         },
+        "active_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wait_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "operator_wait_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
         "event_counts": {
           "type": "object",
           "additionalProperties": {
@@ -259,6 +277,13 @@
         "command_execution_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "command_duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "command_samples": {
+          "$ref": "#/$defs/sampleSummary"
         },
         "file_change_count": {
           "type": "integer",
@@ -285,6 +310,9 @@
             "$ref": "#/$defs/timelineEvent"
           }
         },
+        "timeline_samples": {
+          "$ref": "#/$defs/sampleSummary"
+        },
         "review": {
           "$ref": "#/$defs/reviewTiming"
         },
@@ -295,6 +323,71 @@
     }
   },
   "$defs": {
+    "episodeLineage": {
+      "type": "object",
+      "required": ["schema", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-episode-lineage.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "attemptLineage": {
+      "type": "object",
+      "required": ["schema", "id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-attempt.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["preflight", "delivery", "recovery", "review", "rescue", "publish"]
+        },
+        "parent_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "previous_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_status_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sampleSummary": {
+      "type": "object",
+      "required": ["observed_count", "retained_count", "limit", "truncated"],
+      "additionalProperties": false,
+      "properties": {
+        "observed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      }
+    },
     "deliveryProgress": {
       "type": "object",
       "required": ["schema", "phase", "stage", "heartbeat_at", "event_counter"],

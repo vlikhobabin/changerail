@@ -2521,11 +2521,16 @@ def check_performance_summary_run(tmp: Path) -> None:
     )
     require_ok(result, "runner performance")
     status = load_status(runtime, "performance")
+    if status.get("episode", {}).get("id") != "performance" or status.get("attempt", {}).get("kind") != "delivery":
+        raise AssertionError(f"delivery lineage missing from status: {status}")
     performance = status.get("performance")
     if not isinstance(performance, dict):
         raise AssertionError(f"performance summary missing from status: {status}")
     if performance.get("command_execution_count") != 2:
         raise AssertionError(f"command count was not captured: {performance}")
+    command_samples = performance.get("command_samples")
+    if command_samples != {"observed_count": 2, "retained_count": 2, "limit": 50, "truncated": False}:
+        raise AssertionError(f"command sample metadata missing: {performance}")
     commands = performance.get("commands")
     if not isinstance(commands, list) or len(commands) != 2:
         raise AssertionError(f"command summaries missing: {performance}")
@@ -2556,8 +2561,39 @@ def check_performance_summary_run(tmp: Path) -> None:
     timeline = performance.get("timeline")
     if not isinstance(timeline, list) or not any(event.get("terminal_outcome") == "DELIVERED" for event in timeline):
         raise AssertionError(f"terminal outcome timing missing from timeline: {timeline}")
+    timeline_samples = performance.get("timeline_samples")
+    if not isinstance(timeline_samples, dict) or timeline_samples.get("observed_count", 0) < len(timeline):
+        raise AssertionError(f"timeline sample metadata missing: {performance}")
     if status["usage"].get("cached_input_tokens") != 1 or status["usage"].get("reasoning_tokens") != 1:
         raise AssertionError(f"usage breakdown was not parsed: {status['usage']}")
+    refreshed = run(
+        [
+            str(RUNNER),
+            "refresh-episode",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--episode-id",
+            "performance",
+            "--json",
+        ]
+    )
+    require_ok(refreshed, "refresh episode")
+    episode = json.loads(refreshed.stdout)
+    if episode.get("schema") != "changerail.delivery-episode.v1" or episode.get("final_outcome") != "unknown":
+        raise AssertionError(f"episode refresh did not write a valid derived index: {episode}")
+    if not any(attempt.get("id") == "performance" for attempt in episode.get("attempts", [])):
+        raise AssertionError(f"episode refresh did not include delivery attempt: {episode}")
+    other = json.loads(json.dumps(status))
+    other["run_id"] = "performance-other"
+    other["episode"]["id"] = "performance-other"
+    other["attempt"]["id"] = "performance-other"
+    write_json(runtime / "performance-other" / "status.json", other)
+    ambiguous = run([str(RUNNER), "refresh-episode", CARD, "--workspace", str(workspace), "--runtime-root", str(runtime), "--json"])
+    if ambiguous.returncode == 0 or "ambiguous or missing episode lineage for card" not in ambiguous.stdout:
+        raise AssertionError(f"ambiguous refresh episode did not fail closed: stdout={ambiguous.stdout} stderr={ambiguous.stderr}")
 
 
 def check_progress_events_and_status_view(tmp: Path) -> None:
@@ -2593,6 +2629,9 @@ def check_progress_events_and_status_view(tmp: Path) -> None:
         raise AssertionError(f"progress events were not counted monotonically: {progress}")
     if not isinstance(health, dict) or health.get("state") != "terminated" or health.get("process_alive") is not False:
         raise AssertionError(f"terminated progress health missing: {health}")
+    progress_perf = status.get("performance", {})
+    if not all(key in progress_perf for key in ("active_seconds", "wait_seconds", "operator_wait_seconds")):
+        raise AssertionError(f"progress duration totals missing: {status}")
     status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
     if "SYNTHETIC_PRIVATE_VALUE_SHOULD_NOT_APPEAR" in status_text or "raw_log_excerpt" in status_text:
         raise AssertionError(f"forged content-bearing progress leaked into status: {status_text}")
@@ -2754,6 +2793,9 @@ def check_oversized_output_summary_run(tmp: Path) -> None:
         raise AssertionError(f"oversized command output summary missing: {performance}")
     if command_output.get("oversized_command_count") != 1:
         raise AssertionError(f"oversized command count missing: {command_output}")
+    command_samples = performance.get("command_samples")
+    if not isinstance(command_samples, dict) or command_samples.get("observed_count") != 1:
+        raise AssertionError(f"oversized command sample metadata missing: {performance}")
     if command_output.get("largest_command_bytes", 0) <= command_output.get("threshold_bytes", 0):
         raise AssertionError(f"largest command did not exceed threshold: {command_output}")
     top = command_output.get("top_oversized_commands")

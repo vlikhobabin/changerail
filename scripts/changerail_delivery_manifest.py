@@ -560,6 +560,15 @@ def default_manifest_path(workspace: Path, card: dict[str, Any]) -> Path:
     return workspace / ".runtime" / "changerail" / "delivery-manifests" / f"{card['id']}.json"
 
 
+def manifest_episode(manifest_path: Path, card: dict[str, Any]) -> dict[str, str]:
+    existing = load_json(manifest_path) if manifest_path.exists() else None
+    episode = existing.get("episode") if isinstance(existing, dict) else {}
+    run_id = os.environ.get("CHANGERAIL_ACTIVE_RUN_ID")
+    active_card = os.environ.get("CHANGERAIL_ACTIVE_CARD_ID")
+    episode_id = episode["id"] if isinstance(episode, dict) and isinstance(episode.get("id"), str) else run_id if run_id and active_card in {None, card["id"]} else f"manual-{card['id']}-{utc_now().replace(':', '').replace('-', '')}"
+    return {"schema": "changerail.delivery-episode-lineage.v1", "id": episode_id}
+
+
 def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
     workspace = workspace.resolve(strict=False)
     card_text, card = read_card(card_path, workspace)
@@ -583,6 +592,7 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
     manifest = {
         "schema": SCHEMA_ID,
         "updated_at": utc_now(),
+        "episode": manifest_episode(manifest_path, card),
         "workspace": {
             "root": str(workspace),
             "repository": repository_id(workspace),
@@ -677,6 +687,11 @@ def update_publish(manifest_path: Path, args: argparse.Namespace) -> dict[str, A
         value = getattr(args, field)
         if value:
             publish[field] = value
+    episode = manifest.get("episode")
+    if isinstance(episode, dict) and isinstance(episode.get("id"), str):
+        attempt_id = published_commit or payload_commit or legacy_commit
+        if attempt_id:
+            publish["attempt"] = {"schema": "changerail.delivery-attempt.v1", "id": f"publish-{attempt_id[:12]}", "kind": "publish"}
     manifest["publish"] = publish
     manifest["updated_at"] = utc_now()
     errors = validate_manifest(manifest)
@@ -823,6 +838,9 @@ def update_manifest_after_finalize(
             "committed_at": args.timestamp,
         }
     )
+    episode = manifest.get("episode")
+    if isinstance(episode, dict) and isinstance(episode.get("id"), str):
+        publish["attempt"] = {"schema": "changerail.delivery-attempt.v1", "id": f"publish-{args.commit[:12]}", "kind": "publish"}
     manifest["publish"] = publish
     manifest["updated_at"] = utc_now()
     errors = validate_manifest(manifest)

@@ -1,13 +1,13 @@
 # Отчитываться о recovery-aware delivery episodes
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -89,27 +89,49 @@ retrospective metrics без сохранения prompts, command bodies или
 - `bin/changerail-delivery-runner`
 - `bin/changerail-delivery-metrics`
 - `schemas/changerail-delivery-run.schema.json`
+- `schemas/changerail-delivery-episode.schema.json`
 - `expose-structured-live-delivery-progress.md`
 - `resume-retained-payload-after-external-blocker.md`
-- `openspec/changes/record-recovery-aware-delivery-episodes/`
-- `openspec/changes/report-recovery-aware-delivery-metrics/`
+- `openspec/changes/archive/2026-08-21-record-recovery-aware-delivery-episodes/`
+- `openspec/changes/archive/2026-08-21-report-recovery-aware-delivery-metrics/`
 
 ## Change Set
 - `record-recovery-aware-delivery-episodes`
 - `report-recovery-aware-delivery-metrics`
 
 ## Verify
-- Contract/schema smokes для attempt/episode records.
-- Metrics fixtures, доказывающие preflight exclusion и recovery rollup.
-- End-to-end fake runner с blocker, resume, no-go rescue, go и publish.
+- `python3 scripts/smoke-contract-schemas.py` - passed, 23 schemas including
+  `changerail.delivery-episode.v1`.
+- `python3 scripts/smoke-delivery-metrics.py` - passed; episode rows,
+  preflight-only exclusion, same-card unrelated history isolation, queue
+  episode ids, canonical `changerail.delivery-episode.v1` input and sample
+  metadata covered.
+- `python3 scripts/smoke-delivery-manifest-derive.py` - passed; derived
+  manifests preserve episode lineage and publish attempt metadata.
+- `python3 scripts/smoke-delivery-runner.py` - passed; one-command flow,
+  resume paths, progress wait totals, bounded samples, derived episode refresh
+  and ambiguous same-card refresh failure covered.
+- `./bin/openspec validate --all --strict` - passed, 28 items after archive.
+- `python3 scripts/public-surface-scan.py` - passed, 1207 files scanned, 0
+  findings.
+- `git diff --check` - passed.
+
+## Archive
+- `openspec/changes/archive/2026-08-21-record-recovery-aware-delivery-episodes/`
+- `openspec/changes/archive/2026-08-21-report-recovery-aware-delivery-metrics/`
 
 ## Result
-Проработка завершена; два apply-ready changes созданы, реализация не начата.
+Delivered for review: runner, manifest, review-history and schema contracts now
+carry optional episode/attempt lineage; the runner can materialize ignored
+`changerail.delivery-episode.v1` episode indexes with bounded sample metadata;
+metrics now reports one row per episode, excludes preflight-only records from
+delivery/review denominators and joins review history only through matching
+episode lineage.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- После завершения progress/external-resume dependencies и published
-  investigation authorization выполнить
-  `$chrl-deliver openspec/board/2.todo/report-recovery-aware-delivery-episodes.md`.
+- done
 
 ## Change 1: `record-recovery-aware-delivery-episodes`
 
@@ -136,7 +158,7 @@ episode index и complete aggregate telemetry с bounded samples.
   episode/attempt wire contracts
 
 ### Related
-- `openspec/changes/record-recovery-aware-delivery-episodes/`
+- `openspec/changes/archive/2026-08-21-record-recovery-aware-delivery-episodes/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Change 2: `report-recovery-aware-delivery-metrics`
@@ -159,7 +181,7 @@ denominators, recovery cost, complete totals и honest unknowns.
 - `record-recovery-aware-delivery-episodes`
 
 ### Related
-- `openspec/changes/report-recovery-aware-delivery-metrics/`
+- `openspec/changes/archive/2026-08-21-report-recovery-aware-delivery-metrics/`
 
 ## Log
 - 2026-08-20T17:30:00Z карточка создана из sanitized field-validation evidence.
@@ -168,3 +190,10 @@ denominators, recovery cost, complete totals и honest unknowns.
 - 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
   exact episode/attempt boundary, split budget 300/200, ceiling 500 и запрет
   raw-log reconstruction.
+- 2026-08-21T17:06:22Z `$changerail-do` реализовал recovery-aware episode
+  lineage, metrics rollup, bounded sample metadata и archived оба card-owned
+  changes; verification passed and card remains in `3.inprogress` for review.
+- 2026-08-21T17:29:46Z review cycle 1 returned `no-go`; same-card rescue
+  fixed manifest episode lineage, canonical episode metrics input and
+  ambiguous same-card episode refresh, with focused smokes and gates passing.
+- 2026-08-21T17:57:44Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

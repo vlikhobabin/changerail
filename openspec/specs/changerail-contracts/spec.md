@@ -545,6 +545,34 @@ status contract.
 - **AND** the required base fields still include schema, card, phase, result,
   timestamps, command and usage availability
 
+### Requirement: Delivery episode and attempt contracts
+Runtime owner schemas MUST support explicit recovery-aware episode lineage
+without making legacy records invalid.
+
+#### Scenario: Delivery run declares an attempt
+- **WHEN** a delivery-run status includes `episode.id` and a typed `attempt`
+- **THEN** schema validation accepts `preflight`, `delivery` or `recovery`
+  attempts with optional previous/source linkage
+- **AND** legacy status records without these optional fields remain valid
+
+#### Scenario: Review and publish owners link to the episode
+- **WHEN** review-cycle history or delivery manifest publish metadata declares
+  the same episode and linked attempt ids
+- **THEN** schema validation accepts the owner-scoped lineage
+- **AND** raw prompts, command bodies and log payloads are still not valid
+  fields in those owner artifacts
+
+### Requirement: Derived delivery episode contract
+ChangeRail MUST define `changerail.delivery-episode.v1` as an ignored,
+public-safe derived index over schema-valid owner artifacts.
+
+#### Scenario: Episode index summarizes owner artifacts
+- **WHEN** a delivery episode record is materialized
+- **THEN** it contains typed attempt summaries, owner artifact references,
+  final outcome and bounded sampling metadata
+- **AND** it does not contain prompts, raw commands, MCP payloads, screenshots,
+  source content or raw logs
+
 ### Requirement: Delivery run schema bounds command output metadata
 The `changerail.delivery-run.v1` schema MUST allow structured command output
 metadata while forbidding raw command payload copies in status records.
@@ -571,6 +599,13 @@ The delivery-run contract MUST keep output amplification diagnostics bounded so
 - **THEN** the status record includes aggregate counts and bounded top-command
   metadata rather than every raw output payload
 - **AND** ignored raw evidence paths remain outside committable scope
+
+#### Scenario: Detail samples are truncated
+- **WHEN** command or timeline detail retention is smaller than observed count
+- **THEN** the status record exposes observed count, retained count, limit and
+  truncation state
+- **AND** aggregate command counts and durations remain based on the complete
+  observed set
 
 ### Requirement: Delivery run usage breakdown contract
 ChangeRail MUST allow delivery run records to expose available token usage
@@ -1943,3 +1978,48 @@ MUST делать prior retained status, evidence, manifest и review verdict
 - **WHEN** current target id/fingerprint не совпадает с retained identity
 - **THEN** dirty resume fail closed до child launch
 - **AND** оператор начинает новый clean attempt
+
+### Requirement: Episode and attempt identity contract
+Runtime owner schemas MUST использовать schema-valid episode ids и typed
+attempt objects с unique ids и optional parent/previous links. Links MUST
+разрешаться внутри одного workspace/card/episode и MUST отклонять cycles или
+conflicting duplicate attempt ids.
+
+#### Scenario: Cross-artifact lineage проходит валидацию
+- **WHEN** delivery status, review history и manifest используют один episode id
+  и distinct linked attempt ids
+- **THEN** contract validation и episode materialization проходят
+- **AND** каждый source остается authoritative для owned fields
+
+#### Scenario: Cross-episode link fail closed
+- **WHEN** attempt ссылается на parent/previous id другого episode либо duplicate
+  id имеет другое content
+- **THEN** episode refresh сообщает contract conflict
+- **AND** не merge ambiguous attempts
+
+### Requirement: Derived delivery episode record
+`changerail.delivery-episode.v1` MUST быть ignored public-safe derived index
+schema-valid attempt summaries и indirect owner-artifact references. Он MUST
+NOT включать prompts, raw commands, MCP payloads, screenshots, source content
+или raw logs.
+
+#### Scenario: Episode refresh объединяет owner artifacts
+- **WHEN** matching delivery, review и publish artifacts существуют для одного
+  episode
+- **THEN** refresh атомарно пишет ordered attempt summaries и final lifecycle
+  state
+- **AND** detailed evidence остается referenced через normalized ignored paths
+
+#### Scenario: Legacy run не имеет explicit lineage
+- **WHEN** reader встречает valid legacy delivery run без episode fields
+- **THEN** он может показать isolated synthetic episode для этого run
+- **AND** missing lineage и later review/publish data остаются `unknown`
+
+### Requirement: Sampling and duration contract
+Performance/episode schemas MUST отличать complete aggregate totals от bounded
+detail samples и MUST явно представлять incomplete intervals.
+
+#### Scenario: Detail sample усечен
+- **WHEN** retained detail count меньше observed count
+- **THEN** record объявляет truncation и sample limit
+- **AND** aggregate totals остаются valid для complete observed set

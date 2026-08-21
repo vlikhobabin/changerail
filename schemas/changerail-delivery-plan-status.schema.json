@@ -215,6 +215,10 @@
           "type": "string",
           "minLength": 1
         },
+        "episode_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "run_status_path": {
           "$ref": "#/$defs/relativePath"
         },
