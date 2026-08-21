@@ -859,11 +859,19 @@ tracked `/opt/changerail/bin/codex`; consumer repository не обязан им�
 tracked `bin/codex`, если оператор запускает ChangeRail runner извне или
 передает supported launcher через `--launcher`. Если `--workspace` не указан, workspace
 резолвится в git-root invocation cwd, а вне git - в текущий cwd. Если
-`CODEX_HOME` не задан, runner использует `<workspace>/.codex`; если
+`CODEX_HOME` не задан, runner использует ignored mutable home
+`<workspace>/.runtime/changerail/codex-home`; tracked project policy остаётся в
+`<workspace>/.codex/config.toml`. Runtime `config.toml` содержит только exact
+absolute trust binding выбранного workspace, поэтому Codex persistence не
+меняет review payload. Existing ignored project `.codex/auth.json` или
+`.codex/auth.toml` подключается в runtime home symlink-ом без чтения и
+копирования credential contents. Если
 `--runtime-root` не задан, status пишется под
 `<workspace>/.runtime/changerail/delivery-runs/`. Preflight записывает диагностику
-launcher, Codex binary, auth state, `config.toml`, stale symlink-ов в
-`CODEX_HOME`, permissions, publish target и optional connectivity URL. Remote
+launcher, Codex binary, auth state, effective project policy, stale symlink-ов
+в runtime home и project `.codex/`, permissions, publish target и optional
+connectivity URL. Explicit operator `CODEX_HOME` остаётся operator-owned:
+runner использует его config/auth state и не генерирует там файлы. Remote
 publish-target proof выполняет `git ls-remote --exit-code <remote>
 refs/heads/<branch>` и сохраняет только sanitized command/result/detail:
 remote name, branch, remote URL class, failure class, retryability, attempt

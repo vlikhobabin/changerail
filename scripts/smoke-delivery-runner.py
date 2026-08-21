@@ -140,6 +140,10 @@ def write_fake_launcher(path: Path) -> None:
                 "stdin = sys.stdin.read()",
                 "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR'), 'CHANGERAIL_DISCOVERY_POLICY': os.environ.get('CHANGERAIL_DISCOVERY_POLICY'), 'CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES': os.environ.get('CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES')}))",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
+                "if mode == 'persist-project-trust':",
+                "    codex_home = os.environ['CODEX_HOME']",
+                "    with open(os.path.join(codex_home, 'config.toml'), 'a', encoding='utf-8') as handle:",
+                "        handle.write('\\n[projects.' + json.dumps(os.getcwd()) + ']\\ntrust_level = ' + json.dumps('trusted') + '\\n')",
                 "if mode == 'non-terminal-error':",
                 "    print(json.dumps({'type': 'tool/result', 'data': {'status': 'failed', 'message': 'error'}}))",
                 "if mode == 'no-go':",
@@ -2042,8 +2046,9 @@ def check_success_run(tmp: Path) -> None:
         raise AssertionError(f"child cwd did not honor --workspace: {first}")
     if first.get("CODEX_WORKDIR") != str(workspace):
         raise AssertionError(f"CODEX_WORKDIR did not honor --workspace: {first}")
-    if first.get("CODEX_HOME") != str(workspace / ".codex"):
-        raise AssertionError(f"CODEX_HOME did not default to workspace .codex: {first}")
+    expected_codex_home = workspace / ".runtime" / "changerail" / "codex-home"
+    if first.get("CODEX_HOME") != str(expected_codex_home):
+        raise AssertionError(f"CODEX_HOME did not use isolated workspace runtime home: {first}")
     if first.get("CHANGERAIL_ACTIVE_RUN_ID") != "success":
         raise AssertionError(f"active runner id was not passed to the child: {first}")
     if first.get("CHANGERAIL_ACTIVE_RUN_DIR") != str(runtime / "success"):
@@ -2090,10 +2095,123 @@ def check_default_workspace_run(tmp: Path) -> None:
         raise AssertionError(f"default child cwd did not use invocation repo: {first}")
     if first.get("CODEX_WORKDIR") != str(workspace):
         raise AssertionError(f"default CODEX_WORKDIR did not use invocation repo: {first}")
-    if first.get("CODEX_HOME") != str(workspace / ".codex"):
-        raise AssertionError(f"default CODEX_HOME did not follow workspace: {first}")
+    expected_codex_home = workspace / ".runtime" / "changerail" / "codex-home"
+    if first.get("CODEX_HOME") != str(expected_codex_home):
+        raise AssertionError(f"default CODEX_HOME did not follow isolated workspace runtime home: {first}")
     if "status: " + str(runtime / "default-workspace" / "status.json") not in result.stdout:
         raise AssertionError(f"default runtime root did not follow workspace: {result.stdout}")
+
+
+def check_default_codex_home_isolates_persisted_trust(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "isolated-codex-home", publish_ready=False)
+    launcher = tmp / "fake-codex-persist-trust"
+    runtime = tmp / "isolated-codex-home-runtime"
+    write_fake_launcher(launcher)
+    git(["add", "-f", ".codex/config.toml"], workspace)
+    git(
+        [
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=changerail-smoke@example.invalid",
+            "commit",
+            "-m",
+            "track project Codex policy",
+        ],
+        workspace,
+    )
+    configure_upstream_baseline(workspace)
+    project_config = workspace / ".codex" / "config.toml"
+    original_config = project_config.read_bytes()
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "isolated-codex-home",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("persist-project-trust"),
+    )
+    require_ok(result, "isolated default CODEX_HOME")
+
+    runtime_home = workspace / ".runtime" / "changerail" / "codex-home"
+    require_private_mode(runtime_home, 0o700)
+    require_private_mode(runtime_home / "config.toml", 0o600)
+    if project_config.read_bytes() != original_config:
+        raise AssertionError("Codex trust persistence mutated tracked project config")
+    auth_link = runtime_home / "auth.json"
+    if not auth_link.is_symlink() or auth_link.resolve() != (workspace / ".codex" / "auth.json").resolve():
+        raise AssertionError(f"runtime auth marker did not reference project auth: {auth_link}")
+    runtime_config = (runtime_home / "config.toml").read_text(encoding="utf-8")
+    if str(workspace) not in runtime_config or "trust_level = \"trusted\"" not in runtime_config:
+        raise AssertionError(f"runtime config lacks exact workspace trust: {runtime_config}")
+    if git(["status", "--porcelain"], workspace):
+        raise AssertionError("ignored runtime Codex state created a committable workspace diff")
+
+
+def check_default_codex_home_rejects_directory_symlink(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "symlinked-codex-home", publish_ready=False)
+    launcher = tmp / "fake-codex-symlinked-home"
+    runtime = tmp / "symlinked-codex-home-runtime"
+    call_log = tmp / "symlinked-codex-home-calls.jsonl"
+    write_fake_launcher(launcher)
+    git(["add", "-f", ".codex/config.toml"], workspace)
+    git(
+        [
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=changerail-smoke@example.invalid",
+            "commit",
+            "-m",
+            "track project Codex policy",
+        ],
+        workspace,
+    )
+    configure_upstream_baseline(workspace)
+    project_config = workspace / ".codex" / "config.toml"
+    original_config = project_config.read_bytes()
+    runtime_parent = workspace / ".runtime" / "changerail"
+    runtime_parent.mkdir(parents=True)
+    (runtime_parent / "codex-home").symlink_to(workspace / ".codex", target_is_directory=True)
+
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "symlinked-codex-home",
+            "--launcher",
+            str(launcher),
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("runner accepted a symlinked default Codex runtime home")
+    if project_config.read_bytes() != original_config:
+        raise AssertionError("symlinked runtime home mutated tracked project config before blocking")
+    if call_log.exists() and call_log.read_text(encoding="utf-8").strip():
+        raise AssertionError("runner launched a child after rejecting symlinked runtime home")
+    status = load_status(runtime, "symlinked-codex-home")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    runtime_home = checks.get("Codex runtime home")
+    if not runtime_home or runtime_home["status"] != "fail":
+        raise AssertionError(f"symlinked runtime home was not rejected explicitly: {status}")
 
 
 def check_performance_summary_run(tmp: Path) -> None:
@@ -4365,6 +4483,8 @@ def main() -> int:
         check_one_command_delivery_review_budget_no_go(workspace)
         check_success_run(workspace)
         check_default_workspace_run(workspace)
+        check_default_codex_home_isolates_persisted_trust(workspace)
+        check_default_codex_home_rejects_directory_symlink(workspace)
         check_performance_summary_run(workspace)
         check_oversized_output_summary_run(workspace)
         check_no_go_run(workspace)

@@ -207,19 +207,25 @@ bin/changerail-delivery-runner run openspec/board/3.inprogress/example.md \
 Если `--workspace` не указан, runner берет git-root текущего invocation cwd,
 а вне git - сам cwd. `--workspace` задает реальный child cwd и
 `CODEX_WORKDIR`; если `CODEX_HOME` не задан оператором, runner использует
-`<workspace>/.codex`, а не path ChangeRail source of truth. Если `--runtime-root` не
-указан, status и logs пишутся под
+ignored `<workspace>/.runtime/changerail/codex-home`, а tracked project policy
+читает из `<workspace>/.codex/config.toml`. Runner записывает в runtime home
+exact workspace trust и подключает existing ignored project auth marker
+symlink-ом, не читая и не копируя credentials. Это не позволяет Codex startup
+добавить machine-local trust path в tracked project config. Если
+`--runtime-root` не указан, status и logs пишутся под
 `<workspace>/.runtime/changerail/delivery-runs/`. Перед background-run используйте
-preflight: он проверяет launcher, эффективный `CODEX_HOME`, `config.toml`,
-auth state без чтения секретов, stale symlink-и внутри `CODEX_HOME`,
+preflight: он проверяет launcher, эффективный `CODEX_HOME`, project policy,
+auth state без чтения секретов, stale symlink-и в runtime и project layers,
 executable permissions, наличие Codex binary и, если указан URL, делает
 реальную connectivity-проверку proxy/endpoint. Диагностика читается из status
 JSON; runtime logs остаются ignored state. Если status показывает
-`CODEX auth: fail`, настройте ignored auth marker в проектном `CODEX_HOME`,
+`CODEX auth: fail`, настройте ignored auth marker в project `.codex/`,
 запустите runner с explicit `CODEX_HOME` или задайте поддерживаемую auth env
 переменную; canonical remediation описан в
 `docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`. Если
-`CODEX_HOME symlinks: fail`, пересоздайте устаревшие symlink-и до запуска.
+`CODEX_HOME symlinks: fail`, пересоздайте указанные runtime или project
+symlink-и до запуска. Explicit operator `CODEX_HOME` остаётся совместимым
+operator-owned override и runner не переписывает его файлы.
 
 ## Fix budget до review
 

@@ -429,8 +429,9 @@ tracked explicit blocker в ChangeRail compatibility notes.
 
 `verify-project` проверяет wiring и ignore policy, но unattended delivery runner
 нуждается еще и в effective Codex auth source и trusted automation authority.
-Effective `CODEX_HOME/config.toml` должен содержать
-`approval_policy = "never"` и `sandbox_mode = "danger-full-access"`; иначе
+При default запуске tracked `<workspace>/.codex/config.toml` должен содержать
+`approval_policy = "never"` и `sandbox_mode = "danger-full-access"`; при
+explicit `CODEX_HOME` эти значения проверяются в его `config.toml`. Иначе
 runner preflight останавливается до запуска child. Это относится к single-card
 команде `changerail-delivery-runner run` и к plan-oriented командам
 `preflight-plan`, `run-plan` и `resume-plan`: без auth preflight должен
@@ -444,18 +445,25 @@ effective `CODEX_HOME` задаются для каждого child workspace.
 
 Runner выбирает auth location так:
 
-- если оператор явно задал `CODEX_HOME`, используется этот каталог;
-- иначе effective `CODEX_HOME` равен `<workspace>/.codex`, где `workspace` -
-  consumer repository из `--workspace` или текущий git-root;
+- если оператор явно задал `CODEX_HOME`, используется этот operator-owned
+  каталог без generated reconciliation;
+- иначе effective mutable `CODEX_HOME` равен ignored
+  `<workspace>/.runtime/changerail/codex-home`, где `workspace` - consumer
+  repository из `--workspace` или текущий git-root;
+- default runtime config содержит exact absolute workspace trust, а project
+  policy и MCP settings остаются в tracked `<workspace>/.codex/config.toml`;
 - auth считается готовым, если есть supported marker вроде `auth.json` или
-  `auth.toml` внутри effective `CODEX_HOME`, либо задана supported auth
-  environment variable.
+  `auth.toml` внутри project `.codex/`, который runner подключает symlink-ом в
+  default runtime home, либо задана supported auth environment variable.
 
 Project-local marker должен оставаться ignored local state. В generated
 `.gitignore` для consumer проекта есть `.codex/auth.json` и
 `.codex/auth.toml`; не добавляйте эти файлы в tracked payload, не публикуйте их
 в docs, status или logs и не копируйте credentials автоматически во время
-adoption.
+adoption. Runner также не копирует marker contents: он создаёт только ignored
+symlink в своём runtime home. После preflight `git status --short` должен
+оставаться clean; появление `.runtime/` в payload означает неверную ignore
+policy и блокирует запуск.
 
 Безопасный локальный вариант - symlink на уже настроенный Codex auth:
 
@@ -595,7 +603,10 @@ unsupported/invalid, не runtime PASS. Raw doctor/prompt output остаетс�
 Если output содержит `CODEX auth: fail`, настройте project-local ignored marker,
 задайте explicit `CODEX_HOME` или используйте supported auth environment
 variable. Если output содержит `CODEX_HOME symlinks: fail`, пересоздайте stale
-symlink-и внутри effective `CODEX_HOME` перед `run-plan` или `resume-plan`.
+symlink-и в указанном runtime или project `.codex/` layer перед `run-plan` или
+`resume-plan`. Не добавляйте absolute `[projects."..."]` вручную в tracked
+project config: default runner создаёт exact trust только в ignored runtime
+home.
 
 ## Проверка
 
