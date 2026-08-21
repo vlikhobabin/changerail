@@ -1,13 +1,13 @@
 # Запретить неявную подмену объявленной среды выполнения
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -89,13 +89,16 @@ Exact authorization source `authorize-bounded-execution-target-payload`
 ## Verify
 - `python3 scripts/smoke-contract-schemas.py`
 - `python3 scripts/smoke-verify-project.py`
+- `python3 scripts/smoke-delivery-manifest.py`
+- `python3 scripts/smoke-retained-evidence.py`
 - `python3 scripts/smoke-delivery-runner.py`
 - `python3 scripts/smoke-review-preflight.py`
 - `bin/openspec validate --all --strict`
+- `git diff --check`
 - `python3 scripts/public-surface-scan.py`
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-enforce-declared-execution-target-invariant/`
 
 ## Related
 - `AGENTS.shared.md`
@@ -107,14 +110,17 @@ Exact authorization source `authorize-bounded-execution-target-payload`
 - `openspec/board/2.todo/define-verification-coverage-map.md`
 - `openspec/board/2.todo/resume-retained-payload-after-external-blocker.md`
 - `openspec/board/4.done/authorize-bounded-execution-target-payload.md`
-- `openspec/changes/enforce-declared-execution-target-invariant/`
+- `openspec/changes/archive/2026-08-21-enforce-declared-execution-target-invariant/`
 
 ## Result
-Проработка завершена; apply-ready artifacts созданы, реализация не начата.
+Реализация завершена: добавлены optional execution-target contract, shared
+loader/projection, fail-closed manifest/verification/runner/evidence/review
+gates, lifecycle guidance, template example и synthetic smoke coverage.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- После exact published investigation authorization выполнить
-  `$chrl-deliver openspec/board/2.todo/enforce-declared-execution-target-invariant.md`.
+- done
 
 ## Change 1: `enforce-declared-execution-target-invariant`
 
@@ -162,3 +168,12 @@ fail-closed substitution policy без platform-specific provision logic.
 - 2026-08-21T09:10:47Z linked exact published authorization source
   `authorize-bounded-execution-target-payload`; successor remains queued until
   that source is published in `4.done`.
+- 2026-08-21T13:10:00Z implementation completed; focused contract,
+  verify-project, manifest, evidence, runner and review-preflight smokes passed
+  before OpenSpec sync/archive.
+- 2026-08-21T13:15:00Z OpenSpec change archived as
+  `openspec/changes/archive/2026-08-21-enforce-declared-execution-target-invariant/`.
+- 2026-08-21T13:30:00Z independent review returned NO-GO for missing
+  single-card post-child target drift gate and shortened public-safety
+  redaction wording; scoped fixes added and runner/verify-project gates rerun.
+- 2026-08-21T14:00:00Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

@@ -167,6 +167,9 @@ For every verification claim in the card, archived tasks and manifest:
 
 - identify the command that allegedly ran;
 - identify the retained output, evidence path or observed output summary;
+- when the project declares `.changerail/execution-target.json`, confirm the
+  current declaration, manifest and retained evidence have one exact matching
+  target identity;
 - re-run cheap read-only checks when feasible;
 - mark unbacked mandatory claims as findings.
 
@@ -232,6 +235,8 @@ Stop without writing a verdict when:
 
 - this session implemented or planned the card;
 - deterministic preflight is absent, blocked or requires investigation;
+- declared execution target identity is missing, mismatched, substituted or
+  backed by multiple retained evidence targets;
 - card-owned changes are not archived;
 - neither a manifest nor a reconstructable publish scope exists;
 - the workspace is not a git repository or the fingerprint cannot be computed;

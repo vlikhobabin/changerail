@@ -58,6 +58,7 @@ FORBIDDEN_TRACKED_EXACT = {
 }
 SCHEMAS = (
     "changerail-consumer-lock.schema.json",
+    "changerail-execution-target.schema.json",
     "changerail-review-verdict.schema.json",
     "changerail-review-preflight-result.schema.json",
     "changerail-review-cycle-history.schema.json",
@@ -247,6 +248,28 @@ def as_diagnostic(check: Check, message: str | None = None) -> Check:
 
 def policy_error(message: str) -> Check:
     return Check("verification policy", False, message)
+
+
+def check_execution_target_declaration(project: Path, changerail_root: Path) -> Check:
+    scripts = changerail_root / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_execution_target import describe_execution_target, load_execution_target
+    except Exception as exc:
+        return Check(
+            ".changerail/execution-target.json",
+            False,
+            f"execution target helper unavailable: {type(exc).__name__}: {exc}",
+        )
+    state = load_execution_target(project, require_tracked=True)
+    errors = state.get("errors")
+    if errors:
+        return Check(".changerail/execution-target.json", False, "; ".join(str(error) for error in errors))
+    identity = state.get("identity")
+    if isinstance(identity, dict):
+        return Check(".changerail/execution-target.json", True, "declares " + describe_execution_target(identity))
+    return Check(".changerail/execution-target.json", True, "optional declaration absent")
 
 
 def optional_missing(name: str, surface: str) -> Check:
@@ -2161,6 +2184,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
 
     checks: list[Check] = [
         Check("project root", project.is_dir(), str(project)),
+        check_execution_target_declaration(project, changerail_root),
         check_wiring_path(
             project,
             "bin/openspec",

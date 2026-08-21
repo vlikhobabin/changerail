@@ -23,6 +23,7 @@ SPECIAL_OUTPUTS = {
 }
 EXPECTED_SCHEMAS = (
     "schemas/changerail-consumer-lock.schema.json",
+    "schemas/changerail-execution-target.schema.json",
     "schemas/changerail-review-verdict.schema.json",
     "schemas/changerail-review-preflight-result.schema.json",
     "schemas/changerail-review-cycle-history.schema.json",
@@ -797,6 +798,27 @@ def verify_json(changerail_root: Path, project: Path, env: dict[str, str]) -> tu
     return result, data
 
 
+def write_execution_target(project: Path, payload: dict[str, object] | None = None) -> Path:
+    path = project / ".changerail" / "execution-target.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = payload or {
+        "schema": "changerail.execution-target.v1",
+        "id": "database-primary",
+        "fingerprint": "sha256:" + ("1" * 64),
+        "target_substitution_policy": "forbid",
+    }
+    path.write_text(json.dumps(data, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def init_git_and_track(project: Path, *paths: str) -> None:
+    git(project, "init")
+    git(project, "config", "user.email", "smoke@example.invalid")
+    git(project, "config", "user.name", "Smoke Test")
+    if paths:
+        git(project, "add", "--", *paths)
+
+
 def drift_report(
     changerail_root: Path,
     project: Path,
@@ -883,6 +905,88 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "valid fixture passes",
             "pass" if verify.returncode == 0 else "fail",
             verify.stdout.strip(),
+        )
+    )
+    checks.append(
+        Check(
+            "absent execution target is compatible",
+            "pass" if verify.returncode == 0 and "PASS .changerail/execution-target.json: optional declaration absent" in verify.stdout else "fail",
+            verify.stdout.strip(),
+        )
+    )
+    target_project = run_dir / "execution-target-project"
+    shutil.copytree(good_project, target_project, symlinks=True)
+    write_execution_target(target_project)
+    init_git_and_track(target_project, ".changerail/execution-target.json")
+    target_verify = run([str(changerail_root / "bin" / "verify-project"), str(target_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "valid execution target passes",
+            "pass" if target_verify.returncode == 0 and "declares id=database-primary" in target_verify.stdout else "fail",
+            target_verify.stdout.strip(),
+        )
+    )
+    untracked_target_project = run_dir / "bad-untracked-execution-target"
+    shutil.copytree(good_project, untracked_target_project, symlinks=True)
+    write_execution_target(untracked_target_project)
+    init_git_and_track(untracked_target_project)
+    untracked_target = run(
+        [str(changerail_root / "bin" / "verify-project"), str(untracked_target_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "untracked execution target fails",
+            "pass"
+            if untracked_target.returncode != 0 and ".changerail/execution-target.json must be tracked by git" in untracked_target.stdout
+            else "fail",
+            untracked_target.stdout.strip(),
+        )
+    )
+    unknown_target_project = run_dir / "bad-unknown-field-execution-target"
+    shutil.copytree(good_project, unknown_target_project, symlinks=True)
+    write_execution_target(
+        unknown_target_project,
+        {
+            "schema": "changerail.execution-target.v1",
+            "id": "database-primary",
+            "fingerprint": "sha256:" + ("1" * 64),
+            "target_substitution_policy": "forbid",
+            "endpoint": "database.example.invalid",
+        },
+    )
+    init_git_and_track(unknown_target_project, ".changerail/execution-target.json")
+    unknown_target = run(
+        [str(changerail_root / "bin" / "verify-project"), str(unknown_target_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "unknown execution target field fails",
+            "pass"
+            if unknown_target.returncode != 0 and "Additional properties are not allowed" in unknown_target.stdout
+            else "fail",
+            unknown_target.stdout.strip(),
+        )
+    )
+    symlink_target_project = run_dir / "bad-symlink-execution-target"
+    shutil.copytree(good_project, symlink_target_project, symlinks=True)
+    outside_target = run_dir / "outside-execution-target.json"
+    outside_target.write_text("{}", encoding="utf-8")
+    (symlink_target_project / ".changerail").mkdir(exist_ok=True)
+    os.symlink(outside_target, symlink_target_project / ".changerail" / "execution-target.json")
+    symlink_target = run(
+        [str(changerail_root / "bin" / "verify-project"), str(symlink_target_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "symlink execution target fails",
+            "pass" if symlink_target.returncode != 0 and "must be a regular file, not a symlink" in symlink_target.stdout else "fail",
+            symlink_target.stdout.strip(),
         )
     )
     warning_env = {

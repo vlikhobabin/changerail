@@ -79,6 +79,10 @@ If no path is provided and it cannot be inferred, ask for it.
   with safety stop `awaiting external review`.
 - Preserve phase safety stops, manifest handling, evidence expectations and
   scoped publish rules.
+- When a project declares `.changerail/execution-target.json`, preserve that
+  exact target identity through planning, delivery, blocker/resume, review and
+  publish. Do not create, clone, restore, register or select a substitute target
+  as recovery from unavailable provider/platform/service/credential access.
 - Start discovery with bounded, low-output evidence before reading broad
   repository content. Prefer scoped paths from the card or OpenSpec artifacts,
   `rg -l`, counts, top-level file lists or explicitly bounded excerpts. Narrow

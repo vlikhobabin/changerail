@@ -141,6 +141,76 @@ def schema_errors(payload: Any, schema_filename: str) -> list[str]:
     return validate_with_schema(payload, schema_filename)
 
 
+def execution_target_state(root: Path) -> dict[str, Any]:
+    scripts = repo_root_from_script() / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_execution_target import load_execution_target
+    except Exception as exc:
+        return {"present": False, "errors": [f"execution target helper unavailable: {type(exc).__name__}: {exc}"]}
+    return load_execution_target(root, require_tracked=True)
+
+
+def execution_target_identity(root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    state = execution_target_state(root)
+    errors = state.get("errors")
+    if errors:
+        return None, "; ".join(str(error) for error in errors)
+    identity = state.get("identity")
+    return identity if isinstance(identity, dict) else None, None
+
+
+def execution_targets_match(first: Any, second: Any) -> bool:
+    if not isinstance(first, dict) or not isinstance(second, dict):
+        return False
+    keys = ("schema", "id", "fingerprint", "target_substitution_policy")
+    return all(first.get(key) == second.get(key) for key in keys)
+
+
+def execution_target_description(identity: Any) -> str:
+    if not isinstance(identity, dict):
+        return "absent"
+    return (
+        f"id={identity.get('id')} fingerprint={identity.get('fingerprint')} "
+        f"policy={identity.get('target_substitution_policy')}"
+    )
+
+
+def execution_target_preflight_check(root: Path, expected: dict[str, Any] | None = None) -> Check:
+    identity, error = execution_target_identity(root)
+    if error:
+        return Check("execution target", "fail", error, {"detail": error})
+    if expected is not None:
+        if not execution_targets_match(expected, identity):
+            detail = (
+                f"current {execution_target_description(identity)} differs from "
+                f"captured {execution_target_description(expected)}"
+            )
+            return Check("execution target", "fail", detail, {"detail": "target_identity_mismatch"})
+        return Check("execution target", "pass", "current declaration matches captured target identity")
+    if identity:
+        return Check("execution target", "pass", f"declared {execution_target_description(identity)}")
+    return Check("execution target", "pass", "no execution target declaration")
+
+
+def execution_target_drift_check(root: Path, captured: Any) -> Check:
+    current, error = execution_target_identity(root)
+    if error:
+        return Check("execution target", "fail", error, {"detail": "target_identity_unavailable"})
+    if isinstance(captured, dict) or isinstance(current, dict):
+        if not execution_targets_match(captured, current):
+            return Check(
+                "execution target",
+                "fail",
+                "current execution target differs from captured plan identity",
+                {"detail": "target_identity_mismatch"},
+            )
+    if isinstance(current, dict):
+        return Check("execution target", "pass", "current declaration matches captured target identity")
+    return Check("execution target", "pass", "no execution target declaration")
+
+
 def invocation_workspace() -> Path:
     cwd = Path.cwd()
     result = subprocess.run(
@@ -613,6 +683,9 @@ def retained_payload_identity(args: argparse.Namespace, root: Path) -> tuple[dic
     fingerprint, error = review_fingerprint(root)
     if fingerprint is None:
         return None, error or "review fingerprint unavailable"
+    target_identity, target_error = execution_target_identity(root)
+    if target_error:
+        return None, "execution target identity unavailable: " + target_error
     missing = [
         key
         for key in ("head_commit", "tree_sha", "diff_fingerprint")
@@ -639,6 +712,8 @@ def retained_payload_identity(args: argparse.Namespace, root: Path) -> tuple[dic
             "kind": "working-tree",
         },
     }
+    if target_identity:
+        identity["execution_target"] = target_identity
     return identity, None
 
 
@@ -666,6 +741,9 @@ def retained_recovery_summary(child_status: dict[str, Any], run_status_path: str
         },
         "review_target_kind": review_target.get("kind"),
     }
+    target_identity = retained.get("execution_target")
+    if isinstance(target_identity, dict):
+        summary["execution_target"] = target_identity
     if all(isinstance(value, str) and value for value in (
         summary["source_run_id"],
         summary["source_run_status_path"],
@@ -1061,6 +1139,7 @@ def check_plan_semantics(
         seen_aliases.add(alias)
         root = (consumer_root / path).resolve(strict=False)
         state = "preflighted"
+        target_identity: dict[str, Any] | None = None
         if not root.is_dir():
             state = "blocked"
             checks.append(Check("workspace exists", "fail", f"{alias}: {root}"))
@@ -1069,6 +1148,12 @@ def check_plan_semantics(
             checks.append(Check("workspace git repository", "fail", f"{alias}: {root}"))
         else:
             checks.append(Check("workspace", "pass", f"{alias}: {root}"))
+            target_check = execution_target_preflight_check(root)
+            checks.append(Check("execution target", target_check.status, f"{alias}: {target_check.message}"))
+            if target_check.status == "fail":
+                state = "blocked"
+            else:
+                target_identity, _target_error = execution_target_identity(root)
             clean, clean_reason = git_clean(root)
             dirty_allowed = alias in allow_dirty_workspaces
             checks.append(
@@ -1083,6 +1168,8 @@ def check_plan_semantics(
             if not clean and not dirty_allowed:
                 state = "blocked"
         entry = {"alias": alias, "path": path, "root": str(root), "state": state}
+        if target_identity:
+            entry["execution_target"] = target_identity
         workspace_by_alias[alias] = entry
         resolved_workspaces.append(entry)
 
@@ -1495,7 +1582,7 @@ def plan_status_record(
             entry["state"] = "ready"
         status_cards.append(entry)
     status_workspaces = [
-        {key: workspace[key] for key in ("alias", "path", "state", "reason") if key in workspace}
+        {key: workspace[key] for key in ("alias", "path", "state", "reason", "execution_target") if key in workspace}
         for workspace in workspaces
     ]
     record: dict[str, Any] = {
@@ -1785,6 +1872,7 @@ class PerformanceCollector:
 
 def base_record(args: argparse.Namespace, phase: str, result: str) -> dict[str, Any]:
     root = args.workspace.resolve(strict=False)
+    identity, _identity_error = execution_target_identity(root)
     record: dict[str, Any] = {
         "schema": SCHEMA,
         "run_id": args.run_id,
@@ -1818,6 +1906,8 @@ def base_record(args: argparse.Namespace, phase: str, result: str) -> dict[str, 
         record["command"]["model"] = args.model
     if args.reasoning_effort:
         record["command"]["reasoning_effort"] = args.reasoning_effort
+    if identity:
+        record["execution_target"] = identity
     return record
 
 
@@ -1840,6 +1930,7 @@ def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = Fals
     clean, clean_reason = git_clean(root)
     checks = [
         Check("workspace", "pass" if root.is_dir() else "fail", str(root)),
+        execution_target_preflight_check(root),
         Check(
             "workspace dirty state",
             "pass" if clean or allow_dirty_workspace else "fail",
@@ -2203,6 +2294,13 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     if exit_code != 0 and outcome == "DELIVERED":
         outcome = "BLOCKED"
         terminal_signal.reason = "nonzero_child_exit"
+    target_check = execution_target_drift_check(root, record.get("execution_target"))
+    if target_check.status == "fail":
+        outcome = "BLOCKED"
+        terminal_signal.reason = target_check.data.get("detail") if target_check.data else "target_identity_mismatch"
+        checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
+        if isinstance(checks_payload, list):
+            checks_payload.append(check_payload(target_check))
     record["phase"] = "terminal"
     record["result"] = outcome
     record["terminal_outcome"] = outcome
@@ -2388,10 +2486,24 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "payload_drift",
         )
         return checks, reason, False
+    current_target, target_error = execution_target_identity(root)
+    retained_target = retained.get("execution_target")
+    if target_error:
+        checks, reason = resume_fail("retained payload target", target_error, "target_identity_unavailable")
+        return checks, reason, False
+    if isinstance(retained_target, dict) or isinstance(current_target, dict):
+        if not execution_targets_match(retained_target, current_target):
+            checks, reason = resume_fail(
+                "retained payload target",
+                "current execution target differs from retained payload identity",
+                "target_identity_mismatch",
+            )
+            return checks, reason, False
     preflight_check, preflight_reason = retained_resume_review_preflight(args)
     checks = [
         Check("resume prior status", "pass", "prior investigation_required status accepted"),
         Check("retained payload fingerprint", "pass", "current working tree matches retained identity"),
+        Check("retained payload target", "pass", "current declaration matches retained target identity"),
         preflight_check,
     ]
     return checks, preflight_reason, preflight_reason is None
@@ -2544,6 +2656,9 @@ def upstream_state(root: Path) -> tuple[str, str]:
 
 def queue_success_check(workspace: dict[str, Any], card: dict[str, Any], mode: str) -> tuple[bool, str, dict[str, str]]:
     root = Path(workspace["root"])
+    target_check = execution_target_drift_check(root, workspace.get("execution_target"))
+    if target_check.status == "fail":
+        return False, target_check.message, {}
     clean, clean_reason = git_clean(root)
     if not clean:
         return False, clean_reason, {}
@@ -2856,6 +2971,14 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 break
             card = candidates[0]
             workspace = workspace_by_alias[card["workspace"]]
+            target_check = execution_target_drift_check(Path(workspace["root"]), workspace.get("execution_target"))
+            if target_check.status == "fail":
+                card["state"] = "blocked"
+                card["result"] = "BLOCKED"
+                card["reason"] = target_check.message
+                checks.append(Check("execution target", "fail", f"{card['workspace']}: {target_check.message}"))
+                result = "BLOCKED"
+                break
             lock, lock_error = create_workspace_lock(args, workspace)
             locks.append(lock)
             if lock_error:

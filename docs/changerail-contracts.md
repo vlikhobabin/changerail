@@ -13,6 +13,7 @@
 - `changerail.delivery-run.v1`
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
+- `changerail.execution-target.v1`
 - `changerail.review-cycle-history.v1`
 - `changerail.source-classification.v1`
 - `changerail.consumer-lock.v1`
@@ -38,6 +39,7 @@ schemas/changerail-evidence-index.schema.json
 schemas/changerail-delivery-run.schema.json
 schemas/changerail-delivery-plan.schema.json
 schemas/changerail-delivery-plan-status.schema.json
+schemas/changerail-execution-target.schema.json
 schemas/changerail-review-cycle-history.schema.json
 schemas/changerail-source-classification.schema.json
 schemas/changerail-consumer-lock.schema.json
@@ -287,6 +289,12 @@ path bytes. Untracked directories разворачиваются до точны
 paths; directory-wide untracked path отклоняется до попадания в staging
 proposal.
 
+Если project содержит tracked `.changerail/execution-target.json`, manifest
+получает optional `execution_target` projection с `schema`, `id`,
+`fingerprint` и `target_substitution_policy: forbid`. Helper не хранит endpoint,
+credentials, provider id или target contents и fail-closed на symlink, path
+escape, unknown/content-bearing fields, untracked declaration или schema error.
+
 `scope-check` сверяет заявленный manifest scope с фактическим Git scope
 отдельно для working tree и staged index. Helper использует NUL-delimited Git
 data и operation-aware сравнение для `add`, `modify`, `delete` и `rename`;
@@ -377,6 +385,11 @@ Helper отказывается запускать command с очевидным
 редактирует obvious token-like output before retention. Это safety screen, а
 не доказательство отсутствия секретов; команды с credentials не должны
 передаваться в retained capture.
+
+Если tracked execution target declaration присутствует, evidence index и новые
+entries автоматически получают тот же `execution_target`. Existing index с
+другой identity или evidence без matching identity fail-closed; CLI не принимает
+target override.
 
 Пример:
 
@@ -777,6 +790,12 @@ Schema id: `changerail.delivery-run.v1`. Record содержит card, phase, te
 preflight checks, log paths и token usage, когда provider output позволяет его
 прочитать. Если usage недоступен, record обязан явно писать
 `usage.available: false`.
+
+Single-card и plan runner records могут содержать `execution_target`; это та же
+non-sensitive projection из tracked declaration. Runner проверяет ее до child
+launch, при queue resume и retained dirty resume. Drift, rebind или отсутствие
+ранее captured declaration блокирует reuse старого status/evidence/verdict и
+требует новый clean attempt.
 
 Обязательный минимум status record остается стабильным: `schema`, `run_id`,
 `updated_at`, `workspace`, `card`, `phase`, `result`, `timestamps`, `command` и

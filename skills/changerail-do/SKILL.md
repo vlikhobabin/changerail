@@ -51,6 +51,8 @@ Use the card filename without `.md` as `<card-id>`. Record repository-relative
 paths only:
 
 - card metadata and ordered planned change slugs;
+- optional `execution_target` projection from the project-owned
+  `.changerail/execution-target.json` declaration when present;
 - `preexisting_dirty` from `git status --short` at delivery start;
 - card-owned committable paths introduced by planning, implementation, synced
   specs, archives, docs, tests and board updates;
@@ -167,6 +169,12 @@ parsing checks are normally sufficient.
 Every verification claim recorded in the card, tasks or manifest must name the
 executed command and observed outcome. Keep raw logs in ignored runtime state
 when needed; do not commit local runtime evidence.
+
+When the project declares `.changerail/execution-target.json`, verification
+evidence must retain the same target `id`/`fingerprint`. Do not create, clone,
+restore, register or select a substitute provider/platform/service/database as
+a way around unavailable access; record a structured blocker instead. External
+blocker, recovery and evidence paths do not authorize rebind or substitution.
 
 When a delivery manifest exists, verification must include a working-tree
 manifest scope reconciliation if the helper supports it:

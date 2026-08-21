@@ -37,6 +37,9 @@
         }
       }
     },
+    "execution_target": {
+      "$ref": "#/$defs/executionTargetIdentity"
+    },
     "card": {
       "type": "object",
       "required": ["id", "path"],
@@ -120,6 +123,31 @@
     }
   },
   "$defs": {
+    "executionTargetIdentity": {
+      "type": "object",
+      "required": ["schema", "id", "fingerprint", "target_substitution_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.execution-target.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "target_substitution_policy": {
+          "const": "forbid"
+        }
+      }
+    },
     "summaryCommand": {
       "type": "object",
       "required": ["command", "outcome"],

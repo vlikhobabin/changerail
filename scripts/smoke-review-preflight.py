@@ -13,6 +13,18 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "bin" / "changerail-review-verdict"
 MANIFEST_HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
+ALT_TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-rebound",
+    "fingerprint": "sha256:" + ("2" * 64),
+    "target_substitution_policy": "forbid",
+}
 
 
 def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -31,6 +43,66 @@ def write(path: Path, text: str) -> None:
 
 def git(workspace: Path, *args: str) -> None:
     require_ok(run(["git", *args], workspace), f"git {' '.join(args)}")
+
+
+def write_execution_target(repo: Path, identity: dict[str, str] = TARGET) -> None:
+    write(repo / ".changerail" / "execution-target.json", json.dumps(identity, ensure_ascii=True, indent=2) + "\n")
+
+
+def attach_target_evidence(repo: Path, manifest: Path, identities: list[dict[str, str]]) -> None:
+    refs: list[dict[str, str]] = []
+    for index, identity in enumerate(identities, start=1):
+        evidence_id = f"target-evidence-{index}"
+        index_path = repo / ".runtime" / "changerail" / "evidence" / evidence_id / "index.json"
+        output_path = index_path.parent / "outputs" / f"{evidence_id}.txt"
+        write(output_path, "target evidence fixture\n")
+        write(
+            index_path,
+            json.dumps(
+                {
+                    "schema": "changerail.evidence-index.v1",
+                    "updated_at": "2026-08-17T00:00:00Z",
+                    "workspace": {"root": str(repo)},
+                    "scope": {"card_id": "example-card", "changes": ["example-change"]},
+                    "execution_target": identity,
+                    "entries": [
+                        {
+                            "id": evidence_id,
+                            "path": output_path.relative_to(repo).as_posix(),
+                            "role": "raw_output",
+                            "storage": "runtime",
+                            "phase": "do",
+                            "classification": "mandatory",
+                            "status": "passed",
+                            "started_at": "2026-08-17T00:00:00Z",
+                            "ended_at": "2026-08-17T00:00:01Z",
+                            "summary": "target evidence fixture passed",
+                            "raw_output_path": output_path.relative_to(repo).as_posix(),
+                            "command": {"argv": ["true"], "display": "true"},
+                            "execution_target": identity,
+                        }
+                    ],
+                },
+                ensure_ascii=True,
+                indent=2,
+            )
+            + "\n",
+        )
+        refs.append(
+            {
+                "id": evidence_id,
+                "index_path": index_path.relative_to(repo).as_posix(),
+                "raw_output_path": output_path.relative_to(repo).as_posix(),
+                "classification": "mandatory",
+            }
+        )
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["verification_summary"] = {
+        "result": "passed",
+        "summary": "target-bound evidence retained",
+        "evidence_refs": refs,
+    }
+    manifest.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
 
 def card_text(risk: str, *, protocol: bool = False, authorization: str = "none", blocks: str | None = None) -> str:
@@ -77,7 +149,7 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
               self_authorize_reference: bool = False, investigation_block_reference: str = "example-card",
               source_classification: str | None = None, bsl_lines: int = 0,
               bsl_path: str = "src/production/module.bsl", xml_text: str | None = None,
-              xml_path: str = "src/designer/Form.xml") -> tuple[Path, Path]:
+              xml_path: str = "src/designer/Form.xml", execution_target: bool = False) -> tuple[Path, Path]:
     repo = root / f"repo-{risk}-{production_lines}-{int(protocol)}"
     while repo.exists():
         repo = repo.with_name(repo.name + "-next")
@@ -90,6 +162,8 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
     write(repo / "src" / "base.py", "BASE = True\n")
     if source_classification is not None:
         write(repo / ".changerail" / "source-classification.yaml", source_classification)
+    if execution_target:
+        write_execution_target(repo)
     if authorization:
         write(
             repo / "openspec" / "board" / "4.done" / "published-investigation.md",
@@ -625,7 +699,41 @@ def main() -> int:
         normalized = json.loads(manifest.read_text(encoding="utf-8"))
         source = next(item for item in normalized["committable_paths"] if item.get("path") == "src/new.py")
         assert source["operation"] == "add"
+        scope_repo, scope_manifest = repo, manifest
 
+        repo, manifest = workspace(root, "ordinary", execution_target=True)
+        attach_target_evidence(repo, manifest, [TARGET])
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "declared target preflight")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert next(item for item in data["checks"] if item["id"] == "execution-target")["status"] == "pass"
+        assert data["execution_target"]["evidence_identity_count"] == 1
+
+        repo, manifest = workspace(root, "ordinary", execution_target=True)
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert "missing execution_target" in next(item for item in data["checks"] if item["id"] == "execution-target")["detail"]
+
+        repo, manifest = workspace(root, "ordinary", execution_target=True)
+        attach_target_evidence(repo, manifest, [ALT_TARGET])
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert "differs from current declaration" in next(
+            item for item in data["checks"] if item["id"] == "execution-target"
+        )["detail"]
+
+        repo, manifest = workspace(root, "ordinary", execution_target=True)
+        attach_target_evidence(repo, manifest, [TARGET, ALT_TARGET])
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert "multiple execution targets" in next(
+            item for item in data["checks"] if item["id"] == "execution-target"
+        )["detail"]
+
+        repo, manifest = scope_repo, scope_manifest
         write(repo / "unexpected.txt", "not in manifest\n")
         result, data = preflight(repo, manifest, "--normalize")
         assert result.returncode == 1

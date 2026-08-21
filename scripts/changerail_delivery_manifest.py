@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from changerail_contract_schema import validate_with_schema
+from changerail_execution_target import load_execution_target
 
 SCHEMA_ID = "changerail.delivery-manifest.v1"
 SCHEMA_FILE = "changerail-delivery-manifest.schema.json"
@@ -563,6 +564,10 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
     workspace = workspace.resolve(strict=False)
     card_text, card = read_card(card_path, workspace)
     changes = classify_changes(workspace, parse_change_slugs(card_text))
+    target_state = load_execution_target(workspace, require_tracked=True)
+    target_errors = target_state.get("errors")
+    if target_errors:
+        raise ManifestError("execution target declaration invalid: " + "; ".join(target_errors), 1)
     committable_paths = git_status_entries(workspace)
     add_unique_path(committable_paths, str(card["path"]), "unknown")
     for change in changes:
@@ -575,7 +580,7 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
     manifest_path = default_manifest_path(workspace, card)
     verdict_base = workspace / ".runtime" / "changerail" / "reviews" / f"{card['id']}.json"
     evidence_root = workspace / ".runtime" / "changerail" / "evidence" / str(card["id"])
-    return {
+    manifest = {
         "schema": SCHEMA_ID,
         "updated_at": utc_now(),
         "workspace": {
@@ -614,6 +619,10 @@ def derive_manifest(card_path: Path, workspace: Path) -> dict[str, Any]:
         "preexisting_dirty": [],
         "publish": {"status": "pending"},
     }
+    identity = target_state.get("identity")
+    if isinstance(identity, dict):
+        manifest["execution_target"] = identity
+    return manifest
 
 
 def repository_id(workspace: Path) -> str:

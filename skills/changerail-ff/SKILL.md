@@ -69,6 +69,9 @@ If no card path is provided and it cannot be inferred, ask for it.
 - Work in the foreground and keep the user informed before major stages.
 - Keep changes scoped to the board card and `openspec/changes/<change>/`
   artifacts.
+- When a project declares `.changerail/execution-target.json`, preserve that
+  target identity as part of the delivery handoff and do not plan any provider,
+  platform or CLI argument override that would substitute another target.
 - Prefer small implementation-sized changes with clear boundaries and
   dependencies. A typical card decomposes into about 2-5 such changes; if it
   needs many more, it is likely two cards.
@@ -151,6 +154,11 @@ Update common card fields when present:
 - `Result`
 - `Next`
 - `Log`
+
+If the project has `.changerail/execution-target.json`, record the handoff
+expectation in card/change acceptance instead of adding endpoint, credentials
+or provider-specific target values. Rebind/provision/substitution is a separate
+operator action and not planning recovery scope.
 
 If the card starts in `openspec/board/1.backlog/`, move it to
 `openspec/board/2.todo/` after decomposition unless `--no-move` is present or

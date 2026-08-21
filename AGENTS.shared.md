@@ -188,7 +188,12 @@ pre-step перед `$changerail-deliver <card>`.
 `openspec/config.yaml`, `AGENTS.md`, board rules, target card и artifacts.
 
 Discovery: scoped paths, `rg -l`, counts и excerpts first; broad/truncated
-output или exit `130` inconclusive и требует narrow follow-up.
+output или exit `130` остается inconclusive до narrow follow-up.
+
+Tracked `.changerail/execution-target.json` делает `id`/`fingerprint` частью
+verification floor: manifest/status/evidence/blocker/resume/review MUST match.
+Substitute target forbidden; missing/multiple/mismatch => blocker. Rebind =>
+new clean attempt with new tracked declaration.
 
 Обязательный verification floor собирается из project-declared sources:
 `AGENTS.md`, `openspec/config.yaml`, `tasks.md`, `design.md` и затронутого
@@ -259,6 +264,7 @@ credential/mutation/live/final boundary = `xhigh`. Phase counters независ
 Review gate независим от implementation session. Он аудитит:
 
 - diff versus card и OpenSpec scope;
+- target declaration, manifest и evidence match, если target объявлен;
 - покрытие requirements и acceptance criteria;
 - verification evidence и retained outputs;
 - public-safety и repository-boundary risks;
@@ -273,22 +279,17 @@ Reviewer также проверяет, что обязательный project-
 tests и тесты, которые не наблюдают заявленное поведение, должны становиться
 findings, а не молчаливым pass.
 
-Review-cycle history сохраняется как ignored runtime evidence отдельно от
-latest canonical verdict. Это позволяет видеть цепочку `no-go -> fix ->
-re-review -> go` в метриках, не меняя fail-closed publish gate.
-Initial review - это `review_cycle: 1` и `same_card_rescue_attempt: 0`, если
-history writer знает счетчик. Same-card rescue attempt расходуется только после
-independent `no-go`, когда implementing session исправляет scoped blocker в той
-же карточке; последующий fresh review является re-review cycle и увеличивает
-`review_cycle`. Runtime history хранит structured `rescue_budget` с
-`limit`, `used`, `remaining` и `exhausted`; legacy history без этих optional
-полей читается как `unknown`, а не как вычисленный из prose budget.
-Default - два same-card rescue и один payload review; extra clean-HEAD LLM audit
-допустим один раз на declared milestone. Hash-bound suite evidence reusable до
-обязательного rerun перед live/final publish. `>300` production LOC, новая
-authority/wire protocol или repeated defect class => investigation; exception
-только для validated `4.done` authorization source (exact link, `301..500`,
-protocol). Иначе investigation-required. Если budget
+Review-cycle history - ignored runtime evidence отдельно от latest verdict:
+цепочка `no-go -> fix -> re-review -> go` видна, но publish остается fail
+closed. Initial review: `review_cycle: 1`, `same_card_rescue_attempt: 0`.
+Same-card rescue считается только после independent `no-go`; fresh re-review
+увеличивает `review_cycle`. Runtime history хранит structured `rescue_budget`;
+legacy missing fields = `unknown`. Default - два same-card rescue и один payload
+review; extra clean-HEAD LLM audit допустим один раз на declared milestone.
+Hash-bound suite reusable до обязательного rerun перед live/final
+publish. `>300` production LOC, новая authority/wire protocol или repeated
+defect class => investigation; exception - validated `4.done` authorization
+source (exact link, `301..500`, protocol). Иначе investigation-required. Если budget
 исчерпан и latest review всё ещё
 `no-go`, agent не публикует dirty payload и не self-authorizes следующий
 same-card rescue. Он создает linked rescue/replacement карточку с source card,
@@ -329,6 +330,10 @@ Verification claims требуют evidence. Подходящие evidence: comm
 reports, retained smoke artifacts, review verdicts и explicit manual checks,
 записанные с достаточными деталями для воспроизведения вывода.
 
+Retained evidence для declared target хранит только same non-sensitive identity
+projection; оно не разрешает provision/rebind/substitution и не содержит
+endpoint/credentials/contents target-а.
+
 Для ChangeRail-owned verification commands предпочтительный retained runtime
 contract - `bin/changerail-evidence`: он пишет `changerail.evidence-index.v1`
 под ignored `.runtime/changerail/evidence/`, сохраняет concise command outcome,
@@ -365,7 +370,7 @@ python3 scripts/public-surface-scan.py
 python3 scripts/public-surface-scan.py --history
 ```
 
-Scanner findings for token-like assignments must redact secret values in logs.
+Scanner logs MUST redact token-like values.
 
 ## Generated Sections And Drift
 

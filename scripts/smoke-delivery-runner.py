@@ -25,6 +25,18 @@ CARD = "openspec/board/3.inprogress/harden-delivery-operations.md"
 ONE_COMMAND_CARD = "openspec/board/2.todo/one-command-delivery-smoke.md"
 ONE_COMMAND_DONE_CARD = "openspec/board/4.done/one-command-delivery-smoke.md"
 ONE_COMMAND_CHANGE = "one-command-delivery-smoke"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
+ALT_TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-rebound",
+    "fingerprint": "sha256:" + ("2" * 64),
+    "target_substitution_policy": "forbid",
+}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -127,6 +139,17 @@ def head_commit(workspace: Path) -> str:
     return git(["rev-parse", "HEAD"], workspace)
 
 
+def commit_execution_target(workspace: Path, identity: dict[str, str] = TARGET) -> None:
+    path = workspace / ".changerail" / "execution-target.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(identity, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    git(["add", ".changerail/execution-target.json"], workspace)
+    git(
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "target"],
+        workspace,
+    )
+
+
 def write_fake_launcher(path: Path) -> None:
     path.write_text(
         "\n".join(
@@ -159,6 +182,12 @@ def write_fake_launcher(path: Path) -> None:
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-malformed', 'type': 'agent_message', 'text': 'Target unavailable.\\nterminal_outcome: BLOCKED\\nterminal_reason: delivery/blocked'}}))",
                 "if mode == 'marker-like-prose':",
                 "    print(json.dumps({'type': 'assistant-message', 'content': 'terminal_outcome: DELIVERED and terminal_reason: ignored are prose'}))",
+                "if mode == 'target-drift':",
+                "    os.makedirs('.changerail', exist_ok=True)",
+                "    drift = {'schema': 'changerail.execution-target.v1', 'id': 'database-rebound', 'fingerprint': 'sha256:' + ('2' * 64), 'target_substitution_policy': 'forbid'}",
+                "    with open(os.path.join('.changerail', 'execution-target.json'), 'w', encoding='utf-8') as handle:",
+                "        json.dump(drift, handle, sort_keys=True)",
+                "        handle.write('\\n')",
                 "if mode == 'performance':",
                 "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'in_progress'}}), flush=True)",
                 "    time.sleep(0.01)",
@@ -1717,6 +1746,7 @@ def create_retained_resume_workspace(
     successor_id: str = "retained-card",
     auth_dirty_before_fingerprint: bool = False,
     ceiling: int = 500,
+    execution_target: dict[str, str] | None = None,
 ) -> tuple[Path, Path, Path]:
     workspace = create_workspace(tmp, name)
     (workspace / RETAINED_CARD).parent.mkdir(parents=True, exist_ok=True)
@@ -1735,6 +1765,8 @@ def create_retained_resume_workspace(
         ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "retained auth fixture"],
         workspace,
     )
+    if execution_target is not None:
+        commit_execution_target(workspace, execution_target)
     if auth_dirty_before_fingerprint:
         with (workspace / RETAINED_AUTHORIZATION).open("a", encoding="utf-8") as handle:
             handle.write("\n<!-- stale authorization smoke -->\n")
@@ -1773,6 +1805,8 @@ def create_retained_resume_workspace(
             "review_target": {"kind": "working-tree"},
         },
     }
+    if execution_target is not None:
+        prior["retained_payload"]["execution_target"] = execution_target
     write_json(prior_path, prior)
     return workspace, runtime, prior_path
 
@@ -1866,6 +1900,20 @@ def check_retained_payload_resume_fail_closed(tmp: Path) -> None:
         raise AssertionError("fingerprint drift retained resume unexpectedly passed")
     if load_status(drift_runtime, "retained-drift").get("terminal_reason") != "payload_drift":
         raise AssertionError("fingerprint drift did not use stable reason")
+
+    target_workspace, target_runtime, target_prior = create_retained_resume_workspace(
+        tmp,
+        "retained-target-mismatch",
+        execution_target=TARGET,
+    )
+    target_prior_payload = json.loads(target_prior.read_text(encoding="utf-8"))
+    target_prior_payload["retained_payload"]["execution_target"] = ALT_TARGET
+    write_json(target_prior, target_prior_payload)
+    target_result = run_retained_resume(target_workspace, target_runtime, target_prior, launcher, run_id="retained-target-mismatch")
+    if target_result.returncode == 0:
+        raise AssertionError("target-mismatch retained resume unexpectedly passed")
+    if load_status(target_runtime, "retained-target-mismatch").get("terminal_reason") != "target_identity_mismatch":
+        raise AssertionError("target mismatch did not use stable reason")
 
     stale_workspace, stale_runtime, stale_prior = create_retained_resume_workspace(
         tmp,
@@ -2650,6 +2698,117 @@ def check_preflight(tmp: Path) -> None:
             raise AssertionError("preflight status was not written")
     finally:
         server.shutdown()
+
+
+def check_execution_target_preflight(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "execution-target-preflight", publish_ready=False)
+    commit_execution_target(workspace)
+    launcher = tmp / "fake-codex-target-preflight"
+    write_fake_launcher(launcher)
+    runtime = tmp / "target-preflight-runtime"
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "target-preflight",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+            "--write-status",
+        ]
+    )
+    require_ok(result, "execution target preflight")
+    payload = json.loads(result.stdout)
+    if payload.get("execution_target") != TARGET:
+        raise AssertionError(f"preflight status did not capture execution target: {payload}")
+    checks = {check["name"]: check for check in payload["preflight"]["checks"]}
+    if checks.get("execution target", {}).get("status") != "pass":
+        raise AssertionError(f"execution target check did not pass: {checks}")
+
+    rebind = create_workspace(tmp, "execution-target-clean-rebind", publish_ready=False)
+    commit_execution_target(rebind, ALT_TARGET)
+    rebind_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(rebind),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "target-clean-rebind",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+        ]
+    )
+    require_ok(rebind_result, "clean execution target rebind preflight")
+    rebind_payload = json.loads(rebind_result.stdout)
+    if rebind_payload.get("execution_target") != ALT_TARGET:
+        raise AssertionError(f"clean rebind did not capture new execution target: {rebind_payload}")
+
+    drift = create_workspace(tmp, "execution-target-run-drift", publish_ready=False)
+    commit_execution_target(drift)
+    drift_result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(drift),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "target-run-drift",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+        ],
+        env=runner_env("target-drift"),
+    )
+    if drift_result.returncode == 0:
+        raise AssertionError("single-card run with execution target drift unexpectedly passed")
+    drift_status = load_status(runtime, "target-run-drift")
+    if drift_status.get("terminal_outcome") != "BLOCKED" or drift_status.get("terminal_reason") != "target_identity_mismatch":
+        raise AssertionError(f"execution target drift did not block with stable reason: {drift_status}")
+
+    unsafe = create_workspace(tmp, "unsafe-execution-target-preflight", publish_ready=False)
+    outside = tmp / "outside-execution-target.json"
+    outside.write_text("{}", encoding="utf-8")
+    (unsafe / ".changerail").mkdir(exist_ok=True)
+    os.symlink(outside, unsafe / ".changerail" / "execution-target.json")
+    unsafe_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(unsafe),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "unsafe-target-preflight",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+        ]
+    )
+    if unsafe_result.returncode == 0:
+        raise AssertionError("unsafe execution target preflight unexpectedly passed")
+    unsafe_payload = json.loads(unsafe_result.stdout)
+    unsafe_checks = {check["name"]: check for check in unsafe_payload["preflight"]["checks"]}
+    if "must be a regular file, not a symlink" not in unsafe_checks.get("execution target", {}).get("message", ""):
+        raise AssertionError(f"unsafe execution target check did not fail closed: {unsafe_checks}")
 
 
 def check_preflight_rejects_insufficient_automation_authority(tmp: Path) -> None:
@@ -4410,6 +4569,7 @@ def main() -> int:
         check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
+        check_execution_target_preflight(workspace)
         check_preflight_rejects_insufficient_automation_authority(workspace)
         check_custom_launcher_without_path_codex(workspace)
         check_default_launcher_requires_path_codex(workspace)

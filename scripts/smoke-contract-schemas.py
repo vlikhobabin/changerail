@@ -36,6 +36,16 @@ Validator = Callable[[Any], list[str]]
 SHA = "sha256:" + ("0" * 64)
 TREE = "0" * 40
 DATE = "2026-07-12T00:00:00Z"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
+
+
+def execution_target() -> dict[str, Any]:
+    return dict(TARGET)
 
 
 def review_verdict() -> dict[str, Any]:
@@ -84,6 +94,7 @@ def delivery_manifest() -> dict[str, Any]:
         "schema": "changerail.delivery-manifest.v1",
         "updated_at": DATE,
         "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
+        "execution_target": dict(TARGET),
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "changes": [{"slug": "example-change", "state": "active", "order": 1}],
         "committable_paths": [],
@@ -175,6 +186,7 @@ def delivery_run_minimal() -> dict[str, Any]:
         "run_id": "example-run",
         "updated_at": DATE,
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
+        "execution_target": dict(TARGET),
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "phase": "terminal",
         "result": "DELIVERED",
@@ -353,7 +365,13 @@ def delivery_plan_status() -> dict[str, Any]:
         "max_parallel": 2,
         "per_workspace_parallelism": 1,
         "workspaces": [
-            {"alias": "service-a", "path": "service-a", "state": "delivered", "head_commit": "abc123"},
+            {
+                "alias": "service-a",
+                "path": "service-a",
+                "state": "delivered",
+                "head_commit": "abc123",
+                "execution_target": dict(TARGET),
+            },
             {"alias": "service-b", "path": "service-b", "state": "delivered", "head_commit": "def456"},
         ],
         "cards": [
@@ -457,6 +475,13 @@ def review_preflight_result() -> dict[str, Any]:
             "normalized": False,
             "scope_ok": True,
         },
+        "execution_target": {
+            "present": True,
+            "path": ".changerail/execution-target.json",
+            "identity": dict(TARGET),
+            "manifest_identity": dict(TARGET),
+            "evidence_identity_count": 1,
+        },
         "risk": {
             "tier": "ordinary",
             "source": "card",
@@ -525,6 +550,7 @@ def evidence_index() -> dict[str, Any]:
         "updated_at": DATE,
         "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
         "scope": {"card_id": "example-card", "changes": ["example-change"]},
+        "execution_target": dict(TARGET),
         "entries": [
             {
                 "id": "schema-smoke",
@@ -549,6 +575,7 @@ def evidence_index() -> dict[str, Any]:
                 "raw_output_path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
                 "redacted": False,
                 "timed_out": False,
+                "execution_target": dict(TARGET),
             }
         ],
     }
@@ -944,6 +971,10 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
     "changerail-consumer-lock.schema.json": (
         consumer_lock,
         schema_validator("changerail-consumer-lock.schema.json"),
+    ),
+    "changerail-execution-target.schema.json": (
+        execution_target,
+        schema_validator("changerail-execution-target.schema.json"),
     ),
     "changerail-review-verdict.schema.json": (review_verdict, _validate_verdict),
     "changerail-review-preflight-result.schema.json": (

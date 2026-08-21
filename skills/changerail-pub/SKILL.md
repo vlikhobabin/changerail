@@ -84,6 +84,11 @@ staging. A verdict whose reviewed `workspace.tree_sha` is missing or differs
 from the current publish tree is stale for review-gated publish and requires a
 fresh review. Never stage the verdict file.
 
+If the project declares `.changerail/execution-target.json`, deterministic
+preflight must also prove current declaration, manifest and retained evidence
+have one exact matching target identity. Missing, multiple or mismatched target
+identity blocks publish; do not stage or propose provider substitution.
+
 ## Workflow
 
 ### 1. Read Final State
@@ -244,6 +249,7 @@ Stop when:
 
 - the risk-appropriate machine receipt or semantic review verdict is absent,
   stale, invalid or negative;
+- declared execution target evidence is missing, mismatched or substituted;
 - planned card-owned changes are not archived and `--allow-unarchived` is not
   present;
 - final verification fails;
