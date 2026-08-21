@@ -50,9 +50,9 @@ child, не изменяя существующий investigation recovery objec
 - **AND** raw logs и evidence contents остаются indirect ignored references
 
 ### Requirement: Retained recovery SHALL preserve declared execution target
-Если project contract объявляет execution target, delivery-run и plan-status MUST
-сохранять его logical id/fingerprint в retained identity и MUST NOT
-принимать blocker/evidence как authority на provision, rebind или substitution.
+The delivery contracts MUST сохранять logical id/fingerprint объявленной
+project execution target в retained identity и MUST NOT принимать
+blocker/evidence как authority на provision, rebind или substitution.
 
 #### Scenario: Target identity совпадает
 - **WHEN** blocker, current project declaration и target-bearing recovery

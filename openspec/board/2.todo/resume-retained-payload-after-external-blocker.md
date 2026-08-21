@@ -120,7 +120,7 @@ fingerprint resume для single-card/queue без общего dirty-tree bypas
 - `openspec/board/4.done/support-runner-resume-after-investigation-required.md`
 - exact published investigation authorization for this card's dirty-resume
   authority and blocker/evidence wire contract
-- `enforce-declared-execution-target-invariant`
+- `openspec/board/1.backlog/enforce-declared-execution-target-invariant.md`
 
 ### Related
 - `openspec/changes/resume-retained-payload-after-external-blocker/`
