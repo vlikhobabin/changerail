@@ -1364,6 +1364,43 @@ and `allow_new_authority_or_wire_protocol` true.
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable dirty-resume waiver
 
+### Requirement: Published bounded recovery-episodes authorization source
+ChangeRail MUST publish the bounded recovery-episodes authorization as one clean
+tracked `4.done` board card before successor
+`report-recovery-aware-delivery-episodes` can use the bounded production-LOC
+and episode/attempt lineage plus derived metrics protocol-boundary exception.
+The authorization source MUST contain exactly one schema-valid investigation
+authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`report-recovery-aware-delivery-episodes`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true. The accepted split is runner
+lineage up to 300 production LOC and metrics collection/output up to 200
+production LOC, and it MUST NOT authorize raw-log reconstruction, prompt/tool
+payload retention or broader content-bearing telemetry.
+
+#### Scenario: Authorization source binds the exact recovery-episodes chain
+- **WHEN** deterministic review preflight evaluates
+  `report-recovery-aware-delivery-episodes` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-recovery-episodes-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `report-recovery-aware-delivery-episodes`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Recovery-episodes authorization cannot be reused
+- **WHEN** another card references the published recovery-episodes
+  authorization source, raw-log reconstruction or broader telemetry authority
+  is attempted, one side exceeds its accepted split budget, or the exact
+  reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable telemetry waiver
+
 ### Requirement: Field-validation successors MUST use bounded investigation decisions
 ChangeRail MUST require bounded decisions for exact successors
 `enforce-declared-execution-target-invariant`,

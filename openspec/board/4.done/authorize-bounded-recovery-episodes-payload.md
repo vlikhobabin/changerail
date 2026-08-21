@@ -1,13 +1,13 @@
 # Авторизовать bounded recovery-episodes payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -55,24 +55,36 @@ episode/attempt lineage плюс bounded metrics rollup.
 
 ## Verify
 - `bin/openspec validate authorize-bounded-recovery-episodes-payload --strict`
-- `python3 scripts/smoke-review-preflight.py`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+  - passed before archive.
+- `bin/openspec validate changerail-contracts --strict` - passed.
+- `python3 scripts/smoke-review-preflight.py` - passed; exact
+  recovery-episodes authorization acceptance and mismatched-card rejection
+  covered.
+- `bin/openspec archive authorize-bounded-recovery-episodes-payload --yes` -
+  passed.
+- `bin/openspec validate --all --strict` - passed, 35 items after archive.
+- `python3 scripts/public-surface-scan.py` - passed, 1201 files scanned, 0
+  findings.
+- `git diff --check` - passed.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-authorize-bounded-recovery-episodes-payload/`
 
 ## Related
 - `openspec/changes/authorize-bounded-recovery-episodes-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-recovery-episodes-payload/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 - `openspec/board/2.todo/report-recovery-aware-delivery-episodes.md`
 
 ## Result
-Проработка завершена; apply-ready authorization artifacts созданы.
+Delivered for review: exact recovery-episodes authorization source synced into
+`changerail-contracts`, preflight smoke covers exact-chain and mismatch proof,
+and the OpenSpec change is archived.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/authorize-bounded-recovery-episodes-payload.md`.
+- done
 
 ## Change 1: `authorize-bounded-recovery-episodes-payload`
 
@@ -99,3 +111,9 @@ Episode/attempt schemas и owner linkage меняют wire contract.
 
 ## Log
 - 2026-08-21T09:04:00Z created from published bounded batch investigation.
+- 2026-08-21T10:45:55Z `$chrl-ff` confirmed apply-ready artifacts and moved the
+  card to `3.inprogress`.
+- 2026-08-21T10:50:16Z `$chrl-do` synced exact recovery-episodes authorization,
+  added preflight smoke coverage and archived
+  `authorize-bounded-recovery-episodes-payload`.
+- 2026-08-21T11:00:49Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

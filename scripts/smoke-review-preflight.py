@@ -428,6 +428,66 @@ def exact_external_blocker_resume_authorization_workspace(root: Path) -> tuple[P
     return repo, Path(json.loads(derived.stdout)["manifest"])
 
 
+def exact_recovery_episodes_authorization_workspace(root: Path) -> tuple[Path, Path]:
+    repo = root / "repo-bounded-recovery-episodes-authorization"
+    while repo.exists():
+        repo = repo.with_name(repo.name + "-next")
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "smoke@example.invalid")
+    git(repo, "config", "user.name", "ChangeRail Smoke")
+    write(repo / ".gitignore", ".runtime/\n")
+    write(repo / "docs" / "base.md", "baseline\n")
+    write(repo / "src" / "base.py", "BASE = True\n")
+    investigation_id = "investigate-bounded-field-validation-batch"
+    successor_id = "report-recovery-aware-delivery-episodes"
+    authorization_id = "authorize-bounded-recovery-episodes-payload"
+    authorization_reference = json.dumps(
+        {
+            "authorization_card": f"openspec/board/4.done/{authorization_id}.md",
+            "authorization_id": authorization_id,
+        },
+        separators=(",", ":"),
+    )
+    authorization_payload = json.dumps(
+        {
+            "investigation_card": f"openspec/board/4.done/{investigation_id}.md",
+            "investigation_id": investigation_id,
+            "successor_card": f"openspec/board/3.inprogress/{successor_id}.md",
+            "successor_id": successor_id,
+            "production_loc_ceiling": 500,
+            "allow_new_authority_or_wire_protocol": True,
+        },
+        separators=(",", ":"),
+    )
+    write(
+        repo / "openspec" / "board" / "4.done" / f"{investigation_id}.md",
+        f"# Investigation\n\n## Status\n4.done\n\n## Blocks\n- `{successor_id}`\n",
+    )
+    write(
+        repo / "openspec" / "board" / "4.done" / f"{authorization_id}.md",
+        "# Authorization\n\n## Status\n4.done\n\n## Depends On\n"
+        f"- `{investigation_id}`\n\n## Authorization\n"
+        f"- Investigation authorization: `{authorization_payload}`\n",
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "baseline")
+    successor_path = f"openspec/board/3.inprogress/{successor_id}.md"
+    write(
+        repo / successor_path,
+        card_text("ordinary", protocol=True, authorization=authorization_reference, blocks=investigation_id),
+    )
+    write(repo / "openspec" / "changes" / "archive" / "2026-08-21-example-change" / "tasks.md", "## Tasks\n\n- [x] done\n")
+    write(repo / "src" / "runner_lineage.py", "\n".join(f"RUNNER_{index} = {index}" for index in range(300)) + "\n")
+    write(repo / "src" / "metrics_rollup.py", "\n".join(f"METRIC_{index} = {index}" for index in range(144)) + "\n")
+    derived = run(
+        [sys.executable, str(MANIFEST_HELPER), "derive", successor_path, "--workspace", str(repo), "--write", "--json"],
+        repo,
+    )
+    require_ok(derived, "derive exact recovery-episodes authorization manifest")
+    return repo, Path(json.loads(derived.stdout)["manifest"])
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-review-preflight-") as temp:
         root = Path(temp)
@@ -780,6 +840,48 @@ def main() -> int:
             repo,
         )
         require_ok(derived, "derive mismatched external-blocker resume authorization manifest")
+        result, data = preflight(repo, Path(json.loads(derived.stdout)["manifest"]), "--normalize", card_path=mismatched_path)
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        exact_successor_path = "openspec/board/3.inprogress/report-recovery-aware-delivery-episodes.md"
+        repo, manifest = exact_recovery_episodes_authorization_workspace(root)
+        result, data = preflight(repo, manifest, "--normalize", card_path=exact_successor_path)
+        require_ok(result, "exact recovery-episodes authorization")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["risk"]["tier"] == "ordinary"
+        assert data["risk"]["reasoning_effort"] == "high"
+        assert data["complexity_guard"]["added_production_loc"] == 444
+        assert data["complexity_guard"]["limit"] == 500
+        assert data["complexity_guard"]["new_authority_or_wire_protocol"] is True
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "exact recovery-episodes successor payload")
+        authorization_reference = json.dumps(
+            {
+                "authorization_card": "openspec/board/4.done/authorize-bounded-recovery-episodes-payload.md",
+                "authorization_id": "authorize-bounded-recovery-episodes-payload",
+            },
+            separators=(",", ":"),
+        )
+        mismatched_path = "openspec/board/3.inprogress/other-recovery-episodes-successor.md"
+        write(
+            repo / mismatched_path,
+            card_text(
+                "ordinary",
+                protocol=True,
+                authorization=authorization_reference,
+                blocks="investigate-bounded-field-validation-batch",
+            ).replace("example-change", "recovery-episodes-mismatch-change"),
+        )
+        write(repo / "openspec" / "changes" / "archive" / "2026-08-21-recovery-episodes-mismatch-change" / "tasks.md", "## Tasks\n\n- [x] done\n")
+        derived = run(
+            [sys.executable, str(MANIFEST_HELPER), "derive", mismatched_path, "--workspace", str(repo), "--write", "--json"],
+            repo,
+        )
+        require_ok(derived, "derive mismatched recovery-episodes authorization manifest")
         result, data = preflight(repo, Path(json.loads(derived.stdout)["manifest"]), "--normalize", card_path=mismatched_path)
         assert result.returncode == 1
         assert data["outcome"] == "investigation-required"
