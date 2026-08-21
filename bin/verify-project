@@ -65,6 +65,9 @@ SCHEMAS = (
     "changerail-delivery-manifest.schema.json",
     "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
+    "changerail-verification-coverage.schema.json",
+    "changerail-verification-coverage-plan.schema.json",
+    "changerail-verification-coverage-ledger.schema.json",
 )
 MAINTENANCE_HELPERS = (
     "changerail-maintenance",
@@ -200,6 +203,7 @@ class VerificationPolicy:
     surfaces: dict[str, str]
     targeted_openspec_validation: str
     baseline_debt: tuple[BaselineDebt, ...]
+    coverage_map: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1365,6 +1369,7 @@ def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Ch
         surfaces=dict(DEFAULT_SURFACE_POLICY),
         targeted_openspec_validation="required",
         baseline_debt=(),
+        coverage_map=None,
     )
     path = project / "openspec" / "config.yaml"
     try:
@@ -1400,6 +1405,15 @@ def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Ch
         errors.append(policy_error("targeted_openspec_validation must remain required"))
         targeted = "required"
 
+    coverage_map = next(
+        (
+            None if (value := yaml_scalar(line.split(":", 1)[1])).lower() in {"", "null", "none", "~"} else value
+            for indent, line in section
+            if indent == 2 and line.startswith("coverage_map:")
+        ),
+        default.coverage_map,
+    )
+
     baseline_debt: list[BaselineDebt] = []
     for index, entry in enumerate(parse_baseline_debt(section), start=1):
         command = entry.get("command", "")
@@ -1422,8 +1436,29 @@ def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Ch
         surfaces=surfaces,
         targeted_openspec_validation=targeted,
         baseline_debt=tuple(baseline_debt),
+        coverage_map=coverage_map,
     )
     return policy, errors
+
+
+def check_verification_coverage_map(project: Path, changerail_root: Path, policy: VerificationPolicy) -> Check:
+    name = "verification coverage map"
+    if not policy.coverage_map:
+        return Check(name, True, "not configured; existing verification floor applies", severity="info", status="skip")
+    scripts = changerail_root / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_verification_coverage import load_coverage_map
+    except Exception as exc:
+        return Check(name, False, f"validator unavailable: {type(exc).__name__}: {exc}")
+    result = load_coverage_map(project, rel_path=policy.coverage_map, require_tracked=True)
+    if not result.get("present"):
+        return Check(name, False, f"configured map is missing: {policy.coverage_map}")
+    errors = result.get("errors", [])
+    if errors:
+        return Check(name, False, "; ".join(str(error) for error in errors))
+    return Check(name, True, f"{result['path']} valid with fingerprint {result['fingerprint']}")
 
 
 def load_bootstrap_profile(
@@ -2312,6 +2347,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
     checks.extend(
         [
             check_openspec_config(project),
+            check_verification_coverage_map(project, changerail_root, policy),
             targeted_openspec_validate,
             openspec_validate,
             check_gitignore(project),

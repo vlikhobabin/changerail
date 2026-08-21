@@ -2023,3 +2023,78 @@ detail samples и MUST явно представлять incomplete intervals.
 - **WHEN** retained detail count меньше observed count
 - **THEN** record объявляет truncation и sample limit
 - **AND** aggregate totals остаются valid для complete observed set
+
+### Requirement: Project-owned verification coverage map
+ChangeRail MUST валидировать optional tracked map
+`changerail.verification-coverage.v1`, entries которой содержат только `id`,
+`applies_to`, `invariant`, `oracle` и `required_evidence`. Invalid configured
+map MUST fail closed; отсутствующая map MUST сохранять current project-declared
+verification floor.
+
+#### Scenario: Minimal generic Python rule проходит валидацию
+- **WHEN** project rule использует normalized Python path selectors, stable
+  invariant, bounded project oracle ref и required command/runtime evidence
+- **THEN** schema validation проходит
+- **AND** rule не делает formatter, typing или environment matrix checks
+  mandatory вне explicit project policy
+
+#### Scenario: Настроено unsafe или incomplete rule
+- **WHEN** entry имеет duplicate id, absolute/traversing glob, не имеет selector,
+  содержит unknown oracle kind, unbound evidence ref или undeclared extra policy
+  field
+- **THEN** map validation fail closed
+- **AND** ни один coverage ledger этой map не считается trusted
+
+### Requirement: Verification coverage plan and ledger contracts
+ChangeRail MUST предоставлять tracked per-change plan-reference contract и
+ignored runtime ledger contract. Оба MUST быть fingerprint-bound и ссылаться на
+coverage ids/card acceptance hashes без дублирования invariant, oracle,
+commands, acceptance text или final verdict authority.
+
+#### Scenario: Planning ссылается на selected coverage
+- **WHEN** `ff` оценивает configured map для change
+- **THEN** tracked plan записывает map fingerprint, selected rule ids и exact
+  card acceptance hashes
+- **AND** map и card остаются sources referenced content
+
+#### Scenario: Runtime ledger записывает observed evidence
+- **WHEN** delivery reconciles actual manifest scope и записывает evidence
+- **THEN** ignored ledger связывает map/plan/manifest/review fingerprints и
+  evidence-index refs для каждого applicable rule
+- **AND** evidence refs содержат required kind/oracle_ref binding и указывают
+  на schema-valid passed evidence-index entries
+- **AND** не объявляет business acceptance и не включает raw outputs
+
+### Requirement: Domain verification surface extension boundary
+Coverage selectors MUST принимать schema-valid namespaced surface kinds от
+project/domain extension, не назначая domain semantics или execution tools
+generic ChangeRail core.
+
+#### Scenario: Domain extension различает specialized surfaces
+- **WHEN** extension выдает namespaced kinds для language modules, metadata,
+  forms, roles, posting, reports, migrations или runtime UI
+- **THEN** generic coverage matching может выбрать project-owned rules по ids
+- **AND** domain classification/oracle behavior остается owned by extension
+
+#### Scenario: Manifest сообщает extension surfaces
+- **WHEN** delivery manifest содержит schema-valid `extension_surfaces`
+- **THEN** deterministic preflight включает эти namespaced kinds в coverage
+  applicability
+- **AND** invalid surface report блокируется manifest schema validation
+
+### Requirement: Manifest coverage summary
+`changerail.delivery-manifest.v1` MUST поддерживать concise verification
+coverage summary, который ссылается на ignored ledger path/fingerprint и
+сообщает configured/applicable/covered/missing/invalid counts без map content
+или raw evidence.
+
+#### Scenario: Delivery обновляет coverage summary
+- **WHEN** actual manifest scope reconciled с configured map и ledger
+- **THEN** manifest записывает bounded counts и ledger reference
+- **AND** evidence contents остаются в ignored evidence index/output paths
+
+#### Scenario: Summary заявляет complete при stale ledger
+- **WHEN** manifest summary сообщает отсутствие missing entries, но ledger
+  fingerprints не совпадают с current map/card/scope/review target
+- **THEN** deterministic preflight отклоняет summary
+- **AND** independent review не запускается на его основании

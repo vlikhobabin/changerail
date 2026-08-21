@@ -30,6 +30,12 @@ from changerail_repository_knowledge import (  # noqa: E402
     validate_scan_report,
 )
 from changerail_review_verdict import _validate_verdict  # noqa: E402
+from changerail_verification_coverage import (  # noqa: E402
+    fingerprint_coverage_map,
+    validate_coverage_ledger,
+    validate_coverage_map,
+    validate_coverage_plan,
+)
 
 
 Validator = Callable[[Any], list[str]]
@@ -127,6 +133,23 @@ def delivery_manifest() -> dict[str, Any]:
                 }
             ],
         },
+        "coverage_summary": {
+            "configured": True,
+            "status": "complete",
+            "applicable": 1,
+            "covered": 1,
+            "missing": 0,
+            "invalid": 0,
+            "not_applicable": 0,
+            "ledgers": [
+                {
+                    "change": "example-change",
+                    "path": ".runtime/changerail/coverage/example-change-ledger.json",
+                    "fingerprint": SHA,
+                }
+            ],
+        },
+        "extension_surfaces": [{"kind": "domain.managed-form", "path": "src/Form.xml", "operation": "modify"}],
         "review_summary": {
             "result": "go",
             "summary": "fresh independent schema smoke review passed",
@@ -590,6 +613,109 @@ def source_classification() -> dict[str, Any]:
             },
         ],
         "non_production_roots": ["src/examples"],
+    }
+
+
+def verification_coverage_map() -> dict[str, Any]:
+    return {
+        "schema": "changerail.verification-coverage.v1",
+        "entries": [
+            {
+                "id": "python-runtime-route",
+                "applies_to": {
+                    "path_globs": ["src/**/*.py"],
+                    "operation_kinds": ["add", "modify"],
+                    "surface_kinds": ["python.runtime"],
+                },
+                "invariant": "positive runtime route remains observable",
+                "oracle": {"kind": "command", "ref": "pytest-positive-route"},
+                "required_evidence": [
+                    {"kind": "command", "oracle_ref": "pytest-positive-route"},
+                    {"kind": "runtime", "oracle_ref": "pytest-positive-route"},
+                ],
+            },
+            {
+                "id": "python-lint-policy",
+                "applies_to": {"path_globs": ["src/**/*.py"]},
+                "invariant": "project-owned lint policy remains clean when configured",
+                "oracle": {"kind": "lint", "ref": "ruff-check"},
+                "required_evidence": [{"kind": "command", "oracle_ref": "ruff-check"}],
+            },
+            {
+                "id": "python-type-policy",
+                "applies_to": {"path_globs": ["src/**/*.py"]},
+                "invariant": "project-owned type policy remains clean when configured",
+                "oracle": {"kind": "typecheck", "ref": "mypy-explicit-policy"},
+                "required_evidence": [{"kind": "typecheck", "oracle_ref": "mypy-explicit-policy"}],
+            },
+        ],
+    }
+
+
+def verification_coverage_plan() -> dict[str, Any]:
+    map_payload = verification_coverage_map()
+    return {
+        "schema": "changerail.verification-coverage-plan.v1",
+        "generated_at": DATE,
+        "map": {
+            "path": ".changerail/verification-coverage.yaml",
+            "fingerprint": fingerprint_coverage_map(map_payload),
+        },
+        "card": {
+            "id": "example-card",
+            "path": "openspec/board/3.inprogress/example-card.md",
+            "acceptance_hashes": [
+                {"id": "a1", "hash": SHA},
+                {"id": "a2", "hash": "sha256:" + ("1" * 64)},
+            ],
+        },
+        "change": {
+            "slug": "example-change",
+            "path": "openspec/changes/example-change",
+        },
+        "selected_coverage": [
+            {"id": "python-runtime-route", "reason": "changed src/example.py"},
+            {"id": "python-lint-policy", "reason": "project policy declares ruff"},
+        ],
+    }
+
+
+def verification_coverage_ledger() -> dict[str, Any]:
+    return {
+        "schema": "changerail.verification-coverage-ledger.v1",
+        "updated_at": DATE,
+        "workspace": {"root": "/opt/changerail", "head_commit": "abc123", "tree_sha": TREE},
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "change": {"slug": "example-change"},
+        "map": {"path": ".changerail/verification-coverage.yaml", "fingerprint": SHA},
+        "plan": {
+            "path": "openspec/changes/example-change/verification-coverage.json",
+            "fingerprint": "sha256:" + ("1" * 64),
+        },
+        "manifest": {
+            "path": ".runtime/changerail/delivery-manifests/example-card.json",
+            "fingerprint": "sha256:" + ("2" * 64),
+        },
+        "reviewed_tree": {"tree_sha": TREE, "diff_fingerprint": SHA},
+        "entries": [
+            {
+                "coverage_id": "python-runtime-route",
+                "applicability": "applicable",
+                "state": "covered",
+                "oracle_ref": "pytest-positive-route",
+                "evidence_refs": [
+                    {
+                        "id": "pytest-positive-route",
+                        "index_path": ".runtime/changerail/evidence/example-card/index.json",
+                        "kind": "command",
+                        "oracle_ref": "pytest-positive-route",
+                        "raw_output_path": ".runtime/changerail/evidence/example-card/outputs/pytest.txt",
+                        "classification": "mandatory",
+                    }
+                ],
+            }
+        ],
+        "diagnostics": [],
     }
 
 
@@ -1138,6 +1264,18 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         source_classification,
         schema_validator("changerail-source-classification.schema.json"),
     ),
+    "changerail-verification-coverage.schema.json": (
+        verification_coverage_map,
+        validate_coverage_map,
+    ),
+    "changerail-verification-coverage-plan.schema.json": (
+        verification_coverage_plan,
+        validate_coverage_plan,
+    ),
+    "changerail-verification-coverage-ledger.schema.json": (
+        verification_coverage_ledger,
+        validate_coverage_ledger,
+    ),
     "changerail-evidence-index.schema.json": (evidence_index, schema_validator("changerail-evidence-index.schema.json")),
     "changerail-repository-knowledge.schema.json": (
         repository_knowledge_catalog,
@@ -1324,6 +1462,39 @@ def main() -> int:
             traversal_root = source_classification()
             traversal_root["non_production_roots"] = ["src/../fixtures"]
             expect_invalid(failures, f"{name} traversal non-production root", validator, traversal_root, "non_production_roots")
+        if name == "changerail-verification-coverage.schema.json":
+            duplicate_ids = verification_coverage_map()
+            duplicate_ids["entries"][1]["id"] = duplicate_ids["entries"][0]["id"]
+            expect_invalid(failures, f"{name} duplicate ids", validator, duplicate_ids, "duplicate coverage id")
+            unsafe_glob = verification_coverage_map()
+            unsafe_glob["entries"][0]["applies_to"]["path_globs"] = ["/absolute/**/*.py"]
+            expect_invalid(failures, f"{name} unsafe glob", validator, unsafe_glob, "path_globs")
+            missing_selectors = verification_coverage_map()
+            missing_selectors["entries"][0]["applies_to"] = {}
+            expect_invalid(failures, f"{name} missing selectors", validator, missing_selectors, "applies_to")
+            unknown_oracle = verification_coverage_map()
+            unknown_oracle["entries"][0]["oracle"]["kind"] = "telepathy"
+            expect_invalid(failures, f"{name} unknown oracle kind", validator, unknown_oracle, "oracle")
+            unbound_evidence = verification_coverage_map()
+            unbound_evidence["entries"][0]["required_evidence"][0]["oracle_ref"] = "other-oracle"
+            expect_invalid(failures, f"{name} unbound evidence", validator, unbound_evidence, "oracle_ref")
+            policy_field = verification_coverage_map()
+            policy_field["entries"][0]["severity"] = "critical"
+            expect_invalid(failures, f"{name} undeclared policy field", validator, policy_field, "Additional properties")
+        if name == "changerail-verification-coverage-plan.schema.json":
+            copied_invariant = verification_coverage_plan()
+            copied_invariant["selected_coverage"][0]["invariant"] = "must not copy map content"
+            expect_invalid(failures, f"{name} copied invariant", validator, copied_invariant, "Additional properties")
+            copied_criterion = verification_coverage_plan()
+            copied_criterion["card"]["acceptance_hashes"][0]["criterion"] = "must not copy acceptance text"
+            expect_invalid(failures, f"{name} copied acceptance", validator, copied_criterion, "Additional properties")
+        if name == "changerail-verification-coverage-ledger.schema.json":
+            final_verdict = verification_coverage_ledger()
+            final_verdict["final_verdict"] = "go"
+            expect_invalid(failures, f"{name} final verdict authority", validator, final_verdict, "Additional properties")
+            raw_output = verification_coverage_ledger()
+            raw_output["entries"][0]["raw_output"] = "raw command output must stay in runtime evidence"
+            expect_invalid(failures, f"{name} raw evidence", validator, raw_output, "Additional properties")
         if name == "changerail-maintenance-report.schema.json":
             missing_detectors = copy.deepcopy(positive)
             missing_detectors.pop("detectors")

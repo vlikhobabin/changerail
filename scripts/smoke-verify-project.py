@@ -30,6 +30,9 @@ EXPECTED_SCHEMAS = (
     "schemas/changerail-delivery-manifest.schema.json",
     "schemas/changerail-delivery-run.schema.json",
     "schemas/changerail-evidence-index.schema.json",
+    "schemas/changerail-verification-coverage.schema.json",
+    "schemas/changerail-verification-coverage-plan.schema.json",
+    "schemas/changerail-verification-coverage-ledger.schema.json",
 )
 EXPECTED_MAINTENANCE_CHECKS = (
     ".changerail/knowledge.yaml",
@@ -780,6 +783,24 @@ def set_bootstrap_profiles(
         f"  codex_policy: {codex_policy}\n"
     )
     path.write_text(text, encoding="utf-8")
+
+
+def configure_verification_coverage(project: Path, map_text: str) -> None:
+    map_path = project / ".changerail" / "verification-coverage.yaml"
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    map_path.write_text(map_text, encoding="utf-8")
+    config = project / "openspec" / "config.yaml"
+    text = config.read_text(encoding="utf-8")
+    if "  coverage_map:" in text:
+        text = text.replace("  coverage_map: null", "  coverage_map: .changerail/verification-coverage.yaml")
+    else:
+        text = text.replace(
+            "  profile: all-surfaces",
+            "  profile: all-surfaces\n  coverage_map: .changerail/verification-coverage.yaml",
+        )
+    config.write_text(text, encoding="utf-8")
+    if (project / ".git").exists():
+        run(["git", "add", "openspec/config.yaml", ".changerail/verification-coverage.yaml"], project)
 
 
 def remove_surface_path(path: Path) -> None:
@@ -2064,6 +2085,89 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             and check_result(weaken_target_data, name="verification policy", status="fail", severity="blocking")
             else "fail",
             weaken_target.stdout.strip(),
+        )
+    )
+
+    coverage_project = run_dir / "coverage-map-project"
+    shutil.copytree(good_project, coverage_project, symlinks=True)
+    configure_verification_coverage(
+        coverage_project,
+        "schema: changerail.verification-coverage.v1\n"
+        "entries:\n"
+        "  - id: python-runtime-route\n"
+        "    applies_to:\n"
+        "      path_globs: [\"src/**/*.py\"]\n"
+        "      operation_kinds: [add, modify]\n"
+        "      surface_kinds: [python.runtime]\n"
+        "    invariant: \"positive runtime route remains observable\"\n"
+        "    oracle:\n"
+        "      kind: command\n"
+        "      ref: pytest-positive-route\n"
+        "    required_evidence:\n"
+        "      - kind: command\n"
+        "        oracle_ref: pytest-positive-route\n"
+        "      - kind: runtime\n"
+        "        oracle_ref: pytest-positive-route\n"
+        "  - id: python-type-policy\n"
+        "    applies_to:\n"
+        "      path_globs: [\"src/**/*.py\"]\n"
+        "    invariant: \"project-owned type policy remains clean when configured\"\n"
+        "    oracle:\n"
+        "      kind: typecheck\n"
+        "      ref: mypy-explicit-policy\n"
+        "    required_evidence:\n"
+        "      - kind: typecheck\n"
+        "        oracle_ref: mypy-explicit-policy\n",
+    )
+    coverage_valid, coverage_valid_data = verify_json(changerail_root, coverage_project, fake_env)
+    checks.append(
+        Check(
+            "configured verification coverage map validates",
+            "pass"
+            if coverage_valid.returncode == 0
+            and check_result(
+                coverage_valid_data,
+                name="verification coverage map",
+                status="pass",
+                severity="blocking",
+            )
+            else "fail",
+            coverage_valid.stdout.strip(),
+        )
+    )
+
+    bad_coverage_project = run_dir / "bad-coverage-map-project"
+    shutil.copytree(good_project, bad_coverage_project, symlinks=True)
+    configure_verification_coverage(
+        bad_coverage_project,
+        "schema: changerail.verification-coverage.v1\n"
+        "entries:\n"
+        "  - id: python-runtime-route\n"
+        "    applies_to:\n"
+        "      path_globs: [\"/absolute/**/*.py\"]\n"
+        "    invariant: \"unsafe selector should fail\"\n"
+        "    oracle:\n"
+        "      kind: command\n"
+        "      ref: pytest-positive-route\n"
+        "    required_evidence:\n"
+        "      - kind: command\n"
+        "        oracle_ref: another-oracle\n",
+    )
+    coverage_invalid, coverage_invalid_data = verify_json(changerail_root, bad_coverage_project, fake_env)
+    checks.append(
+        Check(
+            "invalid verification coverage map fails closed",
+            "pass"
+            if coverage_invalid.returncode != 0
+            and coverage_invalid_data.get("summary", {}).get("status") == "fail"
+            and check_result(
+                coverage_invalid_data,
+                name="verification coverage map",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            coverage_invalid.stdout.strip(),
         )
     )
 

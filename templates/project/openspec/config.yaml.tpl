@@ -29,6 +29,8 @@ rules:
 
 verification:
   profile: {{SURFACES_PROFILE}}
+  # Optional tracked project-owned map, for example .changerail/verification-coverage.yaml.
+  coverage_map: null
   surfaces:
     codex: {{CODEX_SURFACE_STATE}}
     claude: {{CLAUDE_SURFACE_STATE}}

@@ -27,6 +27,9 @@
 - Domain-specific production source kinds can be declared in project-owned
   `.changerail/source-classification.yaml`; generated templates do not create
   application-specific production roots by default.
+- Domain-specific verification coverage can be declared through
+  `verification.coverage_map` and a tracked project-owned map; generated
+  templates keep that reference `null` by default.
 - Runtime evidence may be referenced, but raw runtime state stays ignored.
 
 ## Gates

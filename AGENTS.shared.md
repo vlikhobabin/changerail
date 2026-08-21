@@ -201,6 +201,8 @@ toolchain. Generic ChangeRail не делает formatter, strict typing или 
 environment matrix обязательными для всех проектов, если они не объявлены
 локальными правилами или не следуют из измененного surface.
 
+`coverage_map`: `ff` ids, `do` refs, preflight freshness, reviewer oracle.
+
 Implementation не завершена, пока verification не запущена и результат не
 записан. Для docs/config-only changes обычный baseline:
 

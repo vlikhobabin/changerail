@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from changerail_contract_schema import validate_with_schema
 from changerail_execution_target import describe_execution_target, execution_targets_match, load_execution_target
+from changerail_verification_coverage import coverage_preflight_check
 import changerail_delivery_manifest as dm
 
 SCHEMA_ID = "changerail.review-preflight-result.v1"
@@ -684,6 +685,19 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         _check(checks, "archive", False, "archive state cannot be checked without a valid manifest")
     execution_target, target_ok, target_detail = _execution_target_state(workspace, manifest)
     _check(checks, "execution-target", target_ok, target_detail)
+    extension_surfaces = manifest.get("extension_surfaces", []) if isinstance(manifest, dict) else []
+    coverage_state, coverage_ok, coverage_detail = coverage_preflight_check(
+        workspace=workspace,
+        card_text=card_text,
+        card=card,
+        manifest=manifest,
+        actual=actual,
+        reviewed_tree={key: fingerprint[key] for key in ("tree_sha", "diff_fingerprint")},
+        surface_kinds={item["kind"] for item in extension_surfaces if isinstance(item, dict) and isinstance(item.get("kind"), str)},
+    )
+    coverage_payload = dict(coverage_state)
+    coverage_payload["detail"] = coverage_detail
+    _check(checks, "coverage", coverage_ok, json.dumps(coverage_payload, ensure_ascii=True, sort_keys=True))
 
     complexity = _production_complexity(workspace, actual, classification) if actual else {"added_production_loc": 0, "source_breakdown": []}
     added_loc = complexity["added_production_loc"]

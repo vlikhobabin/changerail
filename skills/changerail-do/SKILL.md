@@ -192,6 +192,17 @@ bin/changerail-delivery-manifest scope-check \
   --target working-tree --json
 ```
 
+When `openspec/config.yaml` declares `verification.coverage_map`, refresh the
+ignored runtime coverage ledger after verification and before review handoff.
+Reconcile actual manifest paths/operations and schema-valid namespaced extension
+surfaces against the tracked `verification-coverage.json` plan for each change.
+Block and return to planning if an actual applicable coverage id is absent from
+the plan. Keep planned-but-not-actual ids only with explicit not-applicable
+scope evidence. Link required observed evidence through existing
+`changerail.evidence-index.v1` refs and add only bounded counts plus ledger
+path/fingerprint to the delivery manifest; do not embed raw outputs or create an
+alternate acceptance verdict.
+
 Before handing off to any reviewer, the delivery/orchestrator context runs:
 
 ```bash

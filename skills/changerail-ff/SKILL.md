@@ -165,6 +165,15 @@ expectation in card/change acceptance instead of adding endpoint, credentials
 or provider-specific target values. Rebind/provision/substitution is a separate
 operator action and not planning recovery scope.
 
+If `openspec/config.yaml` declares `verification.coverage_map`, validate the
+project-owned map before final handoff. For each selected change, write a
+tracked `verification-coverage.json` next to the change artifacts containing
+only the schema id, map fingerprint, selected coverage ids and exact card
+acceptance hashes. Do not copy invariant text, oracle commands, acceptance text,
+final verdicts or raw evidence into this plan reference. When a selector is
+uncertain but plausible for the change scope, include the id explicitly instead
+of silently omitting it; delivery will reconcile actual scope later.
+
 If the card starts in `openspec/board/1.backlog/`, move it to
 `openspec/board/2.todo/` after decomposition unless `--no-move` is present or
 local board docs say otherwise.
@@ -214,7 +223,9 @@ After all selected changes are apply-ready:
 1. Ensure every card `Related` and `Change Set` entry points to the actual
    change directory.
 2. Set `OpenSpec Stage` to `artifacts` or the local equivalent.
-3. Set `Next` to the project's delivery workflow. If this direct fast-forward
+3. When a coverage map is configured, ensure every selected change has the
+   tracked coverage plan reference described above.
+4. Set `Next` to the project's delivery workflow. If this direct fast-forward
    run is handing off to the next explicit phase and the `changerail-do`
    surface is installed, use:
    ```text
@@ -222,7 +233,7 @@ After all selected changes are apply-ready:
    ```
    Otherwise state that the card is ready for the delivery workflow once that
    surface is installed.
-4. Run:
+5. Run:
    ```bash
    bin/openspec validate --all --strict
    git diff --check

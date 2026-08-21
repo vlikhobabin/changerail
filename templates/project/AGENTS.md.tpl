@@ -66,14 +66,11 @@ runtime evidence with project-local `CODEX_HOME`. Raw probe output remains
 ignored under `.runtime/changerail/diagnostics/`; share only its redacted
 allowlisted summary and never credential values or local paths.
 
-Generated verification policy lives in `openspec/config.yaml`. The selected
-`{{SURFACES_PROFILE}}` profile treats Codex as `{{CODEX_SURFACE_STATE}}`, Claude
-as `{{CLAUDE_SURFACE_STATE}}`, legacy MCP as `{{LEGACY_MCP_SURFACE_STATE}}`, and
-stale legacy artifacts as `{{LEGACY_ARTIFACTS_SURFACE_STATE}}`. Project owners
-may edit tracked policy to mark a surface `optional` only when that surface is
-intentionally unused; optional missing surfaces can produce
-`pass-with-diagnostics`, but targeted card-owned OpenSpec validation remains
-mandatory and cannot be downgraded.
+Generated verification policy lives in `openspec/config.yaml`; it records
+`required`, `optional` or `forbidden` surface states for Codex, Claude, legacy
+MCP and legacy artifacts. Owners may mark an intentionally unused surface
+optional; missing optional surfaces can produce `pass-with-diagnostics`, but
+targeted card-owned OpenSpec validation remains mandatory.
 
 ## Pre-review Delivery Budgets
 

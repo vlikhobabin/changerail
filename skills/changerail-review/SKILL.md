@@ -189,6 +189,14 @@ evidence finding. Formatter, strict typing and environment-matrix checks are
 mandatory only when those sources declare them or the changed surface makes
 them necessary.
 
+When a configured verification coverage map is present, read the tracked
+per-change coverage plan, ignored ledger and manifest `coverage_summary`.
+For every applicable id, audit the map invariant, linked evidence-index refs,
+published boundary and test adequacy against card acceptance. A complete ledger
+proves process identity and freshness only; if the oracle observes an internal,
+disconnected or wrong boundary, write a blocker finding instead of treating the
+ledger as an acceptance pass.
+
 ### 4. Diff Review
 
 Read the full working-tree diff for the claimed publish scope:

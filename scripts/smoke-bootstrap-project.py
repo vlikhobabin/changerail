@@ -42,15 +42,18 @@ def run(cmd: list[str], cwd: Path, extra_env: dict[str, str] | None = None) -> s
     if Path(effective_cmd[0]).name in {"bootstrap-project", "bootstrap-project.cmd"}:
         if "--configure-existing" not in effective_cmd and "--lock-enforcement" not in effective_cmd:
             effective_cmd[2:2] = ["--lock-enforcement", "none"]
-    return subprocess.run(
-        effective_cmd,
-        cwd=cwd,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        env=env,
-        timeout=240,
-    )
+    try:
+        return subprocess.run(
+            effective_cmd,
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+            timeout=240,
+        )
+    except OSError as exc:
+        return subprocess.CompletedProcess(effective_cmd, 127, stdout=str(exc))
 
 
 def create_clean_changerail_fixture(changerail_root: Path, destination: Path) -> Path:
@@ -196,6 +199,7 @@ def missing_verification_profile_guidance(project: Path) -> list[str]:
         "openspec/config.yaml": [
             "verification:",
             "profile: all-surfaces",
+            "coverage_map: null",
             "codex: required",
             "claude: required",
             "legacy_mcp: required",
@@ -464,7 +468,10 @@ def check_consumer_lock_and_path_modes(
 
     relative_project = run_dir / "locked-relative"
     relative_link = relative_project / "bin" / "openspec"
-    relative_link.unlink()
+    if not relative_link.exists() and not relative_link.is_symlink():
+        failures.append("relative path-mode fixture did not create bin/openspec")
+    else:
+        relative_link.unlink()
     refresh = run(
         [
             str(changerail_root / "bin" / "bootstrap-project"),
@@ -507,7 +514,11 @@ def check_consumer_lock_and_path_modes(
     ):
         failures.append("configure mode did not idempotently combine lock repair and auth")
 
-    relative_link.unlink()
+    if relative_link.exists() or relative_link.is_symlink():
+        relative_link.unlink()
+    else:
+        failures.append("configure mode did not repair bin/openspec before project-owned replacement check")
+        relative_link.parent.mkdir(parents=True, exist_ok=True)
     relative_link.write_text("project-owned\n", encoding="utf-8")
     owned_refresh = run(
         [

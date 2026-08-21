@@ -1,13 +1,13 @@
 # Определить минимальную карту verification coverage
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainer
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -100,11 +100,14 @@ reliability gates, не переносить полный каталог maturit
 - `python3 scripts/smoke-review-preflight.py`
 - `python3 scripts/smoke-verify-project.py`
 - `python3 scripts/smoke-bootstrap-project.py`
+- `python3 scripts/smoke-drift.py --project .runtime/changerail/ci-drift/verification-coverage-map-project`
 - `bin/openspec validate --all --strict`
+- `git diff --check`
 - `python3 scripts/public-surface-scan.py`
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-define-verification-coverage-map/`
+- `openspec/changes/archive/2026-08-21-enforce-verification-coverage-ledger/`
 
 ## Related
 - `AGENTS.shared.md`
@@ -119,11 +122,14 @@ reliability gates, не переносить полный каталог maturit
 - `openspec/board/4.done/authorize-bounded-verification-coverage-payload.md`
 
 ## Result
-Проработка завершена; field evidence принято, два apply-ready changes созданы.
+Implementation complete: project-owned coverage map, fingerprint-bound
+plan/ledger contracts, deterministic review-preflight enforcement and lifecycle
+skill guidance delivered.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- После published investigation authorization выполнить
-  `$chrl-deliver openspec/board/2.todo/define-verification-coverage-map.md`.
+- done
 
 ## Triage Decision
 - Перевести в `2.todo`: field validation доказала verification gap, а выбранный
@@ -209,3 +215,8 @@ fingerprint-bound plan/ledger и существующий evidence index/manifes
 - 2026-08-21T11:06:12Z linked exact published authorization source
   `authorize-bounded-verification-coverage-payload`; successor remains queued
   until that source is published in `4.done`.
+- 2026-08-21T19:01:43Z delivered and archived
+  `define-verification-coverage-map` and
+  `enforce-verification-coverage-ledger`; verification gates passed and card
+  moved to review handoff.
+- 2026-08-21T19:55:10Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

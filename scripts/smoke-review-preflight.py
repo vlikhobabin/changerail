@@ -13,6 +13,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "bin" / "changerail-review-verdict"
 MANIFEST_HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from changerail_verification_coverage import (  # noqa: E402
+    card_acceptance_hashes,
+    fingerprint_coverage_map,
+    fingerprint_payload,
+    manifest_fingerprint,
+)
 TARGET = {
     "schema": "changerail.execution-target.v1",
     "id": "database-primary",
@@ -103,6 +110,207 @@ def attach_target_evidence(repo: Path, manifest: Path, identities: list[dict[str
         "evidence_refs": refs,
     }
     manifest.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
+def coverage_map_payload(*, surface_only: bool = False) -> dict[str, Any]:
+    def entry(coverage_id: str, invariant: str, oracle_ref: str) -> dict[str, Any]:
+        return {
+            "id": coverage_id,
+            "applies_to": (
+                {"surface_kinds": ["domain.managed-form"]}
+                if surface_only else {"path_globs": ["src/*.py"], "operation_kinds": ["add", "modify"]}
+            ),
+            "invariant": invariant,
+            "oracle": {"kind": "command", "ref": oracle_ref},
+            "required_evidence": [{"kind": "command", "oracle_ref": oracle_ref}],
+        }
+
+    return {
+        "schema": "changerail.verification-coverage.v1",
+        "entries": [
+            entry("python-positive-route", "positive runtime route remains observable", "pytest-positive-route"),
+            entry("python-public-timeout", "public timeout boundary remains observable", "pytest-public-timeout"),
+            entry("python-connected-renderer", "producer and renderer paths stay connected", "pytest-connected-renderer"),
+        ],
+    }
+
+
+def write_evidence(repo: Path, evidence_id: str, *, status: str = "passed", oracle_ref: str | None = None) -> dict[str, str]:
+    index_path = repo / ".runtime" / "changerail" / "evidence" / evidence_id / "index.json"
+    output_path = index_path.parent / "outputs" / f"{evidence_id}.txt"
+    oracle_ref = oracle_ref or evidence_id
+    write(output_path, f"pytest fixture status={status}\n")
+    write(
+        index_path,
+        json.dumps(
+            {
+                "schema": "changerail.evidence-index.v1",
+                "updated_at": "2026-08-21T00:00:00Z",
+                "workspace": {"root": str(repo)},
+                "scope": {"card_id": "example-card", "changes": ["example-change"]},
+                "entries": [
+                    {
+                        "id": evidence_id,
+                        "path": output_path.relative_to(repo).as_posix(),
+                        "role": "raw_output",
+                        "storage": "runtime",
+                        "phase": "do",
+                        "classification": "mandatory",
+                        "kind": "command",
+                        "status": status,
+                        "started_at": "2026-08-21T00:00:00Z",
+                        "ended_at": "2026-08-21T00:00:01Z",
+                        "summary": "coverage evidence fixture",
+                        "raw_output_path": output_path.relative_to(repo).as_posix(),
+                        "command": {"argv": ["pytest", f"tests/{evidence_id}.py"], "display": f"pytest tests/{evidence_id}.py"},
+                    }
+                ],
+            },
+            ensure_ascii=True,
+            indent=2,
+        )
+        + "\n",
+    )
+    return {
+        "id": evidence_id,
+        "index_path": index_path.relative_to(repo).as_posix(),
+        "kind": "command",
+        "oracle_ref": oracle_ref,
+        "raw_output_path": output_path.relative_to(repo).as_posix(),
+        "classification": "mandatory",
+    }
+
+
+def configure_coverage(
+    repo: Path,
+    manifest: Path,
+    *,
+    omit_plan: bool = False,
+    stale_acceptance: bool = False,
+    evidence_status: str = "passed",
+    false_green: str | None = None,
+    surface_only: bool = False,
+    claim_not_applicable: bool = False,
+) -> Path:
+    map_payload = coverage_map_payload(surface_only=surface_only)
+    write(repo / "openspec" / "config.yaml", "schema: spec-driven\n\nverification:\n  coverage_map: .changerail/verification-coverage.yaml\n")
+    write(repo / ".changerail" / "verification-coverage.yaml", json.dumps(map_payload, ensure_ascii=True, indent=2) + "\n")
+    card = repo / "openspec" / "board" / "3.inprogress" / "example-card.md"
+    plan_path = repo / "openspec" / "changes" / "archive" / "2026-08-17-example-change" / "verification-coverage.json"
+    plan: dict[str, Any] | None = None
+    if not omit_plan:
+        plan = {
+            "schema": "changerail.verification-coverage-plan.v1",
+            "generated_at": "2026-08-21T00:00:00Z",
+            "map": {
+                "path": ".changerail/verification-coverage.yaml",
+                "fingerprint": fingerprint_coverage_map(map_payload),
+            },
+            "card": {
+                "id": "example-card",
+                "path": "openspec/board/3.inprogress/example-card.md",
+                "acceptance_hashes": card_acceptance_hashes(card.read_text(encoding="utf-8")),
+            },
+            "change": {
+                "slug": "example-change",
+                "path": "openspec/changes/archive/2026-08-17-example-change",
+            },
+            "selected_coverage": [] if claim_not_applicable else [
+                {"id": "python-positive-route", "reason": "src/new.py changed"},
+                {"id": "python-public-timeout", "reason": "src/new.py changed"},
+                {"id": "python-connected-renderer", "reason": "src/new.py changed"},
+            ],
+        }
+        write(plan_path, json.dumps(plan, ensure_ascii=True, indent=2, sort_keys=True) + "\n")
+
+    derived = run(
+        [sys.executable, str(MANIFEST_HELPER), "derive", str(card.relative_to(repo)), "--workspace", str(repo), "--write", "--json"],
+        repo,
+    )
+    require_ok(derived, "derive coverage manifest")
+    manifest = Path(json.loads(derived.stdout)["manifest"])
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if surface_only:
+        payload["extension_surfaces"] = [{"kind": "domain.managed-form", "path": "src/new.py", "operation": "modify"}]
+    if omit_plan:
+        payload["coverage_summary"] = {
+            "configured": True,
+            "status": "missing",
+            "applicable": 3,
+            "covered": 0,
+            "missing": 3,
+            "invalid": 0,
+            "not_applicable": 0,
+            "ledgers": [],
+        }
+        manifest.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return manifest
+
+    evidence_ids = {
+        "python-positive-route": "pytest-positive-route",
+        "python-public-timeout": "pytest-internal-timeout" if false_green == "internal-timeout" else "pytest-public-timeout",
+        "python-connected-renderer": "pytest-disconnected-renderer" if false_green == "disconnected-renderer" else "pytest-connected-renderer",
+    }
+    coverage_evidence = {} if claim_not_applicable else {
+        coverage_id: write_evidence(repo, evidence_id, status=evidence_status)
+        for coverage_id, evidence_id in evidence_ids.items()
+        if not (false_green == "missing-positive-route" and coverage_id == "python-positive-route")
+    }
+    fingerprint_result = run([str(HELPER), "fingerprint", "--workspace", str(repo)], repo)
+    require_ok(fingerprint_result, "coverage fingerprint")
+    reviewed = json.loads(fingerprint_result.stdout)
+    ledger = {
+        "schema": "changerail.verification-coverage-ledger.v1",
+        "updated_at": "2026-08-21T00:00:00Z",
+        "workspace": {"root": str(repo), "head_commit": reviewed["head_commit"], "tree_sha": reviewed["tree_sha"]},
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "change": {"slug": "example-change"},
+        "map": {"path": ".changerail/verification-coverage.yaml", "fingerprint": fingerprint_coverage_map(map_payload)},
+        "plan": {
+            "path": plan_path.relative_to(repo).as_posix(),
+            "fingerprint": fingerprint_payload(plan),
+        },
+        "manifest": {
+            "path": manifest.relative_to(repo).as_posix(),
+            "fingerprint": manifest_fingerprint(payload),
+        },
+        "reviewed_tree": {"tree_sha": reviewed["tree_sha"], "diff_fingerprint": reviewed["diff_fingerprint"]},
+        "entries": [
+            {
+                "coverage_id": coverage_id,
+                "applicability": "applicable",
+                "state": "covered",
+                "oracle_ref": evidence_ref["oracle_ref"],
+                "evidence_refs": [evidence_ref],
+            }
+            for coverage_id, evidence_ref in coverage_evidence.items()
+        ],
+        "diagnostics": [],
+    }
+    if claim_not_applicable:
+        ledger["entries"] = []
+    ledger_path = repo / ".runtime" / "changerail" / "coverage" / "example-change-ledger.json"
+    write(ledger_path, json.dumps(ledger, ensure_ascii=True, indent=2, sort_keys=True) + "\n")
+    payload["coverage_summary"] = {
+        "configured": True,
+        "status": "complete",
+        "applicable": 0 if claim_not_applicable else 3,
+        "covered": 0 if claim_not_applicable else 3,
+        "missing": 0,
+        "invalid": 0,
+        "not_applicable": 0,
+        "ledgers": [
+            {
+                "change": "example-change",
+                "path": ledger_path.relative_to(repo).as_posix(),
+                "fingerprint": fingerprint_payload(ledger),
+            }
+        ],
+    }
+    manifest.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    if stale_acceptance:
+        card.write_text(card.read_text(encoding="utf-8").replace("behavior delivered", "changed behavior delivered"), encoding="utf-8")
+    return manifest
 
 
 def card_text(risk: str, *, protocol: bool = False, authorization: str = "none", blocks: str | None = None) -> str:
@@ -696,10 +904,60 @@ def main() -> int:
         assert data["outcome"] == "ready-for-llm-review"
         assert data["risk"]["reasoning_effort"] == "high"
         assert data["manifest"]["normalized"] is True
+        coverage_check = next(item for item in data["checks"] if item["id"] == "coverage")
+        assert coverage_check["status"] == "pass"
+        assert "coverage map absent" in coverage_check["detail"]
         normalized = json.loads(manifest.read_text(encoding="utf-8"))
         source = next(item for item in normalized["committable_paths"] if item.get("path") == "src/new.py")
         assert source["operation"] == "add"
         scope_repo, scope_manifest = repo, manifest
+
+        repo, manifest = workspace(root, "ordinary", production_lines=3)
+        manifest = configure_coverage(repo, manifest)
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "configured coverage preflight")
+        coverage_check = next(item for item in data["checks"] if item["id"] == "coverage")
+        assert coverage_check["status"] == "pass"
+        assert data["outcome"] == "ready-for-llm-review"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=3)
+        manifest = configure_coverage(repo, manifest, omit_plan=True)
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert next(item for item in data["checks"] if item["id"] == "coverage")["status"] == "fail"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=3)
+        manifest = configure_coverage(repo, manifest, stale_acceptance=True)
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert "acceptance" in next(item for item in data["checks"] if item["id"] == "coverage")["detail"]
+
+        repo, manifest = workspace(root, "ordinary", production_lines=3)
+        manifest = configure_coverage(repo, manifest, evidence_status="failed")
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "blocked"
+        assert "evidence" in next(item for item in data["checks"] if item["id"] == "coverage")["detail"]
+
+        for false_green, expected in (
+            ("missing-positive-route", "omits applicable ids"),
+            ("internal-timeout", "oracle_ref does not match map oracle"),
+            ("disconnected-renderer", "oracle_ref does not match map oracle"),
+        ):
+            repo, manifest = workspace(root, "ordinary", production_lines=3)
+            manifest = configure_coverage(repo, manifest, false_green=false_green)
+            result, data = preflight(repo, manifest, "--normalize")
+            assert result.returncode == 1
+            coverage_detail = next(item for item in data["checks"] if item["id"] == "coverage")["detail"]
+            assert expected in coverage_detail
+
+        repo, manifest = workspace(root, "ordinary", production_lines=3)
+        manifest = configure_coverage(repo, manifest, surface_only=True, claim_not_applicable=True)
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert "omits applicable ids" in next(item for item in data["checks"] if item["id"] == "coverage")["detail"]
 
         repo, manifest = workspace(root, "ordinary", execution_target=True)
         attach_target_evidence(repo, manifest, [TARGET])

@@ -18,6 +18,9 @@
 - `changerail.execution-target.v1`
 - `changerail.review-cycle-history.v1`
 - `changerail.source-classification.v1`
+- `changerail.verification-coverage.v1`
+- `changerail.verification-coverage-plan.v1`
+- `changerail.verification-coverage-ledger.v1`
 - `changerail.consumer-lock.v1`
 - `changerail.repository-knowledge.v1`
 - `changerail.maintenance-policy.v1`
@@ -45,6 +48,9 @@ schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-execution-target.schema.json
 schemas/changerail-review-cycle-history.schema.json
 schemas/changerail-source-classification.schema.json
+schemas/changerail-verification-coverage.schema.json
+schemas/changerail-verification-coverage-plan.schema.json
+schemas/changerail-verification-coverage-ledger.schema.json
 schemas/changerail-consumer-lock.schema.json
 schemas/changerail-repository-knowledge.schema.json
 schemas/changerail-maintenance-policy.schema.json
@@ -170,6 +176,68 @@ card/id, ceiling `301..500` и protocol allowance. Preflight также пров
 остаётся `investigation-required`.
 Relation принимает только exact bare id, `<id>.md` или canonical
 `openspec/board/<lane>/<id>.md`; foreign stem и non-board path не совпадают.
+
+## Verification Coverage
+
+Optional tracked project policy can declare a verification coverage map:
+
+```yaml
+schema: changerail.verification-coverage.v1
+entries:
+  - id: python-runtime-route
+    applies_to:
+      path_globs: ["src/**/*.py"]
+      operation_kinds: [add, modify]
+      surface_kinds: [python.runtime]
+    invariant: "positive runtime route remains observable"
+    oracle:
+      kind: command
+      ref: pytest-positive-route
+    required_evidence:
+      - kind: command
+        oracle_ref: pytest-positive-route
+      - kind: runtime
+        oracle_ref: pytest-positive-route
+```
+
+`openspec/config.yaml` references the map through
+`verification.coverage_map`. The generated consumer template keeps the value
+`null`, so projects without a map keep the existing verification floor. When a
+map is configured, `bin/verify-project` loads it with `yaml.safe_load`,
+validates `changerail.verification-coverage.v1` and fails closed for duplicate
+ids, unsafe globs, missing selectors, unknown oracle kinds, unbound evidence
+refs or undeclared policy fields.
+
+Coverage entries are deliberately limited to five fields: `id`, `applies_to`,
+`invariant`, `oracle` and `required_evidence`. Path globs are normalized
+repository-relative POSIX selectors; operation kinds use generic ChangeRail
+scope operations; `surface_kinds` are opaque namespaced ids such as
+`python.runtime` or an extension-owned `onec.managed-form`. ChangeRail core
+matches ids as data and does not embed domain tools or rules.
+
+Fast-forward planning may write a tracked
+`changerail.verification-coverage-plan.v1` artifact per change. It stores map
+fingerprint, selected coverage ids and SHA-256 hashes of exact card acceptance
+criteria. It must not copy invariant, oracle, command, criterion text, final
+verdict authority or raw evidence.
+
+Delivery/review handoff may write ignored
+`changerail.verification-coverage-ledger.v1` runtime state. The ledger binds
+map, plan, manifest and reviewed-tree fingerprints, then records coverage ids,
+applicability, oracle observation state and evidence-index refs. Each evidence
+ref carries the required `kind` and `oracle_ref`; preflight schema-validates the
+referenced evidence index and requires a matching passed entry. It is diagnostic
+evidence for deterministic reconciliation, not an acceptance verdict.
+
+Review preflight validates configured coverage before model launch. Missing or
+stale plan, missing ledger, manifest scope drift, stale fingerprints, incomplete
+applicable ids or evidence refs that do not resolve to passed evidence-index
+entries become process blockers and do not consume semantic review budget.
+If a project/domain extension reports schema-valid `extension_surfaces` in the
+delivery manifest, preflight includes those namespaced surface kinds in
+coverage applicability matching.
+Projects with `verification.coverage_map: null` keep the current verification
+floor and do not require generated coverage artifacts.
 
 ## Review Verdict
 
@@ -327,6 +395,10 @@ Manifest может хранить concise handoff summary без raw logs:
 
 - `verification_summary`: итог проверки, короткое резюме и command/evidence
   references;
+- `coverage_summary`: configured/applicable/covered/missing/invalid counts plus
+  ignored per-change ledger path/fingerprint references;
+- `extension_surfaces`: optional extension-owned namespaced surface kinds used
+  only for generic coverage applicability matching;
 - `review_summary`: latest review result, cycle, finding counts и verdict path;
 - `final_card_state`: итоговый board path/status и stable result summary.
 
