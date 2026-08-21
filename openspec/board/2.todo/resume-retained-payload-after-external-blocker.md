@@ -27,19 +27,18 @@ artifacts
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-external-blocker-resume-payload.md","authorization_id":"authorize-bounded-external-blocker-resume-payload"}`
 
 Published investigation `investigate-bounded-field-validation-batch` закрывает
 repeated-defect classification для одного bounded external-blocker resume
-hypothesis. Перед реализацией все еще требуется отдельная exact published
-authorization card: change расширяет dirty retained-payload launch authority и
-blocker/evidence wire contract.
+hypothesis. Exact authorization source
+`authorize-bounded-external-blocker-resume-payload` публикует bounded source
+для dirty retained-payload launch authority и blocker/evidence wire contract.
 
 ## Depends On
 - `support-runner-resume-after-investigation-required`
 - `investigate-bounded-field-validation-batch`
-- separate exact published authorization source for
-  `resume-retained-payload-after-external-blocker`
+- `authorize-bounded-external-blocker-resume-payload`
 - `enforce-declared-execution-target-invariant`
 
 ## Summary
@@ -89,6 +88,7 @@ resume path после восстановления external condition.
 - `scripts/smoke-delivery-runner.py`
 - `openspec/board/4.done/support-runner-resume-after-investigation-required.md`
 - `openspec/board/1.backlog/enforce-declared-execution-target-invariant.md`
+- `openspec/board/4.done/authorize-bounded-external-blocker-resume-payload.md`
 - `openspec/changes/resume-retained-payload-after-external-blocker/`
 
 ## Result
@@ -153,3 +153,6 @@ fingerprint resume для single-card/queue без общего dirty-tree bypas
 - 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
   exact retained-payload resume hypothesis, ceiling 500, scoped evidence-index
   boundary и requirement нового split при повторе того же blocker.
+- 2026-08-21T09:25:00Z linked exact published authorization source
+  `authorize-bounded-external-blocker-resume-payload`; successor remains
+  queued until remaining dependencies are delivered.

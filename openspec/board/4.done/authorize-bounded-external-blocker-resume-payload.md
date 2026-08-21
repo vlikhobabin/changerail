@@ -1,13 +1,13 @@
 # Авторизовать bounded external-blocker resume payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -52,25 +52,39 @@ investigated dirty-resume/blocker/evidence wire boundary.
 - `authorize-bounded-external-blocker-resume-payload`
 
 ## Verify
-- `bin/openspec validate authorize-bounded-external-blocker-resume-payload --strict`
-- `python3 scripts/smoke-review-preflight.py`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- GREEN: `bin/openspec validate authorize-bounded-external-blocker-resume-payload --strict`
+  - passed; evidence id `openspec-validate-change`.
+- GREEN: `bin/openspec validate changerail-contracts --strict` - passed;
+  evidence id `openspec-validate-changerail-contracts-post-archive`.
+- GREEN: `bin/openspec validate --all --strict` - passed; evidence id
+  `openspec-validate-all-post-archive-cleanup`.
+- GREEN: `python3 scripts/smoke-review-preflight.py` - passed; exact
+  external-blocker authorization acceptance and mismatched-card rejection
+  covered; evidence id `smoke-review-preflight`.
+- GREEN: `python3 scripts/public-surface-scan.py` - passed; evidence id
+  `public-surface-scan`.
+- GREEN: `git diff --check` - passed; evidence id
+  `git-diff-check-post-archive-cleanup`.
+- GREEN: `bin/openspec archive authorize-bounded-external-blocker-resume-payload --yes`
+  - passed; evidence id `openspec-archive-change`.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-authorize-bounded-external-blocker-resume-payload/`
 
 ## Related
-- `openspec/changes/authorize-bounded-external-blocker-resume-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-external-blocker-resume-payload/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 - `openspec/board/2.todo/resume-retained-payload-after-external-blocker.md`
 
 ## Result
-Проработка завершена; apply-ready authorization artifacts созданы.
+Delivery завершен: exact authorization object сохранен, reciprocal successor
+reference добавлен, `changerail-contracts` synced, focused preflight proof
+added, production behavior не менялось и OpenSpec change archived.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/authorize-bounded-external-blocker-resume-payload.md`.
+- done
 
 ## Change 1: `authorize-bounded-external-blocker-resume-payload`
 
@@ -96,3 +110,9 @@ Critical retained-payload launch authority требует exact published source
 
 ## Log
 - 2026-08-21T09:04:00Z created from published bounded batch investigation.
+- 2026-08-21T09:20:00Z fast-forward phase validated existing apply-ready
+  artifacts and moved card to `3.inprogress`.
+- 2026-08-21T10:31:01Z `$chrl-do` added exact external-blocker resume
+  preflight smoke coverage, synced `changerail-contracts`, linked successor
+  authorization and archived `authorize-bounded-external-blocker-resume-payload`.
+- 2026-08-21T10:40:34Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

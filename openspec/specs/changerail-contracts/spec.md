@@ -1331,6 +1331,39 @@ investigation `investigate-bounded-field-validation-batch`, successor
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable telemetry waiver
 
+### Requirement: Published bounded external-blocker resume authorization source
+ChangeRail MUST publish the bounded external-blocker resume authorization as
+one clean tracked `4.done` board card before successor
+`resume-retained-payload-after-external-blocker` can use the bounded
+production-LOC and retained-payload blocker/evidence protocol-boundary
+exception. The authorization source MUST contain exactly one schema-valid
+investigation authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`resume-retained-payload-after-external-blocker`, production LOC ceiling 500
+and `allow_new_authority_or_wire_protocol` true.
+
+#### Scenario: Authorization source binds the exact external-blocker resume chain
+- **WHEN** deterministic review preflight evaluates
+  `resume-retained-payload-after-external-blocker` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-external-blocker-resume-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `resume-retained-payload-after-external-blocker`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: External-blocker resume authorization cannot be reused
+- **WHEN** another card references the published external-blocker resume
+  authorization source, generic dirty bypass or credential/target authority is
+  attempted, or the exact reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable dirty-resume waiver
+
 ### Requirement: Field-validation successors MUST use bounded investigation decisions
 ChangeRail MUST require bounded decisions for exact successors
 `enforce-declared-execution-target-invariant`,
