@@ -1,13 +1,13 @@
 # Авторизовать bounded live-progress payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -52,25 +52,35 @@ value-free progress event/status wire boundary.
 - `authorize-bounded-live-progress-payload`
 
 ## Verify
-- `bin/openspec validate authorize-bounded-live-progress-payload --strict`
-- `python3 scripts/smoke-review-preflight.py`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- `bin/openspec validate authorize-bounded-live-progress-payload --strict` -
+  passed.
+- `bin/openspec validate changerail-contracts --strict` - passed.
+- `python3 scripts/smoke-review-preflight.py` - passed; exact
+  live-progress authorization acceptance and mismatched-card rejection covered.
+- `bin/openspec archive authorize-bounded-live-progress-payload --yes` -
+  passed.
+- `bin/openspec validate --all --strict` - passed, 38 items before archive.
+- `python3 scripts/public-surface-scan.py` - passed, 1201 files scanned, 0
+  findings.
+- `git diff --check` - passed.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-authorize-bounded-live-progress-payload/`
 
 ## Related
 - `openspec/changes/authorize-bounded-live-progress-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-live-progress-payload/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 - `openspec/board/2.todo/expose-structured-live-delivery-progress.md`
 
 ## Result
-Проработка завершена; apply-ready authorization artifacts созданы.
+published; bounded live-progress authorization source complete
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and
+published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/authorize-bounded-live-progress-payload.md`.
+- done
 
 ## Change 1: `authorize-bounded-live-progress-payload`
 
@@ -96,3 +106,10 @@ value-free progress event/status wire boundary.
 
 ## Log
 - 2026-08-21T09:04:00Z created from published bounded batch investigation.
+- 2026-08-21T09:16:00Z `$chrl-ff` confirmed apply-ready artifacts and moved
+  the card to `3.inprogress`.
+- 2026-08-21T09:48:54Z `$chrl-do` added exact live-progress preflight smoke
+  coverage, synced `changerail-contracts` and archived
+  `authorize-bounded-live-progress-payload`.
+- 2026-08-21T10:19:51Z publish finalized card into `4.done`; exact ledger
+  retained in ignored manifest.
