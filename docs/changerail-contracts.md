@@ -871,7 +871,14 @@ absolute trust binding выбранного workspace, поэтому Codex pers
 launcher, Codex binary, auth state, effective project policy, stale symlink-ов
 в runtime home и project `.codex/`, permissions, publish target и optional
 connectivity URL. Explicit operator `CODEX_HOME` остаётся operator-owned:
-runner использует его config/auth state и не генерирует там файлы. Remote
+runner использует его config/auth state и не генерирует там файлы. Если такой
+home проходит exact trusted automation gate и используется tracked ChangeRail
+`bin/codex`, preflight дополнительно требует поддержку Codex option
+`--dangerously-bypass-approvals-and-sandbox`, а реальный child получает этот
+option перед `exec`. Это узкий explicit opt-in для externally sandboxed
+unattended runner: он делает уже выданную authority effective, но не заменяет
+config/auth/clean-tree/upstream/publish-target checks. Generated default home и
+custom launchers не получают Codex-specific bypass автоматически. Remote
 publish-target proof выполняет `git ls-remote --exit-code <remote>
 refs/heads/<branch>` и сохраняет только sanitized command/result/detail:
 remote name, branch, remote URL class, failure class, retryability, attempt

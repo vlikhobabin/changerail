@@ -193,6 +193,34 @@ def write_fake_launcher(path: Path) -> None:
     path.chmod(0o755)
 
 
+def write_fake_codex_cli(path: Path, *, supports_effective_authority: bool = True) -> None:
+    bypass_option = "--dangerously-bypass-approvals-and-sandbox"
+    help_line = f"      {bypass_option}\n" if supports_effective_authority else ""
+    path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, os, sys",
+                f"bypass_option = {bypass_option!r}",
+                f"help_line = {help_line!r}",
+                "log_path = os.environ.get('CHANGERAIL_FAKE_CODEX_LOG')",
+                "if log_path:",
+                "    with open(log_path, 'a', encoding='utf-8') as handle:",
+                "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
+                "if sys.argv[1:] == ['exec', '--help']:",
+                "    print('Run Codex non-interactively')",
+                "    print(help_line, end='')",
+                "    raise SystemExit(0)",
+                "print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
+                "print(json.dumps({'usage': {'input_tokens': 1, 'output_tokens': 1, 'total_tokens': 2}}))",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
 def write_fake_one_command_launcher(path: Path) -> None:
     path.write_text(
         r'''#!/usr/bin/env python3
@@ -2104,6 +2132,131 @@ def check_success_run(tmp: Path) -> None:
         raise AssertionError(f"child prompt did not include discovery policy: {argv}")
     if "terminal_outcome: DELIVERED" not in result.stdout:
         raise AssertionError(f"terminal outcome was not printed: {result.stdout}")
+
+
+def check_explicit_home_default_launcher_enforces_effective_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "explicit-home-effective-authority")
+    runtime = tmp / "explicit-home-effective-authority-runtime"
+    fake_bin = tmp / "explicit-home-effective-authority-bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    call_log = tmp / "explicit-home-effective-authority-calls.jsonl"
+    write_fake_codex_cli(fake_codex)
+    env = runner_env()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["CODEX_HOME"] = str(workspace / ".codex")
+    env["CHANGERAIL_FAKE_CODEX_LOG"] = str(call_log)
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "explicit-home-effective-authority",
+        ],
+        env=env,
+    )
+    require_ok(result, "explicit-home effective authority run")
+    status = load_status(runtime, "explicit-home-effective-authority")
+    bypass_option = "--dangerously-bypass-approvals-and-sandbox"
+    runner_argv = status["command"]["argv"]
+    if runner_argv[:3] != [str(ROOT / "bin" / "codex"), bypass_option, "exec"]:
+        raise AssertionError(f"runner did not place effective authority before exec: {runner_argv}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    effective = checks.get("Codex effective automation authority")
+    if not effective or effective["status"] != "pass":
+        raise AssertionError(f"effective authority preflight did not pass: {checks}")
+    calls = [json.loads(line)["argv"] for line in call_log.read_text(encoding="utf-8").splitlines()]
+    delivery_call = next((argv for argv in calls if "--json" in argv), None)
+    if delivery_call is None:
+        raise AssertionError(f"tracked launcher did not invoke the fake Codex child: {calls}")
+    if bypass_option not in delivery_call or delivery_call.index(bypass_option) > delivery_call.index("exec"):
+        raise AssertionError(f"launcher-observed argv lacks pre-exec effective authority: {delivery_call}")
+
+
+def check_explicit_home_blocks_unsupported_effective_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "explicit-home-unsupported-authority")
+    runtime = tmp / "explicit-home-unsupported-authority-runtime"
+    fake_bin = tmp / "explicit-home-unsupported-authority-bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    call_log = tmp / "explicit-home-unsupported-authority-calls.jsonl"
+    write_fake_codex_cli(fake_codex, supports_effective_authority=False)
+    env = runner_env()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["CODEX_HOME"] = str(workspace / ".codex")
+    env["CHANGERAIL_FAKE_CODEX_LOG"] = str(call_log)
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "explicit-home-unsupported-authority",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("unsupported Codex effective authority unexpectedly launched")
+    status = load_status(runtime, "explicit-home-unsupported-authority")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    effective = checks.get("Codex effective automation authority")
+    if not effective or effective["status"] != "fail":
+        raise AssertionError(f"unsupported authority did not fail preflight: {checks}")
+    calls = [json.loads(line)["argv"] for line in call_log.read_text(encoding="utf-8").splitlines()]
+    if any("--json" in argv for argv in calls):
+        raise AssertionError(f"delivery child launched after unsupported authority preflight: {calls}")
+
+
+def check_generated_home_default_launcher_keeps_config_driven_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "generated-home-config-driven-authority")
+    runtime = tmp / "generated-home-config-driven-authority-runtime"
+    fake_bin = tmp / "generated-home-config-driven-authority-bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    call_log = tmp / "generated-home-config-driven-authority-calls.jsonl"
+    write_fake_codex_cli(fake_codex)
+    env = runner_env()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["CHANGERAIL_FAKE_CODEX_LOG"] = str(call_log)
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "generated-home-config-driven-authority",
+        ],
+        env=env,
+    )
+    require_ok(result, "generated-home config-driven authority run")
+    status = load_status(runtime, "generated-home-config-driven-authority")
+    bypass_option = "--dangerously-bypass-approvals-and-sandbox"
+    if bypass_option in status["command"]["argv"]:
+        raise AssertionError(f"generated home unexpectedly received Codex bypass: {status['command']['argv']}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    effective = checks.get("Codex effective automation authority")
+    if not effective or effective["status"] != "skip":
+        raise AssertionError(f"generated-home authority route should remain config-driven: {checks}")
+    calls = [json.loads(line)["argv"] for line in call_log.read_text(encoding="utf-8").splitlines()]
+    delivery_call = next((argv for argv in calls if "--json" in argv), None)
+    if delivery_call is None or bypass_option in delivery_call:
+        raise AssertionError(f"generated-home launcher argv changed unexpectedly: {calls}")
 
 
 def check_default_workspace_run(tmp: Path) -> None:
@@ -4656,6 +4809,9 @@ def main() -> int:
         check_one_command_delivery_stale_verdict_blocks(workspace)
         check_one_command_delivery_review_budget_no_go(workspace)
         check_success_run(workspace)
+        check_explicit_home_default_launcher_enforces_effective_authority(workspace)
+        check_explicit_home_blocks_unsupported_effective_authority(workspace)
+        check_generated_home_default_launcher_keeps_config_driven_authority(workspace)
         check_default_workspace_run(workspace)
         check_default_codex_home_isolates_persisted_trust(workspace)
         check_default_codex_home_rejects_directory_symlink(workspace)

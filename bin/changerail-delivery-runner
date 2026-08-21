@@ -58,6 +58,8 @@ REMOTE_REACHABILITY_TIMEOUT_SECONDS = float(os.environ.get("CHANGERAIL_REMOTE_RE
 REMOTE_PREFLIGHT_MAX_ATTEMPTS = 2
 REMOTE_PREFLIGHT_BACKOFF_SECONDS = 0.05
 PUBLISH_TARGET_PREFLIGHT_FAILED = "publish_target_preflight_failed"
+CODEX_EFFECTIVE_AUTHORITY_OPTION = "--dangerously-bypass-approvals-and-sandbox"
+CODEX_CAPABILITY_TIMEOUT_SECONDS = 10.0
 REMOTE_FAILURE_CLASSES = (
     "ssh_config",
     "dns",
@@ -382,13 +384,64 @@ def auth_state(codex_home: Path, env: dict[str, str]) -> Check:
     return Check("CODEX auth", "fail", f"no auth marker or supported auth environment variable found; {AUTH_REMEDIATION}")
 
 
-def codex_binary_state(launcher: Path) -> Check:
+def tracked_codex_launcher_selected(launcher: Path) -> bool:
     default_launcher = (repo_root_from_script() / "bin" / "codex").resolve(strict=False)
-    selected_launcher = launcher.resolve(strict=False)
-    if selected_launcher != default_launcher:
-        return Check("codex binary", "skip", f"custom launcher selected: {selected_launcher}")
+    return launcher.resolve(strict=False) == default_launcher
+
+
+def codex_binary_state(launcher: Path) -> Check:
+    if not tracked_codex_launcher_selected(launcher):
+        return Check("codex binary", "skip", f"custom launcher selected: {launcher.resolve(strict=False)}")
     found = shutil.which("codex")
     return Check("codex binary", "pass" if found else "fail", found or "not found")
+
+
+def codex_effective_automation_authority_state(args: argparse.Namespace) -> Check:
+    if not explicit_codex_home():
+        return Check(
+            "Codex effective automation authority",
+            "skip",
+            "generated runtime home preserves config-driven child authority",
+        )
+    if not tracked_codex_launcher_selected(args.launcher):
+        return Check(
+            "Codex effective automation authority",
+            "skip",
+            "custom launcher owns effective child authority propagation",
+        )
+    found = shutil.which("codex")
+    if not found:
+        return Check(
+            "Codex effective automation authority",
+            "fail",
+            "Codex binary is unavailable for explicit-home authority capability check",
+        )
+    try:
+        result = subprocess.run(
+            [found, "exec", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=CODEX_CAPABILITY_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return Check(
+            "Codex effective automation authority",
+            "fail",
+            "Codex authority capability check could not complete",
+        )
+    advertised = CODEX_EFFECTIVE_AUTHORITY_OPTION in (result.stdout + result.stderr)
+    if result.returncode == 0 and advertised:
+        return Check(
+            "Codex effective automation authority",
+            "pass",
+            "explicit operator CODEX_HOME; tracked launcher supports invocation-level authority",
+        )
+    return Check(
+        "Codex effective automation authority",
+        "fail",
+        "installed Codex CLI does not advertise required invocation-level authority",
+    )
 
 
 def no_push_selected(args: argparse.Namespace) -> bool:
@@ -1983,6 +2036,7 @@ def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = Fals
         Check("CODEX_HOME", "pass" if codex_home.exists() else "fail", str(codex_home)),
         Check("CODEX config", "pass" if config.is_file() else "skip", str(config)),
         codex_automation_authority_state(config),
+        codex_effective_automation_authority_state(args),
         auth_state(codex_home, env),
         Check(
             "CODEX_HOME symlinks",
@@ -2034,7 +2088,10 @@ def build_command(args: argparse.Namespace) -> list[str]:
     for value in args.deliver_arg:
         prompt += " " + value
     prompt += "\n\nChangeRail child discovery policy:\n" + child_discovery_policy()
-    command = [str(args.launcher), "exec", "--json"]
+    command = [str(args.launcher)]
+    if explicit_codex_home() and tracked_codex_launcher_selected(args.launcher):
+        command.append(CODEX_EFFECTIVE_AUTHORITY_OPTION)
+    command.extend(["exec", "--json"])
     if args.model:
         command.extend(["-m", args.model])
     if args.reasoning_effort:

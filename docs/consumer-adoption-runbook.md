@@ -437,6 +437,15 @@ runner preflight останавливается до запуска child. Эт�
 `preflight-plan`, `run-plan` и `resume-plan`: без auth preflight должен
 остановиться fail-closed до запуска delivery child.
 
+Explicit operator-owned `CODEX_HOME` также является opt-in к effective child
+authority для tracked ChangeRail `bin/codex`: runner проверяет, что installed
+Codex CLI рекламирует `--dangerously-bypass-approvals-and-sandbox`, и передает
+этот option до `exec`. Используйте такой home только для явно запускаемого
+unattended runner внутри внешней sandbox/container boundary. Missing option
+блокирует preflight до child launch; недостаточная policy, auth, dirty tree,
+upstream и publish-target failures по-прежнему блокируют независимо. Generated
+default runtime home и custom launcher не получают этот option автоматически.
+
 Для queue plans plan runner запускает ChangeRail single-card runner, а single-card runner запускает Codex.
 Примечание: consumer repository не обязан иметь tracked `bin/codex`. Supported path - запускать
 `/opt/changerail/bin/changerail-delivery-runner` из ChangeRail checkout или
