@@ -10,6 +10,7 @@
 - `changerail.review-preflight-result.v1`
 - `changerail.delivery-manifest.v1`
 - `changerail.evidence-index.v1`
+- `changerail.external-blocker.v1`
 - `changerail.delivery-run.v1`
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
@@ -936,6 +937,26 @@ signals являются preferred source of truth; если их нет, fallba
 Malformed reason из authoritative terminal event не принимается как classifier:
 runner записывает стабильный `terminal_reason: malformed_terminal_reason` для
 operator diagnostics.
+
+Recoverable external blocker имеет отдельный bounded contract. Только
+structured JSONL terminal event с `terminal_reason:
+recoverable_external_blocker` и объектом `external_blocker` может сделать
+blocked retained payload resumable. Объект использует schema
+`changerail.external-blocker.v1`, run-local `blocker_id`, known `class`
+(`credential`, `network`, `license`, `external_service`, `platform_access`,
+`required_software`), `observed_at`, `retryable: true` и
+`evidence_policy.required_ids`/`max_age_seconds`. Contract intentionally
+value-free: prompts, entered values, response bodies, screenshots, raw output,
+credentials и project-specific reason strings запрещены schema/runner
+validation. Legacy marker-line `terminal_reason: external_blocker` сохраняет
+diagnostic reason, но не создает retained dirty-resume authority.
+
+Когда valid recoverable external blocker завершает child, status also stores
+exact `retained_payload` identity: source run/status path, card/workspace,
+`HEAD`, reviewed tree SHA, diff fingerprint, review target и optional declared
+execution target identity. Runner не сообщает delivery success и не ослабляет
+последующий review/publish gate. Если structured blocker invalid или retained
+identity cannot be captured, attempt stays `BLOCKED` and non-resumable.
 Если preflight возвращает `CODEX auth: fail` или `CODEX_HOME symlinks: fail`,
 оператор должен использовать remediation из
 `docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`: ignored
@@ -948,6 +969,26 @@ preflight как proof. Runner повторяет полный fresh preflight �
 и запускает `$changerail-deliver` только если publish target доказан заново.
 Если prior status отсутствует, невалиден, относится к другой card/workspace или
 fresh proof снова не проходит, resume пишет `BLOCKED` и не запускает delivery.
+
+Dirty retained resume поддерживается только для exact payload branches:
+existing `investigation_required` branch требует fresh deterministic published
+authorization, а `recoverable_external_blocker` branch требует explicit
+`--evidence-index` under ignored `.runtime/changerail/evidence/`. Evidence index
+must be schema-valid `changerail.evidence-index.v1`, scoped to source
+run/card, contain each required id exactly once with `status: passed`, runtime
+storage, non-redacted state and completion time newer than blocker observation
+and within `max_age_seconds`. Evidence proves only retry eligibility: resumed
+child still reruns mandatory verification, external gate and independent
+review/publish gates. Missing/stale/wrong-scope/non-passing evidence, payload
+drift, workspace/card mismatch, unknown blocker class or target mismatch fail
+closed before Codex launch with stable terminal reasons.
+
+If project declares `.changerail/execution-target.json`, retained identity,
+current declaration, evidence-index target metadata and every recovery evidence
+entry must match exactly by logical id/fingerprint/policy. External recovery
+never authorizes provision, rebind, restore, clone or target substitution;
+explicit target rebind starts a new clean delivery attempt and cannot reuse
+dirty retained evidence.
 
 ## Delivery Plan
 
@@ -1061,6 +1102,9 @@ bin/changerail-delivery-runner preflight-plan delivery-plan.json --consumer-root
 bin/changerail-delivery-runner run-plan delivery-plan.json --consumer-root /opt/example-workspace
 bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /opt/example-workspace \
   --status-path /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json
+bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /opt/example-workspace \
+  --status-path /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json \
+  --evidence-index service-a/.runtime/changerail/evidence/external-resume/index.json
 bin/changerail-delivery-runner status-plan \
   /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json --json
 ```
@@ -1085,6 +1129,17 @@ card с `recovery_for`; external blockers не создают implementation rec
 source, быть в том же workspace/wave и наследовать dependencies. Source
 становится `recovered` и получает `recovered_by` только после успешной delivery
 recovery card; downstream dependencies запускаются после этого.
+
+Если child завершился на valid retained `recoverable_external_blocker`,
+aggregate card status сохраняет `retained_recovery` с source run/status,
+fingerprint, blocker id/class/policy и optional execution target identity.
+`resume-plan --evidence-index <path>` resumes the original child before
+downstream cards; already delivered cards remain skipped. Without evidence,
+with duplicate/mixed retained recovery, wrong workspace/card, target drift or
+failed child resume, queue remains blocked and downstream dependencies stay
+blocked. Linked `recovery_for` implementation cards are rejected for this
+external-retained branch because the only authorized dirty path is exact
+original-child resume.
 
 ## Review Cycle History
 

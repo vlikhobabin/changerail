@@ -480,6 +480,25 @@ terminal reason.
 - **THEN** the run record explicitly reports usage as unavailable instead of
   guessing values
 
+### Requirement: Recoverable external blocker contract
+`changerail.delivery-run.v1` MUST разрешать bounded объект
+`changerail.external-blocker.v1` только для blocked attempt. Объект MUST
+содержать run-local blocker id, known class, observation timestamp,
+`retryable: true` и bounded required evidence ids/maximum age, а также MUST
+отклонять prompts, values, response bodies, screenshots и raw output.
+
+#### Scenario: Value-free blocker проходит валидацию
+- **WHEN** blocked run записывает known class и normalized evidence ids без
+  content-bearing fields
+- **THEN** delivery-run schema validation проходит
+- **AND** последующий resume может проверить policy без parsing terminal prose
+
+#### Scenario: Secret-bearing blocker не проходит валидацию
+- **WHEN** blocker metadata включает entered credential, environment value,
+  response body, screen content или arbitrary project-specific reason
+- **THEN** schema validation fail closed
+- **AND** record не может разрешить retained resume
+
 ### Requirement: Delivery progress wire contract
 `changerail.delivery-run.v1` and `changerail.delivery-plan-status.v1` MUST
 support one optional `changerail.delivery-progress.v1` object with bounded
@@ -1760,7 +1779,9 @@ or ignored runtime evidence content.
 resume validation as structured preflight checks with stable machine reasons.
 The contract MUST distinguish prior-status invalidity, card mismatch, workspace
 mismatch, missing retained identity, payload drift, authorization absence,
-authorization staleness, relation mismatch and authorization ceiling violation.
+authorization staleness, relation mismatch, authorization ceiling violation,
+missing/stale/mismatched external evidence, non-passing evidence and target
+identity mismatch.
 
 #### Scenario: Successful retained resume records fresh checks
 - **WHEN** retained-payload resume validation succeeds
@@ -1775,6 +1796,25 @@ authorization staleness, relation mismatch and authorization ceiling violation.
 - **THEN** the resumed delivery-run status has `terminal_outcome: BLOCKED`
 - **AND** `terminal_reason` is a stable lowercase machine value describing that
   class
+
+### Requirement: External resume evidence contract
+Retained external resume MUST ссылаться на schema-valid ignored evidence index,
+scope которого идентифицирует source run/card, а required entries имеют passed,
+fresh и redacted state согласно blocker policy.
+
+#### Scenario: Fresh evidence принимается
+- **WHEN** каждый required evidence id существует один раз, имеет
+  `status: passed`, принадлежит source scope и завершен после blocker observation
+  в пределах maximum age
+- **THEN** resume записывает fresh passing checks для blocker, evidence и
+  payload identity
+- **AND** raw evidence output не копируется в delivery status
+
+#### Scenario: Evidence нельзя переиспользовать между scope
+- **WHEN** evidence принадлежит другому card/run, не содержит required id,
+  является stale или сообщает non-passing status
+- **THEN** resume status становится `BLOCKED` со stable failure reason
+- **AND** child continuation не запускается
 
 ### Requirement: Published authorization remains source of truth for retained resume
 Retained-payload resume MUST use the published investigation authorization
@@ -1797,9 +1837,10 @@ Authorization paths MUST be tracked under `openspec/board/4.done/`, clean at
 
 ### Requirement: Queue retained recovery status metadata
 `changerail.delivery-plan-status.v1` MUST represent
-`investigation_required` recovery with bounded structured metadata. Aggregate
-card status MUST be able to identify the recovery kind, source run status path,
-source terminal reason and retained-payload fingerprint summary without
+`investigation_required` and `recoverable_external_blocker` recovery with
+bounded structured metadata. Aggregate card status MUST be able to identify the
+recovery kind, source run status path, source terminal reason, retained-payload
+fingerprint summary and external blocker policy when applicable without
 embedding raw child logs or raw source payload.
 
 #### Scenario: Aggregate status records retained recovery context
@@ -1814,11 +1855,23 @@ embedding raw child logs or raw source payload.
 - **THEN** queue validation records `BLOCKED`
 - **AND** it identifies the duplicate recovery as a stable machine reason
 
+### Requirement: Aggregate retained external recovery contract
+`changerail.delivery-plan-status.v1` MUST представлять source run/status, card,
+fingerprint, blocker id/class и evidence policy для resume одного original
+child, не изменяя существующий investigation recovery object.
+
+#### Scenario: Plan status сохраняет resumable context
+- **WHEN** child завершается на valid recoverable external blocker
+- **THEN** aggregate card status сохраняет bounded recovery context и source
+  identity
+- **AND** raw logs и evidence contents остаются indirect ignored references
+
 ### Requirement: Queue recovery terminal reasons are stable
 Queue retained recovery MUST use stable lowercase machine reasons for rejected
 resume or recovery augmentation. The contract MUST cover missing prior status,
 invalid prior status, wrong card, wrong workspace, missing retained identity,
-fingerprint drift, stale authorization and duplicate recovery path.
+fingerprint drift, stale authorization, missing/stale evidence, target mismatch
+and duplicate recovery path.
 
 #### Scenario: Failed queue recovery is machine-readable
 - **WHEN** `resume-plan` rejects an `investigation_required` recovery
@@ -1863,6 +1916,23 @@ non-sensitive `fingerprint` и `target_substitution_policy: forbid` и MUST
 - **WHEN** evidence отсутствует, ссылается на другую или несколько identities
 - **THEN** review/publish gate fail closed
 - **AND** raw endpoint или credential не запрашивается как remediation
+
+### Requirement: Retained recovery SHALL preserve declared execution target
+The delivery contracts MUST сохранять logical id/fingerprint объявленной
+project execution target в retained identity и MUST NOT принимать
+blocker/evidence как authority на provision, rebind или substitution.
+
+#### Scenario: Target identity совпадает
+- **WHEN** blocker, current project declaration, evidence-index metadata and
+  every recovery evidence entry refer to the same logical id/fingerprint
+- **THEN** target identity check может пройти вместе с остальными resume gates
+- **AND** physical endpoint и credentials не копируются в status.
+
+#### Scenario: Target identity изменилась
+- **WHEN** current declaration отсутствует, имеет другой fingerprint или
+  evidence относится к другой/нескольким целям
+- **THEN** retained resume fail closed
+- **AND** explicit rebind требует нового clean delivery attempt.
 
 ### Requirement: Explicit target rebind invalidates prior lineage
 Изменение tracked execution target MUST начинать новый clean delivery attempt и

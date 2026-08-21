@@ -16,6 +16,27 @@
     "usage"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": ["external_blocker"]
+      },
+      "then": {
+        "required": ["terminal_outcome", "terminal_reason", "retained_payload"],
+        "properties": {
+          "result": {
+            "const": "BLOCKED"
+          },
+          "terminal_outcome": {
+            "const": "BLOCKED"
+          },
+          "terminal_reason": {
+            "const": "recoverable_external_blocker"
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "schema": {
       "const": "changerail.delivery-run.v1"
@@ -144,6 +165,9 @@
     },
     "retained_payload": {
       "$ref": "#/$defs/retainedPayloadIdentity"
+    },
+    "external_blocker": {
+      "$ref": "#/$defs/externalBlocker"
     },
     "commit": {
       "type": "string",
@@ -602,6 +626,57 @@
     "terminalReason": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9_]*$"
+    },
+    "externalBlocker": {
+      "type": "object",
+      "required": [
+        "schema",
+        "blocker_id",
+        "class",
+        "observed_at",
+        "retryable",
+        "evidence_policy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.external-blocker.v1"
+        },
+        "blocker_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "class": {
+          "enum": ["credential", "network", "license", "external_service", "platform_access", "required_software"]
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retryable": {
+          "const": true
+        },
+        "evidence_policy": {
+          "type": "object",
+          "required": ["required_ids", "max_age_seconds"],
+          "additionalProperties": false,
+          "properties": {
+            "required_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              }
+            },
+            "max_age_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
     },
     "retainedPayloadIdentity": {
       "type": "object",

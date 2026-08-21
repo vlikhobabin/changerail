@@ -55,8 +55,8 @@ project execution target в retained identity и MUST NOT принимать
 blocker/evidence как authority на provision, rebind или substitution.
 
 #### Scenario: Target identity совпадает
-- **WHEN** blocker, current project declaration и target-bearing recovery
-  evidence ссылаются на тот же logical id/fingerprint
+- **WHEN** blocker, current project declaration, evidence-index metadata and
+  every recovery evidence entry refer to the same logical id/fingerprint
 - **THEN** target identity check может пройти вместе с остальными resume gates
 - **AND** physical endpoint и credentials не копируются в status.
 

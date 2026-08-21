@@ -197,6 +197,36 @@ def delivery_run_minimal() -> dict[str, Any]:
     }
 
 
+def retained_payload_identity() -> dict[str, Any]:
+    return {
+        "schema": "changerail.retained-payload-identity.v1",
+        "source_run_id": "example-run",
+        "source_status_path": ".runtime/changerail/delivery-runs/example-run/status.json",
+        "captured_at": DATE,
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "workspace": {"root": "/opt/changerail"},
+        "head_commit": "abc123",
+        "tree_sha": TREE,
+        "diff_fingerprint": SHA,
+        "review_target": {"kind": "working-tree"},
+        "execution_target": dict(TARGET),
+    }
+
+
+def external_blocker() -> dict[str, Any]:
+    return {
+        "schema": "changerail.external-blocker.v1",
+        "blocker_id": "external-gate-ready",
+        "class": "external_service",
+        "observed_at": DATE,
+        "retryable": True,
+        "evidence_policy": {
+            "required_ids": ["external-gate-ready"],
+            "max_age_seconds": 3600,
+        },
+    }
+
+
 def delivery_progress(phase: str = "do", stage: str = "implementation", counter: int = 3) -> dict[str, Any]:
     return {
         "schema": "changerail.delivery-progress.v1",
@@ -422,6 +452,24 @@ def delivery_plan_status() -> dict[str, Any]:
             },
         ],
         "summary": {"total_cards": 2, "delivered": 2, "blocked": 0, "no_go": 0, "skipped": 0},
+    }
+
+
+def retained_external_recovery() -> dict[str, Any]:
+    return {
+        "kind": "original-retained-payload",
+        "source_run_id": "child-a",
+        "source_run_status_path": ".runtime/changerail/delivery-runs/child-a/status.json",
+        "source_terminal_reason": "recoverable_external_blocker",
+        "card": {"id": "service-a-card", "path": "openspec/board/3.inprogress/service-a-card.md"},
+        "fingerprint": {
+            "head_commit": "abc123",
+            "tree_sha": TREE,
+            "diff_fingerprint": SHA,
+        },
+        "review_target_kind": "working-tree",
+        "execution_target": dict(TARGET),
+        "external_blocker": external_blocker(),
     }
 
 
@@ -1121,6 +1169,27 @@ def main() -> int:
             reason_errors = validator(reason_fixture)
             if reason_errors:
                 failures.append(f"{name}: terminal reason fixture failed: {reason_errors}")
+            external_fixture = delivery_run_minimal()
+            external_fixture["result"] = "BLOCKED"
+            external_fixture["terminal_outcome"] = "BLOCKED"
+            external_fixture["terminal_reason"] = "recoverable_external_blocker"
+            external_fixture["retained_payload"] = retained_payload_identity()
+            external_fixture["external_blocker"] = external_blocker()
+            external_errors = validator(external_fixture)
+            if external_errors:
+                failures.append(f"{name}: external blocker fixture failed: {external_errors}")
+            unknown_external = copy.deepcopy(external_fixture)
+            unknown_external["external_blocker"]["class"] = "project_specific_outage"
+            if not validator(unknown_external):
+                failures.append(f"{name}: unknown external blocker class unexpectedly passed")
+            content_external = copy.deepcopy(external_fixture)
+            content_external["external_blocker"]["response_body"] = "RESPONSE_BODY_SHOULD_NOT_PASS"
+            if not validator(content_external):
+                failures.append(f"{name}: content-bearing external blocker unexpectedly passed")
+            missing_retained_external = copy.deepcopy(external_fixture)
+            missing_retained_external.pop("retained_payload")
+            if not validator(missing_retained_external):
+                failures.append(f"{name}: external blocker without retained identity unexpectedly passed")
             invalid_reason = copy.deepcopy(reason_fixture)
             invalid_reason["terminal_reason"] = "free form reason"
             if not validator(invalid_reason):
@@ -1260,6 +1329,23 @@ def main() -> int:
     recovery_status["summary"]["recovered"] = 1
     if validate_delivery_plan_status(recovery_status):
         failures.append("changerail-delivery-plan-status.schema.json: recovery status fixture failed")
+
+    external_recovery_status = delivery_plan_status()
+    external_recovery_status["result"] = "BLOCKED"
+    external_recovery_status["terminal_outcome"] = "BLOCKED"
+    external_recovery_status["cards"][0]["state"] = "blocked"
+    external_recovery_status["cards"][0]["result"] = "BLOCKED"
+    external_recovery_status["cards"][0]["terminal_reason"] = "recoverable_external_blocker"
+    external_recovery_status["cards"][0]["retained_recovery"] = retained_external_recovery()
+    external_recovery_status["summary"]["delivered"] = 1
+    external_recovery_status["summary"]["blocked"] = 1
+    if validate_delivery_plan_status(external_recovery_status):
+        failures.append("changerail-delivery-plan-status.schema.json: external retained recovery fixture failed")
+
+    invalid_external_recovery = copy.deepcopy(external_recovery_status)
+    invalid_external_recovery["cards"][0]["retained_recovery"]["external_blocker"]["entered_credential"] = "secret"
+    if not validate_delivery_plan_status(invalid_external_recovery):
+        failures.append("changerail-delivery-plan-status.schema.json: content-bearing external retained recovery unexpectedly passed")
 
     invalid_plan_progress = delivery_plan_status()
     invalid_plan_progress["cards"][0]["progress"]["stage"] = "free-form-child-prose"

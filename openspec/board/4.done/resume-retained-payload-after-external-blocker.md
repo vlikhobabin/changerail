@@ -1,13 +1,13 @@
 # Возобновление retained payload после внешнего blocker
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -73,13 +73,23 @@ resume path после восстановления external condition.
 - `resume-retained-payload-after-external-blocker`
 
 ## Verify
-- `python3 scripts/smoke-contract-schemas.py`
-- `python3 scripts/smoke-delivery-runner.py`
-- `bin/openspec validate --all --strict`
-- `python3 scripts/public-surface-scan.py`
+- `python3 scripts/smoke-contract-schemas.py` - passed; retained evidence
+  `smoke-contract-schemas` in
+  `.runtime/changerail/evidence/resume-retained-payload-after-external-blocker/index.json`.
+- `python3 scripts/smoke-delivery-runner.py` - passed; retained evidence
+  `smoke-delivery-runner` in
+  `.runtime/changerail/evidence/resume-retained-payload-after-external-blocker/index.json`.
+- `bin/openspec validate --all --strict` - passed; retained evidence
+  `openspec-all-strict` in
+  `.runtime/changerail/evidence/resume-retained-payload-after-external-blocker/index.json`.
+- `git diff --check` - passed; retained evidence `git-diff-check` in
+  `.runtime/changerail/evidence/resume-retained-payload-after-external-blocker/index.json`.
+- `python3 scripts/public-surface-scan.py` - passed; retained evidence
+  `public-surface-scan` in
+  `.runtime/changerail/evidence/resume-retained-payload-after-external-blocker/index.json`.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-resume-retained-payload-after-external-blocker/`
 
 ## Related
 - `bin/changerail-delivery-runner`
@@ -89,14 +99,20 @@ resume path после восстановления external condition.
 - `openspec/board/4.done/support-runner-resume-after-investigation-required.md`
 - `openspec/board/1.backlog/enforce-declared-execution-target-invariant.md`
 - `openspec/board/4.done/authorize-bounded-external-blocker-resume-payload.md`
-- `openspec/changes/resume-retained-payload-after-external-blocker/`
+- `openspec/changes/archive/2026-08-21-resume-retained-payload-after-external-blocker/`
 
 ## Result
-Проработка завершена; apply-ready artifacts созданы, реализация не начата.
+Реализован bounded retained resume после recoverable external blocker:
+structured blocker object, evidence-index validation, exact payload/target
+fingerprint checks, original-child `resume-plan` parity, schemas, docs and
+smoke coverage. Review cycle 1 returned `no-go` on mixed target-bearing
+evidence; scoped fix now rejects all mismatched recovery evidence entries and
+review cycle 2 returned a fresh `go` verdict.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- После published investigation authorization выполнить
-  `$chrl-deliver openspec/board/2.todo/resume-retained-payload-after-external-blocker.md`.
+- done
 
 ## Change 1: `resume-retained-payload-after-external-blocker`
 
@@ -133,7 +149,7 @@ fingerprint resume для single-card/queue без общего dirty-tree bypas
 - `openspec/board/2.todo/enforce-declared-execution-target-invariant.md`
 
 ### Related
-- `openspec/changes/resume-retained-payload-after-external-blocker/`
+- `openspec/changes/archive/2026-08-21-resume-retained-payload-after-external-blocker/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Log
@@ -156,3 +172,11 @@ fingerprint resume для single-card/queue без общего dirty-tree bypas
 - 2026-08-21T09:25:00Z linked exact published authorization source
   `authorize-bounded-external-blocker-resume-payload`; successor remains
   queued until remaining dependencies are delivered.
+- 2026-08-21T15:20:00Z implementation, spec sync, verification and archive
+  completed; retained evidence index:
+  `.runtime/changerail/evidence/resume-retained-payload-after-external-blocker/index.json`.
+- 2026-08-21T15:52:29Z independent review cycle 1 returned `no-go` (`R1`):
+  extra recovery evidence entry with alternate execution target could pass.
+  Added entry-level target validation, mixed-target smoke coverage and aligned
+  docs/spec wording.
+- 2026-08-21T16:14:18Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

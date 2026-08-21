@@ -78,10 +78,10 @@ resume.
 7. **Declared target identity is immutable across retained resume.** If the
    source project declares an execution target, retained identity also freezes
    its logical id and sanitized fingerprint. Resume requires the current
-   declaration and every target-bearing recovery evidence entry to match.
-   Missing/mismatched/multiple targets fail before child launch. An explicit
-   operator rebind starts a new clean attempt and invalidates prior runtime
-   evidence; it cannot reuse this dirty-resume branch.
+   declaration, evidence-index metadata and every recovery evidence entry to
+   match. Missing/mismatched/multiple targets fail before child launch. An
+   explicit operator rebind starts a new clean attempt and invalidates prior
+   runtime evidence; it cannot reuse this dirty-resume branch.
 
 ## Risks / Trade-offs
 

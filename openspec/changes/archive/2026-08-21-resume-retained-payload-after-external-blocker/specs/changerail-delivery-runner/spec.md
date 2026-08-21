@@ -37,6 +37,8 @@ review/publish gates.
 #### Scenario: Resume input stale или mismatched
 - **WHEN** evidence отсутствует, stale, failed, относится к другому run/card
   либо payload/workspace identity drifted
+- **OR** target-bound recovery evidence has missing, mismatched or multiple
+  entry target identities
 - **THEN** resume завершается non-zero до Codex launch
 - **AND** status записывает stable machine-classified blocker reason
 
@@ -64,7 +66,8 @@ MUST завершаться до Codex launch при target drift или поп�
 recovery как authority на создание, переподключение или подмену среды.
 
 #### Scenario: Recovery evidence указывает другую цель
-- **WHEN** evidence target id/fingerprint не совпадает с source retained identity
+- **WHEN** evidence target id/fingerprint или target-bound entry
+  id/fingerprint не совпадает с source retained identity
 - **THEN** single-card и queue resume fail closed со stable target-mismatch
   reason
 - **AND** child не запускается и downstream queue не освобождается.

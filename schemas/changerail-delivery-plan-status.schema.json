@@ -332,6 +332,20 @@
     },
     "retainedRecovery": {
       "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source_terminal_reason": {
+                "const": "recoverable_external_blocker"
+              }
+            }
+          },
+          "then": {
+            "required": ["external_blocker"]
+          }
+        }
+      ],
       "required": [
         "kind",
         "source_run_id",
@@ -354,7 +368,7 @@
           "$ref": "#/$defs/relativePath"
         },
         "source_terminal_reason": {
-          "const": "investigation_required"
+          "enum": ["investigation_required", "recoverable_external_blocker"]
         },
         "card": {
           "type": "object",
@@ -394,6 +408,60 @@
         },
         "execution_target": {
           "$ref": "#/$defs/executionTargetIdentity"
+        },
+        "external_blocker": {
+          "$ref": "#/$defs/externalBlocker"
+        }
+      }
+    },
+    "externalBlocker": {
+      "type": "object",
+      "required": [
+        "schema",
+        "blocker_id",
+        "class",
+        "observed_at",
+        "retryable",
+        "evidence_policy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.external-blocker.v1"
+        },
+        "blocker_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "class": {
+          "enum": ["credential", "network", "license", "external_service", "platform_access", "required_software"]
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retryable": {
+          "const": true
+        },
+        "evidence_policy": {
+          "type": "object",
+          "required": ["required_ids", "max_age_seconds"],
+          "additionalProperties": false,
+          "properties": {
+            "required_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              }
+            },
+            "max_age_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },

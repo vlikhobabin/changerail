@@ -50,6 +50,26 @@ AUTH_REMEDIATION = (
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
 TERMINAL_FIELD_KEYS = {"terminal_outcome", "terminal-outcome", "outcome", "result"}
 TERMINAL_REASON_KEYS = {"terminal_reason", "terminal-reason", "reason_code", "reason-code"}
+RECOVERABLE_EXTERNAL_REASON = "recoverable_external_blocker"
+EXTERNAL_BLOCKER_SCHEMA = "changerail.external-blocker.v1"
+RETAINED_RESUME_CONTEXT_SCHEMA = "changerail.retained-resume-context.v1"
+EXTERNAL_BLOCKER_CLASSES = (
+    "credential",
+    "network",
+    "license",
+    "external_service",
+    "platform_access",
+    "required_software",
+)
+EXTERNAL_BLOCKER_REQUIRED_KEYS = {
+    "schema",
+    "blocker_id",
+    "class",
+    "observed_at",
+    "retryable",
+    "evidence_policy",
+}
+EXTERNAL_BLOCKER_POLICY_KEYS = {"required_ids", "max_age_seconds"}
 BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 MAX_TIMELINE_EVENTS = 100
 MAX_COMMANDS = 50
@@ -70,6 +90,7 @@ REMOTE_FAILURE_CLASSES = (
 TRANSIENT_REMOTE_FAILURE_CLASSES = {"dns", "timeout", "unknown_remote_failure"}
 URL_USERINFO_RE = re.compile(r"([a-z][a-z0-9+.-]*://)([^/@\s]+)@", re.IGNORECASE)
 TOKEN_VALUE_RE = re.compile(r"(?i)(token|password|passwd|secret|access_key|api_key|authorization)=([^\s&]+)")
+EVIDENCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 DEFAULT_COMMAND_OUTPUT_THRESHOLD_BYTES = 64 * 1024
 
 
@@ -121,6 +142,8 @@ class Check:
 class TerminalSignal:
     outcome: str | None = None
     reason: str | None = None
+    external_blocker: dict[str, Any] | None = None
+    external_blocker_error: str | None = None
 
 
 @dataclass
@@ -298,6 +321,74 @@ def parse_utc(value: str | None) -> datetime | None:
         return None
 
 
+def repo_relative_or_none(path: Path, root: Path) -> str | None:
+    try:
+        return path.resolve(strict=False).relative_to(root.resolve(strict=False)).as_posix()
+    except ValueError:
+        return None
+
+
+def validate_external_blocker(payload: Any) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["external_blocker must be an object"]
+    extra = sorted(set(payload) - EXTERNAL_BLOCKER_REQUIRED_KEYS)
+    if extra:
+        errors.append("external_blocker has unsupported fields: " + ", ".join(extra))
+    missing = sorted(key for key in EXTERNAL_BLOCKER_REQUIRED_KEYS if key not in payload)
+    if missing:
+        errors.append("external_blocker missing fields: " + ", ".join(missing))
+    if payload.get("schema") != EXTERNAL_BLOCKER_SCHEMA:
+        errors.append(f"external_blocker.schema must be {EXTERNAL_BLOCKER_SCHEMA}")
+    blocker_id = payload.get("blocker_id")
+    if not isinstance(blocker_id, str) or not EVIDENCE_ID_RE.fullmatch(blocker_id):
+        errors.append("external_blocker.blocker_id must be a normalized id")
+    blocker_class = payload.get("class")
+    if blocker_class not in EXTERNAL_BLOCKER_CLASSES:
+        errors.append("external_blocker.class must be known")
+    observed_at = payload.get("observed_at")
+    if not isinstance(observed_at, str) or parse_utc(observed_at) is None:
+        errors.append("external_blocker.observed_at must be date-time")
+    if payload.get("retryable") is not True:
+        errors.append("external_blocker.retryable must be true")
+    policy = payload.get("evidence_policy")
+    if not isinstance(policy, dict):
+        errors.append("external_blocker.evidence_policy must be an object")
+        return errors
+    policy_extra = sorted(set(policy) - EXTERNAL_BLOCKER_POLICY_KEYS)
+    if policy_extra:
+        errors.append("external_blocker.evidence_policy has unsupported fields: " + ", ".join(policy_extra))
+    required_ids = policy.get("required_ids")
+    if not isinstance(required_ids, list) or not required_ids:
+        errors.append("external_blocker.evidence_policy.required_ids must be a non-empty array")
+    else:
+        seen: set[str] = set()
+        for index, evidence_id in enumerate(required_ids):
+            if not isinstance(evidence_id, str) or not EVIDENCE_ID_RE.fullmatch(evidence_id):
+                errors.append(f"external_blocker.evidence_policy.required_ids[{index}] must be a normalized id")
+            elif evidence_id in seen:
+                errors.append(f"external_blocker.evidence_policy.required_ids[{index}] duplicates {evidence_id}")
+            else:
+                seen.add(evidence_id)
+    max_age = policy.get("max_age_seconds")
+    if type(max_age) is not int or max_age <= 0:
+        errors.append("external_blocker.evidence_policy.max_age_seconds must be a positive integer")
+    return errors
+
+
+def event_external_blocker(event: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    candidate = event.get("external_blocker")
+    data = event.get("data")
+    if candidate is None and isinstance(data, dict):
+        candidate = data.get("external_blocker")
+    if candidate is None:
+        return None, None
+    errors = validate_external_blocker(candidate)
+    if errors:
+        return None, "; ".join(errors)
+    return copy.deepcopy(candidate), None
+
+
 def elapsed_seconds(start: datetime | None, end: datetime | None) -> float | None:
     if start is None or end is None:
         return None
@@ -341,6 +432,9 @@ def child_environment(args: argparse.Namespace) -> dict[str, str]:
     env["CHANGERAIL_DISCOVERY_POLICY"] = child_discovery_policy()
     env["CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS"] = str(progress_heartbeat_interval_seconds())
     env["CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS"] = str(progress_stale_after_seconds())
+    resume_context = getattr(args, "resume_context", None)
+    if isinstance(resume_context, dict):
+        env["CHANGERAIL_RECOVERY_CONTEXT"] = json.dumps(resume_context, ensure_ascii=True, sort_keys=True)
     return env
 
 
@@ -750,11 +844,14 @@ def retained_recovery_summary(child_status: dict[str, Any], run_status_path: str
     review_target = retained.get("review_target")
     if not isinstance(card, dict) or not isinstance(review_target, dict):
         return None
+    source_reason = child_status.get("terminal_reason")
+    if source_reason not in {"investigation_required", RECOVERABLE_EXTERNAL_REASON}:
+        return None
     summary = {
         "kind": "original-retained-payload",
         "source_run_id": retained.get("source_run_id"),
         "source_run_status_path": run_status_path or retained.get("source_status_path"),
-        "source_terminal_reason": "investigation_required",
+        "source_terminal_reason": source_reason,
         "card": {
             "id": card.get("id"),
             "path": card.get("path"),
@@ -769,6 +866,11 @@ def retained_recovery_summary(child_status: dict[str, Any], run_status_path: str
     target_identity = retained.get("execution_target")
     if isinstance(target_identity, dict):
         summary["execution_target"] = target_identity
+    external_blocker = child_status.get("external_blocker")
+    if source_reason == RECOVERABLE_EXTERNAL_REASON:
+        if validate_external_blocker(external_blocker):
+            return None
+        summary["external_blocker"] = external_blocker
     if all(isinstance(value, str) and value for value in (
         summary["source_run_id"],
         summary["source_run_status_path"],
@@ -1405,6 +1507,9 @@ def child_command_for_card(args: argparse.Namespace, card: dict[str, Any], works
             "--run-id",
             child_run_id(args, card),
         ]
+        evidence_index = card.get("resume_evidence_index")
+        if isinstance(evidence_index, str) and evidence_index:
+            command.extend(["--evidence-index", evidence_index])
     else:
         command = [
             str(args.launcher),
@@ -2376,8 +2481,20 @@ def event_terminal_signal(event: Any) -> TerminalSignal:
         marker_signal = terminal_signal_from_marker_lines(marker)
         if marker_signal.outcome:
             signal = marker_signal
+    blocker, blocker_error = event_external_blocker(event)
+    if blocker_error and signal.outcome == "BLOCKED":
+        signal.reason = "invalid_external_blocker"
+        signal.external_blocker_error = blocker_error
+    elif blocker and signal.outcome == "BLOCKED":
+        if signal.reason == RECOVERABLE_EXTERNAL_REASON:
+            signal.external_blocker = blocker
+        else:
+            signal.reason = "invalid_external_blocker"
+            signal.external_blocker_error = "external_blocker requires recoverable_external_blocker terminal_reason"
     if signal.outcome is None:
         signal.reason = None
+        signal.external_blocker = None
+        signal.external_blocker_error = None
     return signal
 
 
@@ -2607,10 +2724,25 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["terminal_outcome"] = outcome
     if terminal_signal.reason:
         record["terminal_reason"] = terminal_signal.reason
-    if outcome == "BLOCKED" and terminal_signal.reason == "investigation_required":
+    if outcome == "BLOCKED" and terminal_signal.reason == RECOVERABLE_EXTERNAL_REASON and not terminal_signal.external_blocker:
+        checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
+        if isinstance(checks_payload, list):
+            checks_payload.append(
+                check_payload(
+                    Check(
+                        "external blocker",
+                        "fail",
+                        terminal_signal.external_blocker_error or "recoverable external blocker lacks structured metadata",
+                        {"detail": "invalid_external_blocker"},
+                    )
+                )
+            )
+    elif outcome == "BLOCKED" and terminal_signal.reason in {"investigation_required", RECOVERABLE_EXTERNAL_REASON}:
         identity, identity_error = retained_payload_identity(args, root)
         if identity:
             record["retained_payload"] = identity
+            if terminal_signal.reason == RECOVERABLE_EXTERNAL_REASON and terminal_signal.external_blocker:
+                record["external_blocker"] = terminal_signal.external_blocker
         else:
             checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
             if isinstance(checks_payload, list):
@@ -2738,12 +2870,12 @@ def retained_resume_review_preflight(args: argparse.Namespace) -> tuple[Check, s
     )
 
 
-def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+def retained_identity_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, dict[str, Any] | None]:
     root = args.workspace.resolve(strict=False)
     retained = prior.get("retained_payload")
     if not isinstance(retained, dict):
         checks, reason = resume_fail("retained payload identity", "prior status has no retained_payload identity", "missing_retained_identity")
-        return checks, reason, False
+        return checks, reason, None
     expected_status_path = repository_relative(args.status_path, root)
     if retained.get("source_run_id") != prior.get("run_id") or retained.get("source_status_path") != expected_status_path:
         checks, reason = resume_fail(
@@ -2751,15 +2883,15 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "retained payload source run/status does not match the resume input",
             "prior_status_mismatch",
         )
-        return checks, reason, False
+        return checks, reason, None
     retained_card = retained.get("card")
     if not isinstance(retained_card, dict) or retained_card.get("id") != card_id(args.card) or retained_card.get("path") != args.card:
         checks, reason = resume_fail("retained payload card", "retained payload belongs to another card", "card_mismatch")
-        return checks, reason, False
+        return checks, reason, None
     retained_workspace = retained.get("workspace")
     if not isinstance(retained_workspace, dict) or retained_workspace.get("root") != str(root):
         checks, reason = resume_fail("retained payload workspace", "retained payload belongs to another workspace", "workspace_mismatch")
-        return checks, reason, False
+        return checks, reason, None
     review_target = retained.get("review_target")
     if not isinstance(review_target, dict) or review_target.get("kind") != "working-tree":
         checks, reason = resume_fail(
@@ -2767,7 +2899,7 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "retained payload does not identify the working tree review target",
             "missing_retained_identity",
         )
-        return checks, reason, False
+        return checks, reason, None
     fingerprint, fingerprint_error = review_fingerprint(root)
     if fingerprint is None:
         checks, reason = resume_fail(
@@ -2775,7 +2907,7 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             fingerprint_error or "current retained payload fingerprint cannot be computed",
             "retained_payload_fingerprint_unavailable",
         )
-        return checks, reason, False
+        return checks, reason, None
     mismatched = [
         key
         for key in ("head_commit", "tree_sha", "diff_fingerprint")
@@ -2787,12 +2919,12 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "current retained payload fingerprint differs: " + ", ".join(mismatched),
             "payload_drift",
         )
-        return checks, reason, False
+        return checks, reason, None
     current_target, target_error = execution_target_identity(root)
     retained_target = retained.get("execution_target")
     if target_error:
         checks, reason = resume_fail("retained payload target", target_error, "target_identity_unavailable")
-        return checks, reason, False
+        return checks, reason, None
     if isinstance(retained_target, dict) or isinstance(current_target, dict):
         if not execution_targets_match(retained_target, current_target):
             checks, reason = resume_fail(
@@ -2800,15 +2932,179 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
                 "current execution target differs from retained payload identity",
                 "target_identity_mismatch",
             )
-            return checks, reason, False
-    preflight_check, preflight_reason = retained_resume_review_preflight(args)
+            return checks, reason, None
     checks = [
-        Check("resume prior status", "pass", "prior investigation_required status accepted"),
+        Check("resume prior status", "pass", f"prior {prior.get('terminal_reason')} status accepted"),
         Check("retained payload fingerprint", "pass", "current working tree matches retained identity"),
         Check("retained payload target", "pass", "current declaration matches retained target identity"),
-        preflight_check,
     ]
+    return checks, None, retained
+
+
+def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+    checks, reason, _retained = retained_identity_checks(args, prior)
+    if reason:
+        return checks, reason, False
+    preflight_check, preflight_reason = retained_resume_review_preflight(args)
+    checks.append(preflight_check)
     return checks, preflight_reason, preflight_reason is None
+
+
+def evidence_resume_failure_reason(error: str) -> str:
+    if "scope" in error or "workspace" in error:
+        return "evidence_scope_mismatch"
+    if "stale" in error or "newer than blocker" in error or "maximum age" in error:
+        return "stale_evidence"
+    if "target" in error:
+        return "target_identity_mismatch"
+    if "missing" in error:
+        return "missing_evidence"
+    if "passed" in error or "status" in error:
+        return "evidence_not_passing"
+    if "redacted" in error or "secret" in error:
+        return "secret_bearing_evidence"
+    return "invalid_evidence"
+
+
+def load_external_evidence_index(args: argparse.Namespace) -> tuple[Path | None, dict[str, Any] | None, str | None, str | None]:
+    root = args.workspace.resolve(strict=False)
+    index_arg = getattr(args, "evidence_index", None)
+    if not isinstance(index_arg, Path):
+        return None, None, "external blocker resume requires --evidence-index", "missing_evidence"
+    index_path = index_arg if index_arg.is_absolute() else root / index_arg
+    relative = repo_relative_or_none(index_path, root)
+    if not relative or not relative.startswith(".runtime/changerail/evidence/"):
+        return index_path, None, "--evidence-index must resolve under .runtime/changerail/evidence/", "evidence_scope_mismatch"
+    data = load_json_object(index_path)
+    if data is None:
+        return index_path, None, "evidence index cannot be read as JSON object", "missing_evidence"
+    errors = schema_errors(data, "changerail-evidence-index.schema.json")
+    if errors:
+        return index_path, None, "; ".join(errors), "invalid_evidence"
+    return index_path, data, None, None
+
+
+def evidence_entry_target_matches(retained_target: Any, entry_target: Any) -> bool:
+    if isinstance(retained_target, dict):
+        return execution_targets_match(retained_target, entry_target)
+    return not isinstance(entry_target, dict)
+
+
+def evidence_entry_target_error(retained_target: Any, entry: dict[str, Any], index: int) -> str | None:
+    label = entry.get("id") if isinstance(entry.get("id"), str) else f"#{index}"
+    entry_target = entry.get("execution_target")
+    if isinstance(retained_target, dict):
+        if not isinstance(entry_target, dict):
+            return f"evidence entry {label} target identity is missing"
+        if not execution_targets_match(retained_target, entry_target):
+            return f"evidence entry {label} target identity does not match retained target"
+        return None
+    if isinstance(entry_target, dict):
+        return f"evidence entry {label} target identity is present without retained target"
+    return None
+
+
+def external_evidence_semantic_error(
+    args: argparse.Namespace,
+    prior: dict[str, Any],
+    retained: dict[str, Any],
+    blocker: dict[str, Any],
+    evidence: dict[str, Any],
+) -> str | None:
+    root = args.workspace.resolve(strict=False)
+    workspace = evidence.get("workspace")
+    if not isinstance(workspace, dict) or workspace.get("root") != str(root):
+        return "evidence workspace does not match source workspace"
+    scope = evidence.get("scope")
+    if not isinstance(scope, dict):
+        return "evidence scope is missing"
+    if scope.get("run_id") != prior.get("run_id"):
+        return "evidence scope run_id does not match source run"
+    if scope.get("card_id") != card_id(args.card) or scope.get("card_path") != args.card:
+        return "evidence scope card does not match source card"
+    retained_target = retained.get("execution_target")
+    evidence_target = evidence.get("execution_target")
+    if not evidence_entry_target_matches(retained_target, evidence_target):
+        return "evidence target identity does not match retained target"
+    entries = evidence.get("entries")
+    if not isinstance(entries, list):
+        return "evidence entries are missing"
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for index, entry in enumerate(entries):
+        if isinstance(entry, dict):
+            target_error = evidence_entry_target_error(retained_target, entry, index)
+            if target_error:
+                return target_error
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+            by_id.setdefault(entry["id"], []).append(entry)
+    policy = blocker.get("evidence_policy") if isinstance(blocker.get("evidence_policy"), dict) else {}
+    required_ids = policy.get("required_ids") if isinstance(policy.get("required_ids"), list) else []
+    max_age = policy.get("max_age_seconds") if type(policy.get("max_age_seconds")) is int else 0
+    observed = parse_utc(blocker.get("observed_at") if isinstance(blocker.get("observed_at"), str) else None)
+    now = datetime.now(timezone.utc)
+    for evidence_id in required_ids:
+        matches = by_id.get(evidence_id, [])
+        if len(matches) != 1:
+            return f"missing unique required evidence id: {evidence_id}"
+        entry = matches[0]
+        if entry.get("status") != "passed":
+            return f"required evidence {evidence_id} status is not passed"
+        if entry.get("storage") != "runtime":
+            return f"required evidence {evidence_id} must use runtime storage"
+        if entry.get("redacted") is not False:
+            return f"required evidence {evidence_id} must have redacted false"
+        ended = parse_utc(entry.get("ended_at") if isinstance(entry.get("ended_at"), str) else None)
+        if ended is None or observed is None or ended <= observed:
+            return f"required evidence {evidence_id} must be newer than blocker observation"
+        if max_age <= 0 or (now - ended).total_seconds() > max_age:
+            return f"required evidence {evidence_id} exceeds maximum age"
+        if not evidence_entry_target_matches(retained_target, entry.get("execution_target")):
+            return f"required evidence {evidence_id} target identity does not match retained target"
+    return None
+
+
+def external_retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+    blocker = prior.get("external_blocker")
+    blocker_errors = validate_external_blocker(blocker)
+    if blocker_errors:
+        reason = "unknown_blocker_class" if any("class" in error for error in blocker_errors) else "invalid_external_blocker"
+        checks, failure_reason = resume_fail("external blocker", "; ".join(blocker_errors), reason)
+        return checks, failure_reason, False
+    checks, reason, retained = retained_identity_checks(args, prior)
+    if reason or retained is None:
+        return checks, reason, False
+    index_path, evidence, error, evidence_reason = load_external_evidence_index(args)
+    if error or evidence is None:
+        checks.append(Check("external blocker evidence", "fail", error or "evidence index unavailable", {"detail": evidence_reason or "invalid_evidence"}))
+        return checks, evidence_reason or "invalid_evidence", False
+    semantic_error = external_evidence_semantic_error(args, prior, retained, blocker, evidence)
+    if semantic_error:
+        evidence_reason = evidence_resume_failure_reason(semantic_error)
+        checks.append(Check("external blocker evidence", "fail", semantic_error, {"detail": evidence_reason}))
+        return checks, evidence_reason, False
+    root = args.workspace.resolve(strict=False)
+    relative = repo_relative_or_none(index_path, root) or str(index_path)
+    required_count = len(blocker["evidence_policy"]["required_ids"])
+    checks.append(
+        Check(
+            "external blocker evidence",
+            "pass",
+            f"{relative} satisfies {required_count} required evidence ids",
+            {"detail": relative},
+        )
+    )
+    args.resume_context = {
+        "schema": RETAINED_RESUME_CONTEXT_SCHEMA,
+        "source_run_id": retained["source_run_id"],
+        "source_status_path": retained["source_status_path"],
+        "terminal_reason": RECOVERABLE_EXTERNAL_REASON,
+        "external_blocker": {
+            "blocker_id": blocker["blocker_id"],
+            "class": blocker["class"],
+        },
+        "evidence_index": relative,
+    }
+    return checks, None, True
 
 
 def resume_prior_checks(args: argparse.Namespace) -> tuple[list[Check], str | None, bool]:
@@ -2833,6 +3129,8 @@ def resume_prior_checks(args: argparse.Namespace) -> tuple[list[Check], str | No
         return checks, reason, False
     if prior.get("terminal_reason") == "investigation_required":
         return retained_resume_checks(args, prior)
+    if prior.get("terminal_reason") == RECOVERABLE_EXTERNAL_REASON:
+        return external_retained_resume_checks(args, prior)
     failure_class = prior_status_remote_failure(prior)
     if not failure_class:
         checks, reason = resume_fail(
@@ -2987,16 +3285,21 @@ def dependency_list(card: dict[str, Any]) -> list[str]:
 
 
 def retained_recovery_is_valid(card: dict[str, Any]) -> bool:
-    if card.get("terminal_reason") != "investigation_required":
-        return False
     retained = card.get("retained_recovery")
     if not isinstance(retained, dict):
         return False
     fingerprint = retained.get("fingerprint")
     retained_card = retained.get("card")
+    source_reason = retained.get("source_terminal_reason")
+    if card.get("terminal_reason") != source_reason:
+        return False
+    if source_reason == RECOVERABLE_EXTERNAL_REASON:
+        if validate_external_blocker(retained.get("external_blocker")):
+            return False
+    elif source_reason != "investigation_required":
+        return False
     return (
         retained.get("kind") == "original-retained-payload"
-        and retained.get("source_terminal_reason") == "investigation_required"
         and isinstance(retained.get("source_run_id"), str)
         and isinstance(retained.get("source_run_status_path"), str)
         and isinstance(retained_card, dict)
@@ -3042,6 +3345,11 @@ def retained_original_resume_workspaces(previous: dict[str, Any] | None, data: d
         if isinstance(workspace, str):
             workspaces.add(workspace)
     return workspaces
+
+
+def retained_recovery_is_external(card: dict[str, Any]) -> bool:
+    retained = card.get("retained_recovery")
+    return isinstance(retained, dict) and retained.get("source_terminal_reason") == RECOVERABLE_EXTERNAL_REASON
 
 
 def recovery_by_source(cards: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -3109,6 +3417,15 @@ def valid_recovery_augmentation(
             return False
         if not recoverable_source(source_previous):
             checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: source {source_id} is not recoverable"))
+            return False
+        if retained_recovery_is_external(source_previous):
+            checks.append(
+                Check(
+                    "resume recovery augmentation",
+                    "fail",
+                    f"{card_id}: external blocker recovery must resume the original child with evidence",
+                )
+            )
             return False
         if current.get("workspace") != source_current.get("workspace") or current.get("wave") != source_current.get("wave"):
             checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: recovery must share source workspace and wave"))
@@ -3276,8 +3593,21 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 if not isinstance(status_path, str) or not status_path:
                     status_path = retained_recovery.get("source_run_status_path") if isinstance(retained_recovery, dict) else None
                 if isinstance(status_path, str) and status_path:
-                    card["resume_status_path"] = status_path
-                    card["reason"] = "retained investigation recovery will resume original child"
+                    if retained_recovery_is_external(previous_card):
+                        evidence_index = getattr(args, "evidence_index", None)
+                        if isinstance(evidence_index, Path):
+                            card["resume_status_path"] = status_path
+                            card["resume_evidence_index"] = str(evidence_index)
+                            card["reason"] = "retained external blocker recovery will resume original child"
+                        else:
+                            card["state"] = "blocked"
+                            card["result"] = "BLOCKED"
+                            card["terminal_reason"] = "missing_evidence"
+                            card["reason"] = "retained external blocker recovery requires --evidence-index"
+                            checks.append(Check("retained external evidence", "fail", f"{card['id']}: --evidence-index is required"))
+                    else:
+                        card["resume_status_path"] = status_path
+                        card["reason"] = "retained investigation recovery will resume original child"
         if resume and isinstance(previous_card, dict) and recoverable_source(previous_card):
             recoveries = recovery_by_source(cards)
             if card["id"] in recoveries:
@@ -3291,6 +3621,9 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                     card["reason"] = previous_card["reason"]
                 if isinstance(previous_card.get("run_status_path"), str):
                     card["run_status_path"] = previous_card["run_status_path"]
+    if any(check.name == "retained external evidence" and check.status == "fail" for check in checks):
+        record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
+        return record, 1
     completed = {card["id"] for card in cards if card.get("state") == "skipped"}
     cards_by_id = {card["id"]: card for card in cards if isinstance(card.get("id"), str)}
     for card in cards:
@@ -3371,7 +3704,7 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
             card["result"] = child_result
             if child_signal.reason:
                 card["terminal_reason"] = child_signal.reason
-            if child_signal.reason == "investigation_required" and isinstance(child_status, dict):
+            if child_signal.reason in {"investigation_required", RECOVERABLE_EXTERNAL_REASON} and isinstance(child_status, dict):
                 retained = retained_recovery_summary(child_status, card.get("run_status_path"))
                 if retained:
                     card["retained_recovery"] = retained
@@ -3908,6 +4241,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     resume = subparsers.add_parser("resume", help="resume a blocked single-card delivery after fresh preflight")
     resume.add_argument("card", nargs="?", help="single repository-relative board card path; defaults to prior status card")
     resume.add_argument("--status-path", type=Path, required=True, help="prior delivery-run status.json path")
+    resume.add_argument("--evidence-index", type=Path, help="ignored evidence index proving recoverable external blocker retry eligibility")
     resume.add_argument("--workspace", type=Path)
     resume.add_argument("--runtime-root", type=Path)
     resume.add_argument("--run-id", default=utc_run_id())
@@ -3972,6 +4306,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     resume_plan = subparsers.add_parser("resume-plan", help="resume an aggregate delivery plan run")
     add_plan_common(resume_plan)
     resume_plan.add_argument("--status-path", type=Path)
+    resume_plan.add_argument("--evidence-index", type=Path, help="ignored evidence index for retained external blocker recovery")
     resume_plan.set_defaults(func=command_resume_plan)
 
     status_plan = subparsers.add_parser("status-plan", help="read aggregate delivery plan status")
@@ -4003,6 +4338,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             args.runtime_root = resolve_path(args.runtime_root, args.workspace)
         else:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
+        if getattr(args, "evidence_index", None):
+            args.evidence_index = resolve_path(args.evidence_index, args.workspace)
         args.launcher = resolve_path(args.launcher)
     elif args.command == "status":
         args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
@@ -4018,6 +4355,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         args.consumer_root = resolve_path(args.consumer_root) if getattr(args, "consumer_root", None) else invocation_workspace()
         if hasattr(args, "status_path") and args.status_path:
             args.status_path = resolve_path(args.status_path, args.consumer_root)
+        if hasattr(args, "evidence_index") and args.evidence_index:
+            args.evidence_index = resolve_path(args.evidence_index, args.consumer_root)
         if hasattr(args, "plan"):
             args.plan = resolve_path(args.plan, args.consumer_root)
         if getattr(args, "runtime_root", None):
