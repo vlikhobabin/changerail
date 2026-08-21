@@ -3025,6 +3025,16 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
         workspace = workspace_by_alias[card["workspace"]]
         card["run_status_path"] = repository_relative(child_status_path_for(args, card, workspace), args.consumer_root)
         previous_card = previous_cards.get(card["id"])
+        if resume and mode == "push" and card_is_published(
+            Path(workspace["root"]), card.get("resolved_path") or card["card"]
+        ):
+            ok, reason, details = queue_success_check(workspace, card, mode)
+            card.update(details)
+            if ok:
+                card["state"] = "skipped"
+                card["result"] = "DELIVERED"
+                card["reason"] = f"already published before resume; {reason}"
+                continue
         if resume and isinstance(previous_card, dict) and previous_card.get("state") == "delivered":
             ok, reason, details = queue_success_check(workspace, card, mode)
             card.update(details)

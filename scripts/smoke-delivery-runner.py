@@ -803,6 +803,9 @@ def write_fake_queue_runner(path: Path) -> None:
                 "if mode == 'external-blocker' and 'service-a-card' in args.card:",
                 "    result = 'BLOCKED'",
                 "    terminal_reason = 'external_blocker'",
+                "if mode == 'already-published-blocker' and '/4.done/' in args.card:",
+                "    result = 'BLOCKED'",
+                "    terminal_reason = 'already_published_card_requested_for_delivery'",
                 "if mode == 'recovery-no-go' and 'service-a-recovery' in args.card:",
                 "    result = 'NO-GO'",
                 "if args.command == 'resume' and 'service-a-card' in args.card:",
@@ -815,7 +818,7 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    if mode in resume_reasons:",
                 "        result = 'BLOCKED'",
                 "        terminal_reason = resume_reasons[mode]",
-                "if mode == 'publish-success' and result == 'DELIVERED' and args.command == 'run':",
+                "if mode in ('publish-success', 'already-published-blocker') and result == 'DELIVERED' and args.command == 'run':",
                 "    root = Path(args.workspace)",
                 "    source = root / args.card",
                 "    if source.exists():",
@@ -4804,6 +4807,205 @@ def check_queue_resume_plan(tmp: Path) -> None:
         raise AssertionError(f"resume should launch only unfinished card: {calls}")
 
 
+def check_queue_resume_skips_published_card_after_blocked_handoff(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-resume-published-consumer")
+    runner = tmp / "fake-queue-runner-resume-published"
+    call_log = tmp / "queue-resume-published-calls.jsonl"
+    runtime = tmp / "queue-resume-published-runtime"
+    plan_payload = queue_plan_fixture()
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, plan_payload)
+
+    source = service_a / "openspec/board/3.inprogress/service-a-card.md"
+    done = service_a / "openspec/board/4.done/service-a-card.md"
+    done.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(done)
+    commit_paths(service_a, "publish service-a outside prior aggregate", "openspec/board")
+    git(["push"], service_a)
+
+    previous = {
+        "schema": "changerail.delivery-plan-status.v1",
+        "run_id": "queue-resume-published-previous",
+        "updated_at": "2026-08-21T00:00:00Z",
+        "plan": {
+            "id": "queue-smoke",
+            "path": "delivery-plan.json",
+            "fingerprint": queue_plan_fingerprint(plan_payload),
+        },
+        "phase": "terminal",
+        "result": "BLOCKED",
+        "terminal_outcome": "BLOCKED",
+        "mode": "push",
+        "timestamps": {"started_at": "2026-08-21T00:00:00Z", "ended_at": "2026-08-21T00:00:01Z"},
+        "cards": [
+            {
+                "id": "service-a-card",
+                "workspace": "service-a",
+                "card": "service-a-card.md",
+                "resolved_path": "openspec/board/3.inprogress/service-a-card.md",
+                "state": "blocked",
+                "result": "BLOCKED",
+                "terminal_reason": "already_published_card_requested_for_delivery",
+                "wave": 1,
+            },
+            {
+                "id": "service-b-card",
+                "workspace": "service-b",
+                "card": "service-b-card.md",
+                "resolved_path": "openspec/board/2.todo/service-b-card.md",
+                "state": "pending",
+                "wave": 2,
+                "depends_on": ["service-a-card"],
+            },
+        ],
+    }
+    previous_path = runtime / "previous" / "status.json"
+    write_json(previous_path, previous)
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "already-published-blocker"
+    result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-resume-published",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue resume-plan after external publication")
+    status = load_status(runtime, "queue-resume-published")
+    cards = {card["id"]: card for card in status["cards"]}
+    if cards["service-a-card"].get("state") != "skipped" or cards["service-a-card"].get("result") != "DELIVERED":
+        raise AssertionError(f"published source was not skipped safely: {status}")
+    if status["result"] != "DELIVERED" or status["summary"]["delivered"] != 1:
+        raise AssertionError(f"resume did not continue after published source: {status}")
+    calls = queue_run_calls(call_log)
+    if [call.get("card") for call in calls] != ["openspec/board/2.todo/service-b-card.md"]:
+        raise AssertionError(f"resume launched an already published card: {calls}")
+
+
+def check_queue_resume_rejects_published_card_with_incomplete_proof(tmp: Path) -> None:
+    for case in ("diverged", "retained-dirty"):
+        consumer, service_a, _service_b = create_queue_consumer(tmp, f"queue-resume-published-{case}-consumer")
+        runner = tmp / f"fake-queue-runner-resume-published-{case}"
+        call_log = tmp / f"queue-resume-published-{case}-calls.jsonl"
+        runtime = tmp / f"queue-resume-published-{case}-runtime"
+        plan_payload = queue_plan_fixture()
+        plan = consumer / "delivery-plan.json"
+        write_fake_queue_runner(runner)
+        write_queue_plan(plan, plan_payload)
+
+        source = service_a / "openspec/board/3.inprogress/service-a-card.md"
+        done = service_a / "openspec/board/4.done/service-a-card.md"
+        done.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(done)
+        commit_paths(service_a, "publish service-a outside prior aggregate", "openspec/board")
+        git(["push"], service_a)
+
+        if case == "diverged":
+            git(
+                [
+                    "-c",
+                    "user.name=ChangeRail Smoke",
+                    "-c",
+                    "user.email=changerail-smoke@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "local divergent commit",
+                ],
+                service_a,
+            )
+            publisher = tmp / "queue-resume-published-diverged-publisher"
+            remote = service_a.parent / f"{service_a.name}.git"
+            git(["clone", str(remote), str(publisher)], tmp)
+            git(
+                [
+                    "-c",
+                    "user.name=ChangeRail Smoke",
+                    "-c",
+                    "user.email=changerail-smoke@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "remote divergent commit",
+                ],
+                publisher,
+            )
+            git(["push"], publisher)
+            git(["fetch", "origin"], service_a)
+            counts = git(["rev-list", "--left-right", "--count", "@{u}...HEAD"], service_a).split()
+            if counts != ["1", "1"]:
+                raise AssertionError(f"fixture did not create divergent upstream: {counts}")
+            previous = recovery_previous_status(
+                plan_payload,
+                source_state="blocked",
+                source_result="BLOCKED",
+                terminal_reason="already_published_card_requested_for_delivery",
+            )
+            expected_command = "run"
+        else:
+            (service_a / "DIRTY.txt").write_text("retained dirty payload\n", encoding="utf-8")
+            previous = recovery_previous_status(
+                plan_payload,
+                source_state="blocked",
+                source_result="BLOCKED",
+                terminal_reason="investigation_required",
+                retained_recovery=retained_recovery_fixture(),
+            )
+            expected_command = "resume"
+        previous["mode"] = "push"
+        previous_path = runtime / "previous" / "status.json"
+        write_json(previous_path, previous)
+
+        env = runner_env()
+        env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+        env["CHANGERAIL_QUEUE_FAKE_MODE"] = "already-published-blocker"
+        result = run(
+            [
+                str(RUNNER),
+                "resume-plan",
+                str(plan),
+                "--consumer-root",
+                str(consumer),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"queue-resume-published-{case}",
+                "--launcher",
+                str(runner),
+                "--status-path",
+                str(previous_path),
+                "--json",
+            ],
+            env=env,
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"{case} published-card proof unexpectedly received auto-success")
+        status = load_status(runtime, f"queue-resume-published-{case}")
+        first = {card["id"]: card for card in status["cards"]}["service-a-card"]
+        if first.get("state") != "blocked" or first.get("terminal_reason") != "already_published_card_requested_for_delivery":
+            raise AssertionError(f"{case} published-card proof did not remain fail-closed: {status}")
+        calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+        delivery_calls = [call for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] in {"run", "resume"}]
+        if len(delivery_calls) != 1 or delivery_calls[0]["argv"][1] != expected_command:
+            raise AssertionError(f"{case} did not reach the expected fail-closed child branch: {delivery_calls}")
+        if delivery_calls[0].get("card") != "openspec/board/4.done/service-a-card.md":
+            raise AssertionError(f"{case} child did not receive the re-resolved done card: {delivery_calls}")
+
+
 def check_queue_push_success_validation(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-push-validation-consumer")
     runner = tmp / "fake-queue-runner-push"
@@ -4926,6 +5128,8 @@ def main() -> int:
         check_queue_fail_fast_and_locks(workspace)
         check_queue_terminal_reason_and_missing_status(workspace)
         check_queue_resume_plan(workspace)
+        check_queue_resume_skips_published_card_after_blocked_handoff(workspace)
+        check_queue_resume_rejects_published_card_with_incomplete_proof(workspace)
         check_queue_investigation_required_capture_and_original_resume(workspace)
         check_queue_investigation_required_original_resume_fail_closed(workspace)
         check_queue_recovery_resume(workspace)
