@@ -1,13 +1,13 @@
 # Авторизовать bounded execution-target payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -56,25 +56,35 @@ investigation.
 - `authorize-bounded-execution-target-payload`
 
 ## Verify
-- `bin/openspec validate authorize-bounded-execution-target-payload --strict`
-- `python3 scripts/smoke-review-preflight.py`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- GREEN: `bin/openspec validate authorize-bounded-execution-target-payload --strict`
+  - passed before archive.
+- GREEN: `bin/openspec validate changerail-contracts --strict` - passed after
+  manual contract sync.
+- GREEN: `bin/openspec validate --all --strict` - passed after archive, 38
+  items.
+- GREEN: `python3 scripts/smoke-review-preflight.py` - `review preflight smoke:
+  PASS`.
+- GREEN: `python3 scripts/public-surface-scan.py` - passed, 1201 files scanned,
+  0 findings.
+- GREEN: `git diff --check` - passed.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-authorize-bounded-execution-target-payload/`
 
 ## Related
-- `openspec/changes/authorize-bounded-execution-target-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-execution-target-payload/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 - `openspec/board/2.todo/enforce-declared-execution-target-invariant.md`
 
 ## Result
-Проработка завершена; apply-ready authorization artifacts созданы.
+Delivery завершен: exact authorization object сохранен, reciprocal successor
+reference добавлен, `changerail-contracts` synced, production behavior не
+менялось и OpenSpec change archived.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/authorize-bounded-execution-target-payload.md`.
+- done
 
 ## Change 1: `authorize-bounded-execution-target-payload`
 
@@ -98,7 +108,12 @@ successor.
 - `investigate-bounded-field-validation-batch`
 
 ### Related
-- `openspec/changes/authorize-bounded-execution-target-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-execution-target-payload/`
 
 ## Log
 - 2026-08-21T09:04:00Z created from published bounded batch investigation.
+- 2026-08-21T09:10:47Z delivery started; exact authorization source moved to
+  `3.inprogress` for verification, archive and review.
+- 2026-08-21T09:13:46Z contract synced, change archived, full verification
+  floor passed; production delta remains zero.
+- 2026-08-21T09:20:26Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

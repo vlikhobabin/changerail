@@ -1269,6 +1269,37 @@ ceiling 500 and `allow_new_authority_or_wire_protocol` true.
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable waiver
 
+### Requirement: Published bounded execution-target authorization source
+ChangeRail MUST publish the bounded execution-target authorization as one clean
+tracked `4.done` board card before successor
+`enforce-declared-execution-target-invariant` can use the bounded
+production-LOC and target-identity protocol-boundary exception. The
+authorization source MUST contain exactly one schema-valid investigation
+authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`enforce-declared-execution-target-invariant`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true.
+
+#### Scenario: Authorization source binds the exact execution-target card chain
+- **WHEN** deterministic review preflight evaluates
+  `enforce-declared-execution-target-invariant` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor references
+  `openspec/board/4.done/authorize-bounded-execution-target-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `enforce-declared-execution-target-invariant`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Execution-target authorization cannot be reused
+- **WHEN** another card references the published execution-target
+  authorization source or the exact reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable waiver
+
 ### Requirement: Field-validation successors MUST use bounded investigation decisions
 ChangeRail MUST require bounded decisions for exact successors
 `enforce-declared-execution-target-invariant`,

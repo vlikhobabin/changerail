@@ -41,18 +41,17 @@ independent review и запрещает неявную подмену.
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-execution-target-payload.md","authorization_id":"authorize-bounded-execution-target-payload"}`
 
 Published investigation `investigate-bounded-field-validation-batch` закрывает
 repeated-defect classification для одного bounded target-identity hypothesis.
-Перед реализацией все еще требуется отдельная exact published authorization
-card для нового project/delivery/evidence contract и обязательного fail-closed
-preflight.
+Exact authorization source `authorize-bounded-execution-target-payload`
+публикует bounded source для нового project/delivery/evidence contract и
+обязательного fail-closed preflight.
 
 ## Depends On
 - `investigate-bounded-field-validation-batch`
-- separate exact published authorization source for
-  `enforce-declared-execution-target-invariant`
+- `authorize-bounded-execution-target-payload`
 
 ## Acceptance
 - Проект может объявить универсальную цель выполнения: логический id,
@@ -107,6 +106,7 @@ preflight.
 - `schemas/changerail-delivery-plan-status.schema.json`
 - `openspec/board/2.todo/define-verification-coverage-map.md`
 - `openspec/board/2.todo/resume-retained-payload-after-external-blocker.md`
+- `openspec/board/4.done/authorize-bounded-execution-target-payload.md`
 - `openspec/changes/enforce-declared-execution-target-invariant/`
 
 ## Result
@@ -159,3 +159,6 @@ fail-closed substitution policy без platform-specific provision logic.
 - 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
   exact target-identity hypothesis, ceiling 500, shared loader/comparator
   boundary и requirement нового split при повторе того же blocker.
+- 2026-08-21T09:10:47Z linked exact published authorization source
+  `authorize-bounded-execution-target-payload`; successor remains queued until
+  that source is published in `4.done`.

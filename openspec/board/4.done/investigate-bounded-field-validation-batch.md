@@ -214,6 +214,7 @@ successor `Published investigation authorization` остается `none`, по�
 ## Related
 - `openspec/changes/archive/2026-08-21-decide-bounded-field-validation-batch/`
 - `scripts/changerail_review_preflight.py`
+- `openspec/board/4.done/authorize-bounded-execution-target-payload.md`
 - `openspec/board/2.todo/enforce-declared-execution-target-invariant.md`
 - `openspec/board/2.todo/expose-structured-live-delivery-progress.md`
 - `openspec/board/2.todo/resume-retained-payload-after-external-blocker.md`
@@ -271,3 +272,5 @@ authorization sources без production implementation.
   whitespace checks passed; `decide-bounded-field-validation-batch` archived
   after manual `changerail-contracts` spec sync.
 - 2026-08-21T09:00:13Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
+- 2026-08-21T09:10:47Z reciprocal link added for exact execution-target
+  authorization source `authorize-bounded-execution-target-payload`.
