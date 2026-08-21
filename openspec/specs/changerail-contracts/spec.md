@@ -1435,6 +1435,42 @@ acceptance, tasks and evidence instead of copied secondary truth.
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable coverage-catalog waiver
 
+### Requirement: Published bounded source-profile authorization source
+ChangeRail MUST publish the bounded source-profile authorization as one clean
+tracked `4.done` board card before successor
+`materialize-versioned-source-classification-profiles` can use the bounded
+production-LOC and profile provenance/materialization/check protocol-boundary
+exception. The authorization source MUST contain exactly one schema-valid
+investigation authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`materialize-versioned-source-classification-profiles`, production LOC ceiling
+500 and `allow_new_authority_or_wire_protocol` true. The accepted boundary is
+the existing `.changerail/source-classification.yaml` as the only effective
+rules input, with profile detection, materialization and drift reporting using
+one canonical normalization path.
+
+#### Scenario: Authorization source binds the exact source-profile chain
+- **WHEN** deterministic review preflight evaluates
+  `materialize-versioned-source-classification-profiles` after the
+  investigation and authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-source-profile-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `materialize-versioned-source-classification-profiles`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Source-profile authorization cannot be reused
+- **WHEN** another card references the published source-profile authorization
+  source, a second effective rules source is added, or the exact reciprocal card
+  links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable source-classification waiver
+
 ### Requirement: Field-validation successors MUST use bounded investigation decisions
 ChangeRail MUST require bounded decisions for exact successors
 `enforce-declared-execution-target-invariant`,

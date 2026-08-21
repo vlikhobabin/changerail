@@ -1,13 +1,13 @@
 # Авторизовать bounded source-profile payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -56,25 +56,41 @@ source.
 - `authorize-bounded-source-profile-payload`
 
 ## Verify
-- `bin/openspec validate authorize-bounded-source-profile-payload --strict`
-- `python3 scripts/smoke-review-preflight.py`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- GREEN: `bin/openspec validate authorize-bounded-source-profile-payload --strict`
+  - passed before archive.
+- GREEN: `bin/openspec validate changerail-contracts --strict` - passed after
+  manual contract sync.
+- GREEN: `python3 scripts/smoke-review-preflight.py` - `review preflight smoke:
+  PASS`; exact source-profile authorization acceptance and mismatched-card
+  rejection covered.
+- GREEN: `bin/openspec archive authorize-bounded-source-profile-payload --yes --skip-specs`
+  - passed after manual spec sync.
+- GREEN: `bin/openspec validate --all --strict` - passed before archive, 34
+  items.
+- GREEN: `python3 scripts/public-surface-scan.py` - passed, 1202 files scanned,
+  0 findings.
+- GREEN: `git diff --check` - passed.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-authorize-bounded-source-profile-payload/`
 
 ## Related
 - `openspec/changes/authorize-bounded-source-profile-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-source-profile-payload/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 - `openspec/board/2.todo/materialize-versioned-source-classification-profiles.md`
+- `scripts/smoke-review-preflight.py`
 
 ## Result
-Проработка завершена; apply-ready authorization artifacts созданы.
+Delivery завершен: exact source-profile authorization source сохранен, single
+effective rules constraint synced, exact/mismatch preflight smoke покрывает
+source-profile chain, production behavior не менялось и OpenSpec change
+archived.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/authorize-bounded-source-profile-payload.md`.
+- done
 
 ## Change 1: `authorize-bounded-source-profile-payload`
 
@@ -101,3 +117,9 @@ Profile/check contracts влияют на production complexity classification.
 
 ## Log
 - 2026-08-21T09:04:00Z created from published bounded batch investigation.
+- 2026-08-21T11:49:49Z `$chrl-ff` confirmed apply-ready artifacts and moved
+  the card to `3.inprogress`.
+- 2026-08-21T11:54:13Z `$chrl-do` synced `changerail-contracts`, added
+  source-profile exact/mismatch preflight smoke coverage and archived
+  `authorize-bounded-source-profile-payload`; production delta remains zero.
+- 2026-08-21T12:31:13Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
