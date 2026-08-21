@@ -100,7 +100,7 @@ CODEX_POLICIES = ("safe-interactive", "trusted-automation")
 LOCK_ENFORCEMENTS = ("none", "advisory", "strict")
 REVISION_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 PROJECT_DOC_MAX_BYTES = 32768
-PROJECT_DOC_WARNING_PERCENT = 85
+PROJECT_DOC_GENERATED_TARGET_PERCENT = 70
 CONFIGURE_BOOTSTRAP_ONLY_OPTIONS = {
     "--backup-existing",
     "--codex-policy",
@@ -518,10 +518,11 @@ def preflight_generated_instruction_budget(
     except OSError as exc:
         raise BootstrapError(f"cannot render AGENTS.md instruction preflight: {exc}") from exc
     measured = len(rendered.encode("utf-8"))
-    if measured * 100 >= PROJECT_DOC_MAX_BYTES * PROJECT_DOC_WARNING_PERCENT:
+    if measured * 100 >= PROJECT_DOC_MAX_BYTES * PROJECT_DOC_GENERATED_TARGET_PERCENT:
         raise BootstrapError(
             f"generated AGENTS.md uses {measured}/{PROJECT_DOC_MAX_BYTES} UTF-8 bytes and reaches "
-            f"the {PROJECT_DOC_WARNING_PERCENT}% warning threshold; reduce project/shared rules or "
+            f"the {PROJECT_DOC_GENERATED_TARGET_PERCENT}% generated-instruction target; "
+            "reduce project/shared rules or "
             "review an explicit tracked budget change"
         )
     return measured

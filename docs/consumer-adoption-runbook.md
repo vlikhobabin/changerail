@@ -538,6 +538,32 @@ effective Codex process state. Generated `.codex/config.toml` задает
 failure. Для legacy consumer без key временно действует тот же compatibility
 default.
 
+Greenfield bootstrap использует более строгий generation target: новый
+`AGENTS.md` должен занимать менее 70% limit. Оставшиеся 30% резервируются для
+project-specific правил и будущих shared upgrades; повышать limit вместо
+сокращения дублирующих инструкций не является default remediation.
+
+### Audit `AGENTS.md` после ChangeRail upgrade
+
+Если новая версия ChangeRail меняет `AGENTS.shared.md`, maintainer обязан
+провести review `AGENTS.md` во всех consumer-проектах, а не только проверить
+source checkout. Для каждого consumer:
+
+1. Найдите marker-блок `CHANGERAIL_SHARED_AGENTS_BEGIN/END` и замените только
+   его body текущим `/opt/changerail/AGENTS.shared.md`, сохранив project-specific
+   prefix без blind overwrite.
+2. Проверьте локальную часть на duplicated shared workflow, stale authority,
+   устаревшие verification commands, private paths и domain rules, ошибочно
+   попавшие в generic section.
+3. Выполните `wc -c AGENTS.md` и стремитесь держать итог ниже 70% от
+   `project_doc_max_bytes`; диапазон 70–85% требует явного owner review, а 85%+
+   уже дает verifier diagnostic.
+4. Запустите `/opt/changerail/bin/verify-project <project>` и локальный
+   verification baseline проекта, затем review diff перед commit.
+
+Workspace inventory с private consumer paths должен оставаться ignored. В
+публичных docs и reports фиксируйте только aggregate counts и generic examples.
+
 Runtime evidence запускается только opt-in и только с project-local
 `CODEX_HOME`:
 

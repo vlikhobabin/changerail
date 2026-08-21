@@ -51,6 +51,10 @@ credentials, traces или machine-local inventory.
   never stages, commits, pushes or creates a remote repository.
 - Generated Codex config now tracks `project_doc_max_bytes = 32768`; older
   consumers without the key use that compatibility default until migrated.
+  New bootstrap keeps generated `AGENTS.md` below 70% of that limit. After a
+  shared instruction update, inventory every ChangeRail consumer, refresh only
+  the marker-bounded generated section, review the project-specific prefix and
+  rerun `verify-project` plus the local project baseline.
   Runtime proof is separate and opt-in through `verify-project
   --runtime-diagnostics`; default verification remains static and does not
   invoke Codex.

@@ -12,36 +12,14 @@ state to tracked files.
 
 ## Current Scope
 
-The project is currently in bootstrap stage. The tracked public surface is:
+The tracked public surface comprises methodology and docs, self-hosted OpenSpec
+artifacts, lifecycle skills/commands, schemas, bootstrap/templates, helper
+wrappers, maintenance/release tooling and public agent configuration. Canonical
+inventory and ownership live in `README.md` and `.changerail/KNOWLEDGE.md`;
+update those sources instead of duplicating file-by-file inventories here.
 
-- architecture and roadmap documentation under `docs/`;
-- root `README.md`;
-- reusable ChangeRail methodology in `AGENTS.shared.md`;
-- self-hosted OpenSpec dogfooding structure under `openspec/`;
-- generic ChangeRail lifecycle skills and OpenSpec lifecycle skills under `skills/`;
-- Claude command wrappers under `claude/commands/changerail/`;
-- ChangeRail contract schemas under `schemas/`;
-- helper wrappers `bin/openspec`, `bin/changerail-python`,
-  `bin/changerail-delivery-manifest`, `bin/changerail-review-verdict`,
-  `bin/changerail-evidence`,
-  `bin/bootstrap-project`, `bin/verify-project`,
-  `bin/changerail-delivery-runner`, `bin/changerail-delivery-metrics`,
-  `bin/changerail-maintenance` and `bin/changerail-maintenance-runner`;
-- project bootstrap templates under `templates/project/`;
-- drift, smoke, release baseline, schema validation and public-surface checks
-  under `scripts/`;
-- Python runtime/helper dependency pins in `requirements-runtime.txt`;
-- release-gate Python tooling pins in `requirements-dev.txt` and `ruff.toml`;
-- MIT `LICENSE`;
-- public Codex configuration under `.codex/config.toml`;
-- repo-local Codex skill symlinks under `.codex/skills/`;
-- MCP baseline config under `.mcp.json`;
-- repo-scoped Codex launcher `bin/codex`.
-
-Planned public surface:
-
-- release tags and packaged distribution metadata after the first stable
-  release decision.
+Release tags and packaged distribution metadata remain gated by the first
+stable release decision.
 
 ## Public Safety
 
@@ -71,14 +49,9 @@ The launcher sets:
 - `CODEX_HOME=/opt/changerail/.codex`;
 - `CODEX_WORKDIR=/opt/changerail`.
 
-The committed Codex profile enables:
-
-- trusted project path `/opt/changerail`;
-- filesystem MCP scoped to `/opt/changerail`;
-- Context7 MCP for current library documentation;
-- Figma curated plugin for design-related workflows;
-- `approval_policy = "never"`;
-- `sandbox_mode = "danger-full-access"`.
+The committed profile scopes Codex/filesystem access to this repository and
+uses `approval_policy = "never"` with `sandbox_mode = "danger-full-access"`.
+Treat `.codex/config.toml` as the source of truth for enabled MCP/plugins.
 
 The last two settings are intentional for this local development workspace, but
 they make review discipline more important. Do not run unreviewed commands from

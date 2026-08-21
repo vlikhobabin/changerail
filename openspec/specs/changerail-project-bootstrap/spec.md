@@ -593,20 +593,21 @@ remote repository or publish external state.
 
 ### Requirement: Tracked consumer instruction budget
 Bootstrap MUST render an explicit `project_doc_max_bytes` value in generated
-Codex config and MUST keep generated `AGENTS.md` below the warning threshold at
-creation time. The budget MUST be tracked project policy rather than an inferred
-machine default.
+Codex config and MUST keep generated `AGENTS.md` below 70 percent of that value
+at creation time. This generated-instruction target MUST reserve capacity for
+project rules and future shared upgrades. The budget MUST be tracked project
+policy rather than an inferred machine default.
 
 #### Scenario: Consumer is generated
 - **WHEN** bootstrap renders a default consumer
 - **THEN** `.codex/config.toml` declares `project_doc_max_bytes = 32768`
-- **AND** generated `AGENTS.md` remains below 85 percent of that value
+- **AND** generated `AGENTS.md` remains below 70 percent of that value
 
-#### Scenario: Generated instructions exceed warning threshold
-- **WHEN** template and shared instructions would reach 85 percent before target
+#### Scenario: Generated instructions reach generation target
+- **WHEN** template and shared instructions would reach 70 percent before target
   creation completes
 - **THEN** bootstrap reports the measured byte count and remediation
-- **AND** it does not silently claim an unconstrained instruction surface
+- **AND** it fails before mutating the target
 
 ### Requirement: Runtime diagnostic handoff
 Generated guidance MUST distinguish static verification from opt-in effective

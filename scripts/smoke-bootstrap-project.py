@@ -16,6 +16,8 @@ from pathlib import Path
 
 
 SCHEMA = "changerail.bootstrap-project-smoke.v1"
+PROJECT_DOC_MAX_BYTES = 32768
+PROJECT_DOC_GENERATED_TARGET_PERCENT = 70
 
 
 @dataclass
@@ -162,14 +164,22 @@ def missing_workflow_guidance(project: Path) -> list[str]:
     checks = {
         "AGENTS.md": [
             "explore -> ff -> do -> review -> pub",
-            "## Supervised Roles",
+            "## Роли и очереди",
             "Reviewer работает в fresh context",
+            "$changerail-do <card-path>",
+            "Оркестратор и worker могут быть одной сессией только для небольшой single-card",
+            "bin/changerail-delivery-runner run <card>",
+            "preflight-plan",
+            "run-plan",
+            "resume-plan",
+            "status-plan",
+            "aggregate status",
             "3.inprogress",
             "4.done",
             "max-fix-cycles",
             "max-review-cycles",
             "fix_budget_exhausted",
-            "bounded same-card micro-fix",
+            "bounded micro-fix",
         ],
         "openspec/board/README.md": [
             "explore -> ff -> do -> review -> pub",
@@ -259,11 +269,16 @@ def check_bootstrap_success(changerail_root: Path, run_dir: Path, extra_env: dic
         return Check("bootstrap valid project", "fail", "default bootstrap created auth marker")
     codex_config = (project / ".codex" / "config.toml").read_text(encoding="utf-8")
     agents_size = len((project / "AGENTS.md").read_text(encoding="utf-8").encode("utf-8"))
-    if "project_doc_max_bytes = 32768" not in codex_config or agents_size * 100 >= 32768 * 85:
+    if (
+        f"project_doc_max_bytes = {PROJECT_DOC_MAX_BYTES}" not in codex_config
+        or agents_size * 100 >= PROJECT_DOC_MAX_BYTES * PROJECT_DOC_GENERATED_TARGET_PERCENT
+    ):
         return Check(
             "bootstrap valid project",
             "fail",
-            f"instruction budget missing or default AGENTS.md too large: {agents_size}/32768 bytes",
+            "instruction budget missing or default AGENTS.md reaches the "
+            f"{PROJECT_DOC_GENERATED_TARGET_PERCENT}% generated target: "
+            f"{agents_size}/{PROJECT_DOC_MAX_BYTES} bytes",
         )
     maintenance_paths = [
         ".changerail/KNOWLEDGE.md",
@@ -388,27 +403,27 @@ def check_profile_fail_before_write(changerail_root: Path, run_dir: Path) -> Che
     if dry_run_project.exists():
         failures.append("dry-run: target was mutated")
 
-    oversized_root = run_dir / "oversized-instruction-root"
-    shutil.copytree(changerail_root / "templates", oversized_root / "templates")
-    (oversized_root / "AGENTS.shared.md").write_text("x" * 33000, encoding="utf-8")
-    oversized_project = run_dir / "oversized-instruction-project"
-    oversized = run(
+    over_target_root = run_dir / "over-target-instruction-root"
+    shutil.copytree(changerail_root / "templates", over_target_root / "templates")
+    (over_target_root / "AGENTS.shared.md").write_text("x" * 24000, encoding="utf-8")
+    over_target_project = run_dir / "over-target-instruction-project"
+    over_target = run(
         [
             str(changerail_root / "bin" / "bootstrap-project"),
-            str(oversized_project),
+            str(over_target_project),
             "--changerail-root",
-            str(oversized_root),
+            str(over_target_root),
             "--skip-verify",
         ],
         changerail_root,
     )
     if (
-        oversized.returncode == 0
-        or oversized_project.exists()
-        or "UTF-8 bytes" not in oversized.stdout
-        or "32768" not in oversized.stdout
+        over_target.returncode == 0
+        or over_target_project.exists()
+        or "UTF-8 bytes" not in over_target.stdout
+        or "70% generated-instruction target" not in over_target.stdout
     ):
-        failures.append("oversized generated instructions did not fail before target mutation")
+        failures.append("over-target generated instructions did not fail before target mutation")
 
     if failures:
         return Check("profile validation before write", "fail", "; ".join(failures))
