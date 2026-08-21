@@ -1,13 +1,13 @@
 # Авторизовать bounded verification-coverage payload
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -54,25 +54,39 @@ derived ledger и verification-admission protocol.
 - `authorize-bounded-verification-coverage-payload`
 
 ## Verify
-- `bin/openspec validate authorize-bounded-verification-coverage-payload --strict`
-- `python3 scripts/smoke-review-preflight.py`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
+- GREEN: `bin/openspec validate authorize-bounded-verification-coverage-payload --strict`
+  - passed before archive.
+- GREEN: `bin/openspec validate changerail-contracts --strict` - passed after
+  manual contract sync.
+- GREEN: `bin/openspec validate --all --strict` - passed after archive, 34
+  items.
+- GREEN: `python3 scripts/smoke-review-preflight.py` - `review preflight smoke:
+  PASS`.
+- GREEN: `python3 scripts/public-surface-scan.py` - passed, 1201 files scanned,
+  0 findings.
+- GREEN: `bin/changerail-delivery-manifest scope-check .runtime/changerail/delivery-manifests/authorize-bounded-verification-coverage-payload.json --target working-tree --json`
+  - passed, no missing/extra/mismatched paths.
+- GREEN: `git diff --check` - passed.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-authorize-bounded-verification-coverage-payload/`
 
 ## Related
-- `openspec/changes/authorize-bounded-verification-coverage-payload/`
+- `openspec/changes/archive/2026-08-21-authorize-bounded-verification-coverage-payload/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 - `openspec/board/2.todo/define-verification-coverage-map.md`
+- `scripts/smoke-review-preflight.py`
 
 ## Result
-Проработка завершена; apply-ready authorization artifacts созданы.
+Delivery завершен: exact authorization object сохранен, reciprocal successor
+reference добавлен, `changerail-contracts` synced, coverage-specific
+exact/mismatch preflight smoke добавлен, production behavior не менялось и
+OpenSpec change archived.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/authorize-bounded-verification-coverage-payload.md`.
+- done
 
 ## Change 1: `authorize-bounded-verification-coverage-payload`
 
@@ -99,3 +113,9 @@ Coverage ledger меняет deterministic admission protocol.
 
 ## Log
 - 2026-08-21T09:04:00Z created from published bounded batch investigation.
+- 2026-08-21T11:06:12Z delivery started; exact authorization source moved to
+  `3.inprogress` for verification, archive and review.
+- 2026-08-21T11:11:15Z contract synced, coverage exact/mismatch smoke added,
+  change archived and delivery verification passed; production delta remains
+  zero.
+- 2026-08-21T11:40:54Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

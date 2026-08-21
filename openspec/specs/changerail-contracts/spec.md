@@ -1401,6 +1401,40 @@ payload retention or broader content-bearing telemetry.
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable telemetry waiver
 
+### Requirement: Published bounded verification-coverage authorization source
+ChangeRail MUST publish the bounded verification-coverage authorization as one
+clean tracked `4.done` board card before successor
+`define-verification-coverage-map` can use the bounded production-LOC and
+verification map/ledger protocol-boundary exception. The authorization source
+MUST contain exactly one schema-valid investigation authorization object bound
+to investigation `investigate-bounded-field-validation-batch`, successor
+`define-verification-coverage-map`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true. The accepted boundary is one
+five-field project map and derived runtime ledger with references to
+acceptance, tasks and evidence instead of copied secondary truth.
+
+#### Scenario: Authorization source binds the exact verification-coverage chain
+- **WHEN** deterministic review preflight evaluates
+  `define-verification-coverage-map` after the investigation and authorization
+  cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-verification-coverage-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `define-verification-coverage-map`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Verification-coverage authorization cannot be reused
+- **WHEN** another card references the published verification-coverage
+  authorization source, a payload copies acceptance/tasks/evidence into a
+  second source of truth, or the exact reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable coverage-catalog waiver
+
 ### Requirement: Field-validation successors MUST use bounded investigation decisions
 ChangeRail MUST require bounded decisions for exact successors
 `enforce-declared-execution-target-invariant`,

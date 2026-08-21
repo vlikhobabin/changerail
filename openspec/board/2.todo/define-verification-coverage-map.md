@@ -31,18 +31,17 @@ artifacts
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-verification-coverage-payload.md","authorization_id":"authorize-bounded-verification-coverage-payload"}`
 
 Published investigation `investigate-bounded-field-validation-batch` закрывает
 repeated-defect classification для одного bounded verification-coverage
 hypothesis. Field evidence обосновывает contract, но перед implementation
-review новый verification-admission protocol все еще требует отдельную exact
-published authorization card.
+review новый verification-admission protocol требует exact published source
+`authorize-bounded-verification-coverage-payload`.
 
 ## Depends On
 - `investigate-bounded-field-validation-batch`
-- separate exact published authorization source for
-  `define-verification-coverage-map`
+- `authorize-bounded-verification-coverage-payload`
 
 ## Summary
 ChangeRail требует concrete verification commands, retained evidence и
@@ -117,6 +116,7 @@ reliability gates, не переносить полный каталог maturit
 - `openspec/specs/changerail-project-verification/spec.md`
 - `openspec/changes/define-verification-coverage-map/`
 - `openspec/changes/enforce-verification-coverage-ledger/`
+- `openspec/board/4.done/authorize-bounded-verification-coverage-payload.md`
 
 ## Result
 Проработка завершена; field evidence принято, два apply-ready changes созданы.
@@ -206,3 +206,6 @@ fingerprint-bound plan/ledger и существующий evidence index/manifes
 - 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
   exact verification-coverage hypothesis, one shared loader boundary, ceiling
   500 и requirement нового split при повторе того же blocker.
+- 2026-08-21T11:06:12Z linked exact published authorization source
+  `authorize-bounded-verification-coverage-payload`; successor remains queued
+  until that source is published in `4.done`.
