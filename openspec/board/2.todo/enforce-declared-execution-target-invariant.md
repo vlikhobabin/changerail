@@ -1,13 +1,13 @@
 # Запретить неявную подмену объявленной среды выполнения
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail maintainers
 
 ## OpenSpec Stage
-story
+artifacts
 
 ## Series
 - none
@@ -72,14 +72,17 @@ fail-closed preflight.
 - Synthetic fixtures покрывают совпадение, отсутствие цели, mismatch,
   несколько целей, попытку подмены при blocker/resume и явный новый запуск
   после rebind на абстрактных database/service примерах.
+- Shared declaration validator удерживает exact payload не выше 500 added
+  production-counted LOC; более крупный payload требует split до review.
 - Public surface не содержит названий частных проектов, платформенных правил,
   реальных адресов, учетных данных или runtime evidence.
 
 ## Change Set
-- none yet
+- `enforce-declared-execution-target-invariant`
 
 ## Verify
 - `python3 scripts/smoke-contract-schemas.py`
+- `python3 scripts/smoke-verify-project.py`
 - `python3 scripts/smoke-delivery-runner.py`
 - `python3 scripts/smoke-review-preflight.py`
 - `bin/openspec validate --all --strict`
@@ -97,15 +100,50 @@ fail-closed preflight.
 - `schemas/changerail-delivery-plan-status.schema.json`
 - `openspec/board/2.todo/define-verification-coverage-map.md`
 - `openspec/board/2.todo/resume-retained-payload-after-external-blocker.md`
+- `openspec/changes/enforce-declared-execution-target-invariant/`
 
 ## Result
-not started
+Проработка завершена; apply-ready artifacts созданы, реализация не начата.
 
 ## Next
-- Получить published investigation authorization, затем выполнить
-  `$changerail-ff` и определить минимальный generic contract без
-  domain-specific логики.
+- После exact published investigation authorization выполнить
+  `$chrl-deliver openspec/board/2.todo/enforce-declared-execution-target-invariant.md`.
+
+## Change 1: `enforce-declared-execution-target-invariant`
+
+### Why
+Delivery evidence может быть green на substitute target, если project-specific
+oracle не переносит identity через общий ChangeRail lifecycle.
+
+### Goal
+Добавить optional tracked target identity, exact evidence/recovery binding и
+fail-closed substitution policy без platform-specific provision logic.
+
+### Scope
+- `changerail.execution-target.v1` declaration и schema projections;
+- shared loader для manifest, verification, runner и review preflight;
+- target-bound evidence, blocker/resume и clean rebind semantics;
+- lifecycle skills, templates, docs и synthetic fixtures.
+
+### Acceptance
+- Проекты с declaration проходят lifecycle только с exact matching target
+  identity; legacy projects без declaration сохраняют текущий flow.
+- Endpoint, credentials и target contents не попадают в tracked/status data.
+- Missing/multiple/mismatched identity и substitution fail closed до
+  review/publish или retained child launch.
+- Added production-counted LOC не превышает 500 и использует один shared
+  loader/comparator.
+
+### Depends On
+- exact published investigation authorization for this card's target identity
+  protocol and repeated defect simplification
+
+### Related
+- `openspec/changes/enforce-declared-execution-target-invariant/`
 
 ## Log
 - 2026-08-21 карточка создана по подтвержденному случаю неявной подмены среды
   выполнения после отказа штатного маршрута.
+- 2026-08-21T08:38:00Z `$changerail-ff` выбрал один optional tracked contract,
+  shared validator и bounded implementation ceiling 500; apply-ready proposal,
+  design, delta specs и tasks созданы.
