@@ -2340,9 +2340,17 @@ def review_verdict_fallback_signal(args: argparse.Namespace) -> TerminalSignal:
 
 
 def fallback_terminal_signal(args: argparse.Namespace, exit_code: int, structured_signal: TerminalSignal) -> TerminalSignal:
-    if structured_signal.outcome:
+    malformed_block = (
+        structured_signal.outcome == "BLOCKED"
+        and structured_signal.reason == "malformed_terminal_reason"
+    )
+    if structured_signal.outcome and not malformed_block:
         return structured_signal
     review_signal = review_verdict_fallback_signal(args)
+    if malformed_block:
+        if review_signal.outcome == "NO-GO":
+            return review_signal
+        return structured_signal
     if review_signal.outcome:
         return review_signal
     if exit_code != 0:

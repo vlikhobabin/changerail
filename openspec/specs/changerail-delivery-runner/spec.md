@@ -388,9 +388,35 @@ reasons.
 - **THEN** runner записывает `BLOCKED`
 
 ### Requirement: Review-gated safety-stop fallback
-The runner MUST fail closed when no authoritative terminal event exists and
-structured card or review evidence does not prove that review-gated publish
-completed.
+The runner MUST fail closed when structured child evidence does not prove that
+review-gated publish completed. A schema-valid canonical negative verdict MUST
+remain a conservative terminal signal when no authoritative terminal event
+exists or when the only conflicting child evidence is a malformed terminal
+reason. Every positive verdict MUST remain bound to the exact current tree and
+MUST NOT authorize this override.
+
+#### Scenario: Schema-valid no-go overrides malformed child reason
+- **WHEN** an unpublished card has a schema-valid canonical verdict with
+  `result: no-go`
+- **AND** the child emits authoritative `terminal_outcome: BLOCKED` with a
+  malformed `terminal_reason`
+- **THEN** the runner records terminal outcome `NO-GO`
+- **AND** it does not publish the payload
+
+#### Scenario: Malformed child reason without valid negative verdict
+- **WHEN** the child emits authoritative `terminal_outcome: BLOCKED` with a
+  malformed `terminal_reason`
+- **AND** no schema-valid canonical `result: no-go` verdict applies
+- **THEN** the runner records `BLOCKED` with
+  `terminal_reason: malformed_terminal_reason`
+- **AND** it does not publish the payload
+
+#### Scenario: Positive verdict cannot override malformed child reason
+- **WHEN** the child emits authoritative `terminal_outcome: BLOCKED` with a
+  malformed `terminal_reason`
+- **AND** a canonical verdict is positive, stale or invalid
+- **THEN** the runner remains fail-closed
+- **AND** no commit or push is authorized
 
 #### Scenario: Schema-valid no-go verdict after child exit
 - **WHEN** Codex exits without an authoritative terminal outcome

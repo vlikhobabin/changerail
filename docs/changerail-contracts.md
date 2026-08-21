@@ -916,7 +916,11 @@ verdict fallback не применим и карточка
 `terminal_reason`; ignored raw logs не являются источником этих reasons.
 Malformed reason из authoritative terminal event не принимается как classifier:
 runner записывает стабильный `terminal_reason: malformed_terminal_reason` для
-operator diagnostics.
+operator diagnostics. Единственное более сильное evidence для этого
+диагностического outcome — schema-valid canonical `result: no-go`: оно заменяет
+malformed marker на conservative `NO-GO`, но не разрешает commit/push. Отсутствующий,
+invalid, stale или positive verdict не заменяет malformed marker и не открывает
+publish path.
 Если preflight возвращает `CODEX auth: fail` или `CODEX_HOME symlinks: fail`,
 оператор должен использовать remediation из
 `docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`: ignored

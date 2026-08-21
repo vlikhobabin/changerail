@@ -2606,6 +2606,74 @@ def check_review_no_go_fallback_run(tmp: Path) -> None:
         raise AssertionError(f"NO-GO fallback terminal outcome was not printed: {result.stdout}")
 
 
+def check_review_no_go_overrides_malformed_reason_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "review-no-go-malformed-reason-workspace")
+    launcher = tmp / "fake-codex-review-no-go-malformed-reason"
+    runtime = tmp / "runtime"
+    card = "openspec/board/3.inprogress/review-no-go-malformed-reason.md"
+    write_fake_launcher(launcher)
+    write_board_card(workspace, card)
+    commit_paths(workspace, "review no-go malformed reason card", card)
+    write_no_go_verdict(workspace, card)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            card,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "review-no-go-malformed-reason",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("malformed-terminal-reason"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("review no-go malformed reason unexpectedly returned success")
+    status = load_status(runtime, "review-no-go-malformed-reason")
+    if status.get("result") != "NO-GO" or status.get("terminal_outcome") != "NO-GO":
+        raise AssertionError(f"valid no-go should override malformed terminal reason: {status}")
+    if status.get("terminal_reason") is not None:
+        raise AssertionError(f"NO-GO should not retain malformed terminal reason: {status}")
+    if "terminal_outcome: NO-GO" not in result.stdout:
+        raise AssertionError(f"NO-GO malformed-reason override was not printed: {result.stdout}")
+
+
+def check_stale_go_does_not_override_malformed_reason_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "stale-go-malformed-reason-workspace")
+    launcher = tmp / "fake-codex-stale-go-malformed-reason"
+    runtime = tmp / "runtime"
+    card = "openspec/board/3.inprogress/stale-go-malformed-reason.md"
+    write_fake_launcher(launcher)
+    write_board_card(workspace, card)
+    commit_paths(workspace, "stale go malformed reason card", card)
+    write_stale_go_verdict(workspace, card)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            card,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "stale-go-malformed-reason",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("malformed-terminal-reason"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("stale go malformed reason unexpectedly returned success")
+    status = load_status(runtime, "stale-go-malformed-reason")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "malformed_terminal_reason":
+        raise AssertionError(f"stale go changed malformed fail-closed result: {status}")
+
+
 def check_supervisor_stops_after_fallback_no_go(tmp: Path) -> None:
     workspace = create_workspace(tmp, "supervisor-stop-workspace")
     launcher = tmp / "fake-codex-supervisor-stop"
@@ -4819,6 +4887,8 @@ def main() -> int:
         check_oversized_output_summary_run(workspace)
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
+        check_review_no_go_overrides_malformed_reason_run(workspace)
+        check_stale_go_does_not_override_malformed_reason_run(workspace)
         check_supervisor_stops_after_fallback_no_go(workspace)
         check_fix_budget_handoff_run(workspace)
         check_external_blocker_handoff_run(workspace)
