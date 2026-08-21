@@ -1,0 +1,53 @@
+{
+  "cards": [
+    {
+      "card": "openspec/board/2.todo/expose-structured-live-delivery-progress.md",
+      "id": "live-progress",
+      "workspace": "changerail"
+    },
+    {
+      "card": "openspec/board/2.todo/resume-retained-payload-after-external-blocker.md",
+      "depends_on": [
+        "live-progress"
+      ],
+      "id": "external-resume",
+      "workspace": "changerail"
+    },
+    {
+      "card": "openspec/board/2.todo/report-recovery-aware-delivery-episodes.md",
+      "depends_on": [
+        "external-resume"
+      ],
+      "id": "recovery-episodes",
+      "workspace": "changerail"
+    },
+    {
+      "card": "openspec/board/2.todo/define-verification-coverage-map.md",
+      "depends_on": [
+        "recovery-episodes"
+      ],
+      "id": "verification-coverage",
+      "workspace": "changerail"
+    },
+    {
+      "card": "openspec/board/2.todo/materialize-versioned-source-classification-profiles.md",
+      "depends_on": [
+        "verification-coverage"
+      ],
+      "id": "source-profiles",
+      "workspace": "changerail"
+    }
+  ],
+  "description": "Последовательная реализация пяти bounded field-validation карточек",
+  "id": "060-field-validation-implementation",
+  "max_parallel": 1,
+  "per_workspace_parallelism": 1,
+  "push_mode": "push",
+  "schema": "changerail.delivery-plan.v1",
+  "workspaces": [
+    {
+      "alias": "changerail",
+      "path": "."
+    }
+  ]
+}

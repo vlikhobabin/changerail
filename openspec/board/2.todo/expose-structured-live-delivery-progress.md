@@ -26,15 +26,14 @@ artifacts
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-live-progress-payload.md","authorization_id":"authorize-bounded-live-progress-payload"}`
 
-Перед implementation review требуется exact published investigation
-authorization для нового progress event/status wire contract.
+Exact authorization source `authorize-bounded-live-progress-payload`
+публикует bounded source для нового progress event/status wire contract.
 
 ## Depends On
 - `investigate-bounded-field-validation-batch`
-- separate exact published authorization source for
-  `expose-structured-live-delivery-progress`
+- `authorize-bounded-live-progress-payload`
 
 ## Summary
 Пока Codex child работает, single-card status показывает только
@@ -85,7 +84,7 @@ JSONL, который может содержать credentials/private runtime 
 Проработка завершена; apply-ready artifacts созданы, реализация не начата.
 
 ## Next
-- После published investigation authorization выполнить
+- Выполнить
   `$chrl-deliver openspec/board/2.todo/expose-structured-live-delivery-progress.md`.
 
 ## Change 1: `expose-structured-live-delivery-progress`

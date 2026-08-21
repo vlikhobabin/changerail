@@ -27,17 +27,16 @@ artifacts
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-recovery-episodes-payload.md","authorization_id":"authorize-bounded-recovery-episodes-payload"}`
 
-Перед реализацией episode/attempt schemas требуется exact published
-investigation authorization.
+Exact authorization source `authorize-bounded-recovery-episodes-payload`
+публикует bounded source для episode/attempt schemas и metrics rollup.
 
 ## Depends On
 - `expose-structured-live-delivery-progress`
 - `resume-retained-payload-after-external-blocker`
 - `investigate-bounded-field-validation-batch`
-- separate exact published authorization source for
-  `report-recovery-aware-delivery-episodes`
+- `authorize-bounded-recovery-episodes-payload`
 
 ## Problem
 ChangeRail независимо записывает каждый runner process, preflight и review

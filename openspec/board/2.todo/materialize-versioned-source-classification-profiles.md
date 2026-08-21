@@ -80,20 +80,19 @@ ChangeRail поддерживает проектный файл
 - Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
-- Published investigation authorization: `none`
+- Published investigation authorization: `{"authorization_card":"openspec/board/4.done/authorize-bounded-source-profile-payload.md","authorization_id":"authorize-bounded-source-profile-payload"}`
 
 Критический уровень нужен потому, что изменение влияет на расчет объема
 прикладного кода и выбор обязательной независимой проверки.
 
 Published investigation `investigate-bounded-field-validation-batch` закрывает
 repeated-defect classification для одного bounded source-profile hypothesis.
-Перед implementation review все еще требуется отдельная exact published
-authorization card для новых profile/check contracts.
+Exact authorization source `authorize-bounded-source-profile-payload`
+публикует bounded source для новых profile/check contracts.
 
 ## Depends On
 - `investigate-bounded-field-validation-batch`
-- separate exact published authorization source for
-  `materialize-versioned-source-classification-profiles`
+- `authorize-bounded-source-profile-payload`
 
 ## Acceptance
 - Определен версионируемый договор профиля классификации, который может

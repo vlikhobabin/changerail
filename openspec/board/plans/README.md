@@ -31,3 +31,6 @@ package runner.
   sources после опубликованного field-validation investigation; prerequisite
   target invariant и основной implementation batch запускаются только после
   успешного завершения этого плана.
+- `060-field-validation-implementation.json` - пять исходных field-validation
+  карточек после опубликованных authorization sources и завершенного
+  execution-target prerequisite; выполняются последовательно в одном workspace.
