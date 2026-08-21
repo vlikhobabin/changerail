@@ -1,13 +1,13 @@
 # Исследование parity preflight среды дочернего delivery runner
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-deliver-ready / artifacts created or reconciled by internal ff
+archived
 
 ## Series
 - none
@@ -49,6 +49,9 @@ repaired.
 This card is decision-only. A successor that changes runner/status wire
 semantics must declare that boundary separately and use the repository's
 investigation-authorization route when required by complexity preflight.
+
+## Blocks
+- `add-delivery-runner-child-equivalent-preflight`
 
 ## Acceptance
 - Reproduce the supervisor/child parity gap with public-safe deterministic
@@ -106,22 +109,98 @@ investigation-authorization route when required by complexity preflight.
 - Reading, copying or committing authentication material, local runtime logs or
   consumer-specific paths.
 
+## Investigation Decision
+The parity gap is real even when repository, branch and configured remote are
+nominally the same, because the supervisor and child surfaces resolve Git and
+SSH through different process/environment layers. The public-safe deterministic
+reproducer is:
+
+- create a temporary Git repository with a local bare upstream and prove that
+  the supervisor command
+  `git ls-remote --exit-code origin refs/heads/main` passes;
+- run the same workspace, branch and configured remote through a
+  child-equivalent profile that changes only child-visible Git/SSH resolution
+  with isolated `GIT_CONFIG_GLOBAL` or a fake `git ls-remote` wrapper;
+- make that child-equivalent proof fail with sanitized SSH configuration
+  output such as `Bad configuration option: Include`;
+- assert that aggregate admission blocks before workspace lock creation or
+  delivery child launch, records `failure_class: ssh_config`, marks it
+  non-retryable and references child structured status instead of raw logs.
+
+The execution boundaries that can change the result are runner process,
+launcher environment, `CODEX_HOME`, `CODEX_WORKDIR`, Codex project config,
+permission profile, sandboxed command execution, Git environment/config
+resolution, SSH config/include resolution, identity lookup, known-hosts policy
+and SSH agent/socket availability. Supervisor-only `git ls-remote` proof is
+therefore insufficient for aggregate queue admission.
+
+The selected design is a pre-delivery child-equivalent receipt. Queue
+admission, `run-plan` and `resume-plan` should prove publish-target readiness
+through the same effective child execution profile that a delivery child will
+use, but still before any workspace lock or live `$changerail-deliver` child is
+created. The receipt should reuse existing `changerail.delivery-run.v1`
+preflight status and aggregate `changerail.delivery-plan-status.v1`
+`run_status_path`/`failure_class` fields when possible. It must bind workspace
+root, card id/path, `HEAD`, branch, upstream remote, remote URL class,
+launcher, selected `CODEX_WORKDIR`, effective `CODEX_HOME` policy, permission
+profile and sanitized Git/SSH profile. A passing receipt is fresh only for the
+immediate admission window; the successor should default that bounded window
+to 300 seconds and rerun the proof before each later serial dispatch.
+
+If child-equivalent publish-target proof fails, aggregate status should stop as
+`BLOCKED` with `terminal_reason: publish_target_preflight_failed`. The affected
+card status must preserve the sanitized remote `failure_class`, retryability,
+attempt count and child status reference; it must not degrade to
+`unpublished_card`. Retry remains bounded to DNS, timeout and transient
+transport classes. Authentication, SSH policy/configuration and missing branch
+remain non-retryable fail-closed classes.
+
+Consumer-scoped SSH/Git overrides can be supported only as explicit
+workspace-scoped inputs. They must not become ChangeRail defaults, bypass host
+policy, modify package-managed system SSH files, read credential contents into
+tracked artifacts or expose identity paths, URL userinfo, tokens or raw config
+contents in status.
+
+The exact implementation successor is
+`add-delivery-runner-child-equivalent-preflight`; its current path is
+`openspec/board/1.backlog/add-delivery-runner-child-equivalent-preflight.md`.
+The successor production LOC ceiling is 300 added production-counted lines and
+its runner/status protocol-boundary declaration is `no`: it should reuse
+existing status schema fields. If the implementation needs more than 300
+production-counted LOC or any new required runner/status wire fields, it must
+stop for a separate published authorization bound to this investigation and
+the exact successor.
+
 ## Change Set
-- `investigate-delivery-runner-child-environment-preflight-parity`
+- `openspec/changes/archive/2026-08-21-investigate-delivery-runner-child-environment-preflight-parity/`
 
 ## Verify
-- RED/GREEN product evidence: N/A for this decision-only investigation; the
-  investigation must instead retain a deterministic reproducer and prove that
-  it distinguishes supervisor-only success from child-equivalent success.
-- `./bin/openspec validate
-  investigate-delivery-runner-child-environment-preflight-parity --strict`
-- `./bin/openspec validate --all --strict`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check` plus an explicit whitespace scan for untracked files.
+- GREEN: retained deterministic parity reproducer via `bin/changerail-evidence
+  capture --id deterministic-parity-reproducer ...` -> supervisor pass,
+  child-equivalent fail, `failure_class=ssh_config`, retryable false.
+- GREEN: `bin/changerail-evidence validate
+  .runtime/changerail/evidence/investigate-delivery-runner-child-environment-preflight-parity/index.json
+  --json` -> 1 entry.
+- GREEN: `./bin/openspec validate
+  "investigate-delivery-runner-child-environment-preflight-parity" --strict`.
+- GREEN: `./bin/openspec validate "changerail-delivery-runner" --strict`.
+- GREEN: `./bin/openspec validate --all --strict` -> 24/24 passed before
+  archive.
+- GREEN: `./bin/openspec validate --all --strict` -> 23/23 passed after
+  archive.
+- GREEN: `bin/changerail-delivery-manifest scope-check
+  .runtime/changerail/delivery-manifests/investigate-delivery-runner-child-environment-preflight-parity.json
+  --workspace . --target working-tree --json`.
+- GREEN: `python3 scripts/public-surface-scan.py` -> 1101 files scanned, 0
+  findings.
+- GREEN: `python3 -m json.tool .mcp.json`.
+- GREEN: TOML parse for `.codex/config.toml`.
+- GREEN: `git diff --check`.
+- GREEN: explicit trailing-whitespace scan over untracked files -> 7 files.
 - Fresh independent ordinary/high review before scoped publish.
 
 ## Archive
-not started
+- `openspec/changes/archive/2026-08-21-investigate-delivery-runner-child-environment-preflight-parity/`
 
 ## Related
 - `bin/changerail-delivery-runner`
@@ -131,13 +210,16 @@ not started
 - `scripts/smoke-delivery-runner.py`
 - `openspec/specs/changerail-delivery-runner/spec.md`
 - `docs/consumer-adoption-runbook.md`
+- `openspec/changes/archive/2026-08-21-investigate-delivery-runner-child-environment-preflight-parity/`
+- `openspec/board/1.backlog/add-delivery-runner-child-equivalent-preflight.md`
 
 ## Result
-not started
+published; investigation decision complete
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Run `$chrl-deliver
-  openspec/board/2.todo/investigate-delivery-runner-child-environment-preflight-parity.md`.
+- done
 
 ## Change 1: `investigate-delivery-runner-child-environment-preflight-parity`
 
@@ -173,9 +255,17 @@ bind one bounded implementation successor.
 - none
 
 ### Related
-- `openspec/changes/investigate-delivery-runner-child-environment-preflight-parity/`
+- `openspec/changes/archive/2026-08-21-investigate-delivery-runner-child-environment-preflight-parity/`
 
 ## Log
 - 2026-08-21T07:06:02Z created from a sanitized supervised package-runner
   preflight-parity finding; implementation and tests intentionally deferred to
   a separate ChangeRail successor.
+- 2026-08-21T09:29:17Z `$chrl-ff` created apply-ready OpenSpec artifacts for
+  `investigate-delivery-runner-child-environment-preflight-parity` and prepared
+  delivery handoff.
+- 2026-08-21T09:35:22Z `$chrl-do` recorded the investigation decision, created
+  successor `add-delivery-runner-child-equivalent-preflight`, synced
+  `changerail-delivery-runner`, archived the OpenSpec change and prepared
+  review handoff.
+- 2026-08-21T09:41:44Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
