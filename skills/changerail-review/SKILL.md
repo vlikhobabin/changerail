@@ -19,6 +19,12 @@ The reviewer produces evidence, not fixes. Its writes are ignored runtime
 review evidence under `.runtime/changerail/reviews/`: the latest canonical verdict and
 optional review-cycle history. It must not modify reviewed payload files.
 
+When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free review progress
+with `bin/changerail-delivery-runner progress-event review waiting` before
+payload audit and `review complete` after verdict validation. Progress events
+must use only the helper's bounded phase/stage contract and must not include
+prose, commands, paths, environment values or output excerpts.
+
 ## Independence Requirement
 
 This skill must run in a context that did not plan or implement the card:

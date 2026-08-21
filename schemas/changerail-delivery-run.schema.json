@@ -130,6 +130,12 @@
         }
       }
     },
+    "progress": {
+      "$ref": "#/$defs/deliveryProgress"
+    },
+    "progress_health": {
+      "$ref": "#/$defs/progressHealth"
+    },
     "terminal_outcome": {
       "enum": ["DELIVERED", "NO-GO", "BLOCKED"]
     },
@@ -265,6 +271,47 @@
     }
   },
   "$defs": {
+    "deliveryProgress": {
+      "type": "object",
+      "required": ["schema", "phase", "stage", "heartbeat_at", "event_counter"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-progress.v1"
+        },
+        "phase": {
+          "enum": ["preflight", "ff", "do", "review", "publish", "terminal"]
+        },
+        "stage": {
+          "enum": ["starting", "discovery", "planning", "implementation", "verification", "waiting", "finalizing", "complete"]
+        },
+        "heartbeat_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event_counter": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "progressHealth": {
+      "type": "object",
+      "required": ["state", "heartbeat_age_seconds", "process_alive"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": ["active", "stale", "terminated"]
+        },
+        "heartbeat_age_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "process_alive": {
+          "type": "boolean"
+        }
+      }
+    },
     "executionTargetIdentity": {
       "type": "object",
       "required": ["schema", "id", "fingerprint", "target_substitution_policy"],

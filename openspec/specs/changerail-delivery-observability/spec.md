@@ -157,6 +157,24 @@ history.
 - **THEN** existing delivery metrics behavior remains compatible
 - **AND** missing queue-level values are rendered as `unknown`
 
+### Requirement: Supported live progress view
+ChangeRail status readers MUST show latest validated child progress, heartbeat
+timestamp and bounded health through single-card and aggregate views without
+requiring operators to read raw JSONL or stderr logs.
+
+#### Scenario: Operator polls long-running card
+- **WHEN** an operator reads single-card or plan status during active delivery
+- **THEN** the view shows latest generic phase/stage, heartbeat and health for
+  that card
+- **AND** it does not display prompts, command text, output excerpts or
+  environment values
+
+#### Scenario: Aggregate child identity does not match
+- **WHEN** plan status sees child status whose run/card identity does not match
+  the active plan entry
+- **THEN** aggregate status does not mirror that progress
+- **AND** it emits a bounded invalid-child diagnostic
+
 ### Requirement: Queue metrics from structured records
 The delivery metrics helper MUST read aggregate queue status and child delivery
 run records to report queue outcomes without parsing arbitrary text.

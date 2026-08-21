@@ -24,6 +24,13 @@ worker may be the same active session as the orchestrator for small or
 single-card work, but it must never act as the independent reviewer for the
 payload it planned or implemented.
 
+When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free delivery progress
+with `bin/changerail-delivery-runner progress-event do implementation` before
+implementation work, `do verification` before verification and `do complete`
+after archive/card handoff. Progress events must contain only bounded
+phase/stage identity through the helper; never include prose, commands, paths,
+environment values or output excerpts.
+
 ## Project Context
 
 Resolve the repository root from the current working directory or

@@ -20,3 +20,6 @@ Reminders from the skill contract:
 - Preserve phase safety stops and scoped publish behavior.
 - Review must come from a fresh context; the implementing session must not
   write its own verdict.
+- If a runner provided `CHANGERAIL_PROGRESS_EVENT_PATH`, use the canonical
+  value-free `bin/changerail-delivery-runner progress-event <phase> <stage>`
+  transition contract from the skill.

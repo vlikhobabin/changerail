@@ -791,6 +791,14 @@ preflight checks, log paths и token usage, когда provider output позв�
 прочитать. Если usage недоступен, record обязан явно писать
 `usage.available: false`.
 
+Для live runs record может содержать optional `progress` object с schema
+`changerail.delivery-progress.v1`: bounded `phase` (`preflight`, `ff`, `do`,
+`review`, `publish`, `terminal`), bounded `stage`, `heartbeat_at` и
+monotonic `event_counter`. Runner пишет `progress_health` separately as bounded
+diagnostic (`active`, `stale`, `terminated`, heartbeat age и process-alive
+observation). Health не имеет terminal authority: stale heartbeat не меняет
+`result` и не завершает live child.
+
 Single-card и plan runner records могут содержать `execution_target`; это та же
 non-sensitive projection из tracked declaration. Runner проверяет ее до child
 launch, при queue resume и retained dirty resume. Drift, rebind или отсутствие
@@ -857,9 +865,10 @@ Single-card `status` является read-only reader-ом для existing
 `<workspace>/.runtime/changerail/delivery-runs/`. Одновременные selectors,
 missing/corrupt/schema-invalid или unsupported status records fail-closed и не
 fallback-ят на другой run. Human output показывает compact attention fields:
-card, run id, phase, result, `updated_at`, optional `terminal_reason`,
-selected status path и canonical related runtime paths для manifest, review
-verdict, review history и evidence index. Existing linked artifacts
+card, run id, phase, result, `updated_at`, optional progress phase/stage,
+heartbeat, health, `terminal_reason`, selected status path и canonical related
+runtime paths для manifest, review verdict, review history и evidence index.
+Existing linked artifacts
 валидируются по tracked schemas before trust; invalid manifest/verdict/history
 или evidence index дает non-zero diagnostic вместо guessed guidance. Если
 valid manifest содержит `runtime_pause_reasons`, reader печатает только stored
@@ -873,8 +882,22 @@ policy через prompt и environment: начинать с scoped paths, `rg -
 top-level file lists или bounded excerpts, считать truncated output и exit `130`
 inconclusive evidence, а raw stdout/stderr оставлять ignored runtime evidence.
 Default per-command output threshold - 65536 bytes, с override через
-`CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES`. Для ChangeRail source checkout default launcher -
-tracked `/opt/changerail/bin/codex`; consumer repository не обязан иметь
+`CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES`. Для progress runner additionally
+sets `CHANGERAIL_ACTIVE_RUN_ID`, `CHANGERAIL_ACTIVE_CARD_ID`,
+`CHANGERAIL_ACTIVE_RUN_DIR` и private `CHANGERAIL_PROGRESS_EVENT_PATH`.
+Lifecycle code emits value-free events through:
+
+```bash
+bin/changerail-delivery-runner progress-event ff planning
+bin/changerail-delivery-runner progress-event do implementation
+```
+
+Event file stays ignored runtime state. Runner accepts only matching run/card
+identity, known phase/stage, date-time timestamp and increasing sequence, then
+atomically updates `status.json`; prose, shell commands and stdout/stderr values
+are not parsed as lifecycle progress.
+Для ChangeRail source checkout default launcher - tracked `/opt/changerail/bin/codex`;
+consumer repository не обязан иметь
 tracked `bin/codex`, если оператор запускает ChangeRail runner извне или
 передает supported launcher через `--launcher`. Если `--workspace` не указан, workspace
 резолвится в git-root invocation cwd, а вне git - в текущий cwd. Если
@@ -1018,6 +1041,12 @@ uses the existing single-card runner and keeps its own
 `.runtime/changerail/delivery-runs/<run-id>/status.json`. Queue status stores
 references such as child run ids and status paths; raw stdout/stderr logs stay
 ignored runtime evidence and are not embedded in aggregate status.
+Для running card aggregate status may mirror child `progress` and
+`progress_health` only after the child status validates against
+`changerail.delivery-run.v1` and its `run_id`/`card.id` match the active plan
+entry. Mismatch does not copy progress and records bounded
+`progress_diagnostic: invalid_child_identity`; schema-invalid child progress
+uses `progress_diagnostic: invalid_child_status`.
 Если child preflight блокируется на remote publish target, aggregate card status
 сохраняет compact reason/failure class и `run_status_path`, а не raw child logs.
 For queue plans, plan runner запускает ChangeRail single-card runner, the

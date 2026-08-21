@@ -79,6 +79,13 @@ If no path is provided and it cannot be inferred, ask for it.
   with safety stop `awaiting external review`.
 - Preserve phase safety stops, manifest handling, evidence expectations and
   scoped publish rules.
+- When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free lifecycle
+  progress with `bin/changerail-delivery-runner progress-event <phase> <stage>`
+  at major transitions. Use only bounded phases/stages and never include prose,
+  commands, paths, environment values or output excerpts. Recommended
+  transitions are `preflight starting`, `ff planning`, `do implementation`,
+  `do verification`, `review waiting`, `publish finalizing`; terminal status is
+  runner-owned.
 - When a project declares `.changerail/execution-target.json`, preserve that
   exact target identity through planning, delivery, blocker/resume, review and
   publish. Do not create, clone, restore, register or select a substitute target

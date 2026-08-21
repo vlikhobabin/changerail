@@ -16,11 +16,13 @@ from __future__ import annotations
 __doc__ = "Run one ChangeRail delivery card non-interactively and write structured runtime status."
 
 import argparse
+import copy
 import hashlib
 import json
 import os
 import re
 import secrets
+import select
 import shutil
 import subprocess
 import sys
@@ -82,10 +84,29 @@ def positive_int_from_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def positive_float_from_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 COMMAND_OUTPUT_THRESHOLD_BYTES = positive_int_from_env(
     "CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES",
     DEFAULT_COMMAND_OUTPUT_THRESHOLD_BYTES,
 )
+PROGRESS_SCHEMA = "changerail.delivery-progress.v1"
+PROGRESS_EVENT_SCHEMA = "changerail.delivery-progress-event.v1"
+PROGRESS_PHASES = ("preflight", "ff", "do", "review", "publish", "terminal")
+PROGRESS_STAGES = ("starting", "discovery", "planning", "implementation", "verification", "waiting", "finalizing", "complete")
+PROGRESS_EVENT_KEYS = {"schema", "run_id", "card_id", "sequence", "phase", "stage", "emitted_at"}
+DEFAULT_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 5.0
+DEFAULT_PROGRESS_STALE_AFTER_SECONDS = 15.0
+DEFAULT_PROGRESS_POLL_INTERVAL_SECONDS = 0.1
 
 
 @dataclass
@@ -313,9 +334,13 @@ def child_environment(args: argparse.Namespace) -> dict[str, str]:
     env["CODEX_WORKDIR"] = str(root)
     env["CODEX_HOME"] = str(effective_codex_home(args))
     env["CHANGERAIL_ACTIVE_RUN_ID"] = args.run_id
+    env["CHANGERAIL_ACTIVE_CARD_ID"] = card_id(args.card)
     env["CHANGERAIL_ACTIVE_RUN_DIR"] = str((args.runtime_root / args.run_id).resolve(strict=False))
+    env["CHANGERAIL_PROGRESS_EVENT_PATH"] = str(progress_event_path(args).resolve(strict=False))
     env["CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES"] = str(COMMAND_OUTPUT_THRESHOLD_BYTES)
     env["CHANGERAIL_DISCOVERY_POLICY"] = child_discovery_policy()
+    env["CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS"] = str(progress_heartbeat_interval_seconds())
+    env["CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS"] = str(progress_stale_after_seconds())
     return env
 
 
@@ -1509,6 +1534,27 @@ def print_compact_plan_failures(status: dict[str, Any]) -> None:
         print(f"- {line}")
 
 
+def print_compact_plan_progress(status: dict[str, Any]) -> None:
+    cards = status.get("cards")
+    if not isinstance(cards, list):
+        return
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        card_id = card.get("id")
+        progress = card.get("progress")
+        if isinstance(card_id, str) and isinstance(progress, dict):
+            health = card.get("progress_health") if isinstance(card.get("progress_health"), dict) else {}
+            print(
+                f"{card_id}: {progress.get('phase')}/{progress.get('stage')} "
+                f"heartbeat={progress.get('heartbeat_at')} "
+                f"health={health.get('state', 'unknown')}"
+            )
+        diagnostic = card.get("progress_diagnostic")
+        if isinstance(card_id, str) and isinstance(diagnostic, str):
+            print(f"{card_id}: progress_diagnostic={diagnostic}")
+
+
 def build_plan_view(
     args: argparse.Namespace,
     data: dict[str, Any],
@@ -1575,6 +1621,9 @@ def plan_status_record(
                 "started_at",
                 "ended_at",
                 "reason",
+                "progress",
+                "progress_health",
+                "progress_diagnostic",
             )
             if key in card
         }
@@ -1915,9 +1964,180 @@ def status_path(args: argparse.Namespace) -> Path:
     return args.runtime_root / args.run_id / "status.json"
 
 
+def progress_event_path(args: argparse.Namespace) -> Path:
+    return args.runtime_root / args.run_id / "progress-events.jsonl"
+
+
 def log_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     run_dir = args.runtime_root / args.run_id
     return run_dir / "stdout.jsonl", run_dir / "stderr.log"
+
+
+def progress_heartbeat_interval_seconds() -> float:
+    return positive_float_from_env(
+        "CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS",
+        DEFAULT_PROGRESS_HEARTBEAT_INTERVAL_SECONDS,
+    )
+
+
+def progress_stale_after_seconds() -> float:
+    return positive_float_from_env(
+        "CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS",
+        DEFAULT_PROGRESS_STALE_AFTER_SECONDS,
+    )
+
+
+def progress_poll_interval_seconds() -> float:
+    return positive_float_from_env(
+        "CHANGERAIL_PROGRESS_POLL_INTERVAL_SECONDS",
+        DEFAULT_PROGRESS_POLL_INTERVAL_SECONDS,
+    )
+
+
+def progress_base(phase: str, stage: str, heartbeat_at: str, counter: int) -> dict[str, Any]:
+    return {
+        "schema": PROGRESS_SCHEMA,
+        "phase": phase,
+        "stage": stage,
+        "heartbeat_at": heartbeat_at,
+        "event_counter": counter,
+    }
+
+
+def progress_health(progress: dict[str, Any], *, process_alive: bool) -> dict[str, Any]:
+    heartbeat = parse_utc(progress.get("heartbeat_at") if isinstance(progress.get("heartbeat_at"), str) else None)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    age = 0.0
+    if heartbeat is not None:
+        age = max(0.0, (now - heartbeat).total_seconds())
+    state = "terminated" if not process_alive else ("stale" if age > progress_stale_after_seconds() else "active")
+    return {
+        "state": state,
+        "heartbeat_age_seconds": round(age, 3),
+        "process_alive": process_alive,
+    }
+
+
+def valid_progress_event(event: Any, *, run_id: str, card: str, last_sequence: int) -> dict[str, Any] | None:
+    if not isinstance(event, dict):
+        return None
+    if set(event) - PROGRESS_EVENT_KEYS:
+        return None
+    if event.get("schema") != PROGRESS_EVENT_SCHEMA:
+        return None
+    if event.get("run_id") != run_id or event.get("card_id") != card_id(card):
+        return None
+    sequence = event.get("sequence")
+    if not isinstance(sequence, int) or sequence <= last_sequence:
+        return None
+    phase = event.get("phase")
+    stage = event.get("stage")
+    if phase not in PROGRESS_PHASES or stage not in PROGRESS_STAGES:
+        return None
+    emitted_at = event.get("emitted_at")
+    if not isinstance(emitted_at, str) or parse_utc(emitted_at) is None:
+        return None
+    return {
+        "phase": phase,
+        "stage": stage,
+        "heartbeat_at": emitted_at,
+        "event_counter": sequence,
+    }
+
+
+def json_object_line(line: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+class ProgressTracker:
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+        self.event_path = progress_event_path(args)
+        self.event_offset = 0
+        self.last_sequence = 0
+        self.last_write_monotonic = 0.0
+        self.last_health_state: str | None = None
+        self.heartbeat_interval = progress_heartbeat_interval_seconds()
+
+    def initialize(self, record: dict[str, Any]) -> None:
+        now = utc_now()
+        record["progress"] = progress_base("preflight", "complete", now, 0)
+        self.sync(record, process_alive=True, force=True)
+
+    def observe_activity(self, record: dict[str, Any], line: str) -> None:
+        if json_object_line(line) is None:
+            return
+        progress = record.get("progress")
+        if not isinstance(progress, dict):
+            progress = progress_base("preflight", "complete", utc_now(), self.last_sequence)
+            record["progress"] = progress
+        progress["heartbeat_at"] = utc_now()
+        self.sync(record, process_alive=True, force=False)
+
+    def consume_events(self, record: dict[str, Any]) -> None:
+        try:
+            size = self.event_path.stat().st_size
+        except OSError:
+            return
+        if size < self.event_offset:
+            self.event_offset = 0
+        try:
+            with self.event_path.open("r", encoding="utf-8") as handle:
+                handle.seek(self.event_offset)
+                lines = handle.readlines()
+                self.event_offset = handle.tell()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            normalized = valid_progress_event(
+                event,
+                run_id=self.args.run_id,
+                card=self.args.card,
+                last_sequence=self.last_sequence,
+            )
+            if normalized is None:
+                continue
+            self.last_sequence = int(normalized["event_counter"])
+            record["progress"] = progress_base(
+                str(normalized["phase"]),
+                str(normalized["stage"]),
+                str(normalized["heartbeat_at"]),
+                self.last_sequence,
+            )
+            self.sync(record, process_alive=True, force=True)
+
+    def sync(self, record: dict[str, Any], *, process_alive: bool, force: bool = False) -> None:
+        progress = record.get("progress")
+        if not isinstance(progress, dict):
+            return
+        health = progress_health(progress, process_alive=process_alive)
+        health_state_changed = health.get("state") != self.last_health_state
+        record["progress_health"] = health
+        now = time.monotonic()
+        if force or health_state_changed or now - self.last_write_monotonic >= self.heartbeat_interval:
+            record["updated_at"] = utc_now()
+            atomic_write_json(status_path(self.args), record)
+            self.last_write_monotonic = now
+            self.last_health_state = str(health.get("state"))
+
+    def mark_terminal(self, record: dict[str, Any]) -> None:
+        self.consume_events(record)
+        progress = record.get("progress")
+        counter = self.last_sequence
+        if isinstance(progress, dict) and isinstance(progress.get("event_counter"), int):
+            counter = max(counter, int(progress["event_counter"]))
+        counter += 1
+        self.last_sequence = counter
+        record["progress"] = progress_base("terminal", "complete", utc_now(), counter)
+        self.sync(record, process_alive=False, force=True)
 
 
 def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = False) -> list[Check]:
@@ -2237,6 +2457,61 @@ def fallback_terminal_signal(args: argparse.Namespace, exit_code: int, structure
     return TerminalSignal("BLOCKED", "unpublished_card")
 
 
+def append_private_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    ensure_private_directory(path.parent)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
+
+
+def next_progress_event_sequence(path: Path) -> int:
+    sequence = 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 1
+    for line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        candidate = payload.get("sequence") if isinstance(payload, dict) else None
+        if isinstance(candidate, int):
+            sequence = max(sequence, candidate)
+    return sequence + 1
+
+
+def command_progress_event(args: argparse.Namespace) -> int:
+    event_path_raw = os.environ.get("CHANGERAIL_PROGRESS_EVENT_PATH")
+    run_id = os.environ.get("CHANGERAIL_ACTIVE_RUN_ID")
+    card = os.environ.get("CHANGERAIL_ACTIVE_CARD_ID")
+    if not event_path_raw or not run_id or not card:
+        print("progress-event failed: active ChangeRail run identity is unavailable", file=sys.stderr)
+        return 1
+    if args.phase not in PROGRESS_PHASES or args.stage not in PROGRESS_STAGES:
+        print("progress-event failed: unknown phase or stage", file=sys.stderr)
+        return 1
+    event_path = Path(event_path_raw).expanduser().resolve(strict=False)
+    sequence = args.sequence if args.sequence is not None else next_progress_event_sequence(event_path)
+    if sequence <= 0:
+        print("progress-event failed: sequence must be positive", file=sys.stderr)
+        return 1
+    payload = {
+        "schema": PROGRESS_EVENT_SCHEMA,
+        "run_id": run_id,
+        "card_id": card,
+        "sequence": sequence,
+        "phase": args.phase,
+        "stage": args.stage,
+        "emitted_at": utc_now(),
+    }
+    append_private_jsonl(event_path, payload)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def command_preflight(args: argparse.Namespace) -> int:
     args.started_at = utc_now()
     checks = check_preflight(args)
@@ -2259,16 +2534,18 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["command"]["argv"] = command
     record["preflight"] = {"checks": [check_payload(check) for check in checks]}
     record["logs"] = {"stdout": str(stdout_path), "stderr": str(stderr_path)}
+    progress = ProgressTracker(args)
+    progress.initialize(record)
     if any(check.status == "fail" for check in checks):
         record["phase"] = "terminal"
         record["result"] = "BLOCKED"
         record["terminal_outcome"] = "BLOCKED"
         record["timestamps"]["ended_at"] = utc_now()
+        progress.mark_terminal(record)
         atomic_write_json(status_path(args), record)
         print("terminal_outcome: BLOCKED")
         print(f"status: {status_path(args)}")
         return 1
-    atomic_write_json(status_path(args), record)
     performance = PerformanceCollector(root)
     with open_private_text(stdout_path) as stdout, open_private_text(stderr_path) as stderr:
         process = subprocess.Popen(
@@ -2284,11 +2561,35 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         record["process"] = {"pid": process.pid}
         atomic_write_json(status_path(args), record)
         if process.stdout is not None:
-            for line in process.stdout:
+            poll_interval = progress_poll_interval_seconds()
+
+            def handle_stdout_line(line: str) -> None:
                 stdout.write(line)
                 stdout.flush()
                 performance.observe_line(line)
+                progress.observe_activity(record, line)
+                progress.consume_events(record)
+
+            while True:
+                ready, _write, _error = select.select([process.stdout], [], [], poll_interval)
+                if ready:
+                    line = process.stdout.readline()
+                    if line:
+                        handle_stdout_line(line)
+                    elif process.poll() is not None:
+                        break
+                else:
+                    progress.consume_events(record)
+                    progress.sync(record, process_alive=True, force=False)
+                if process.poll() is not None:
+                    while True:
+                        line = process.stdout.readline()
+                        if not line:
+                            break
+                        handle_stdout_line(line)
+                    break
         exit_code = process.wait()
+    progress.consume_events(record)
     terminal_signal = fallback_terminal_signal(args, exit_code, stdout_terminal_signal(stdout_path))
     outcome = terminal_signal.outcome or "BLOCKED"
     if exit_code != 0 and outcome == "DELIVERED":
@@ -2330,6 +2631,7 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["timestamps"]["ended_at"] = utc_now()
     record["updated_at"] = utc_now()
     record_commit(record, root)
+    progress.mark_terminal(record)
     atomic_write_json(status_path(args), record)
     print(f"terminal_outcome: {outcome}")
     if terminal_signal.reason:
@@ -2835,6 +3137,47 @@ def child_terminal_signal(child_status: dict[str, Any] | None) -> TerminalSignal
     return TerminalSignal(result, reason if isinstance(reason, str) else None)
 
 
+def child_status_matches_plan_card(child_status: dict[str, Any], card: dict[str, Any]) -> bool:
+    if child_status.get("run_id") != card.get("run_id"):
+        return False
+    status_card = child_status.get("card")
+    if not isinstance(status_card, dict):
+        return False
+    expected_path = card.get("resolved_path") or card.get("card")
+    return isinstance(expected_path, str) and status_card.get("path") == expected_path
+
+
+def mirror_child_progress(card: dict[str, Any], child_status: dict[str, Any] | None) -> bool:
+    before = {
+        "progress": copy.deepcopy(card.get("progress")),
+        "progress_health": copy.deepcopy(card.get("progress_health")),
+        "progress_diagnostic": card.get("progress_diagnostic"),
+    }
+    for key in ("progress", "progress_health", "progress_diagnostic"):
+        card.pop(key, None)
+    if not isinstance(child_status, dict):
+        return before != {"progress": None, "progress_health": None, "progress_diagnostic": None}
+    progress = child_status.get("progress")
+    health = child_status.get("progress_health")
+    if not isinstance(progress, dict):
+        return before != {"progress": None, "progress_health": None, "progress_diagnostic": None}
+    errors = schema_errors(child_status, "changerail-delivery-run.schema.json")
+    if errors:
+        card["progress_diagnostic"] = "invalid_child_status"
+    elif not child_status_matches_plan_card(child_status, card):
+        card["progress_diagnostic"] = "invalid_child_identity"
+    else:
+        card["progress"] = copy.deepcopy(progress)
+        if isinstance(health, dict):
+            card["progress_health"] = copy.deepcopy(health)
+    after = {
+        "progress": copy.deepcopy(card.get("progress")),
+        "progress_health": copy.deepcopy(card.get("progress_health")),
+        "progress_diagnostic": card.get("progress_diagnostic"),
+    }
+    return before != after
+
+
 def ready_cards(cards: list[dict[str, Any]], completed: set[str], running_workspaces: set[str]) -> list[dict[str, Any]]:
     cards_by_id = {card["id"]: card for card in cards if isinstance(card.get("id"), str)}
     candidates: list[dict[str, Any]] = []
@@ -3014,11 +3357,15 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
         for card_id, (process, card, workspace) in list(running.items()):
             exit_code = process.poll()
             if exit_code is None:
+                child_status = load_json_object(child_status_path_for(args, card, workspace))
+                if mirror_child_progress(card, child_status):
+                    status = write_plan_status(args, data, workspaces, cards, checks, "running" if not resume else "resuming", result, locks)
                 continue
             running.pop(card_id)
             locks.append(release_workspace_lock(args, workspace))
             card["ended_at"] = utc_now()
             child_status = load_json_object(child_status_path_for(args, card, workspace))
+            mirror_child_progress(card, child_status)
             child_signal = child_terminal_signal(child_status)
             child_result = child_signal.outcome or "BLOCKED"
             card["result"] = child_result
@@ -3320,6 +3667,7 @@ def command_status_plan(args: argparse.Namespace) -> int:
         print(f"result: {data.get('result')}")
         print(f"plan: {plan.get('id', 'unknown')}")
         print(f"cards: {len(data.get('cards', [])) if isinstance(data.get('cards'), list) else 0}")
+        print_compact_plan_progress(data)
         print_compact_plan_failures(data)
     return 0 if data.get("result") != "BLOCKED" else 1
 
@@ -3455,6 +3803,22 @@ def command_status(args: argparse.Namespace) -> int:
     print(f"phase: {record.get('phase')}")
     print(f"result: {record.get('result')}")
     print(f"updated_at: {record.get('updated_at')}")
+    progress = record.get("progress")
+    if isinstance(progress, dict):
+        print(
+            "progress: "
+            f"{progress.get('phase')}/{progress.get('stage')} "
+            f"heartbeat={progress.get('heartbeat_at')} "
+            f"event_counter={progress.get('event_counter')}"
+        )
+    health = record.get("progress_health")
+    if isinstance(health, dict):
+        print(
+            "health: "
+            f"{health.get('state')} "
+            f"heartbeat_age_seconds={health.get('heartbeat_age_seconds')} "
+            f"process_alive={health.get('process_alive')}"
+        )
     if record.get("terminal_reason"):
         print(f"terminal_reason: {record.get('terminal_reason')}")
     print(f"status: {repository_relative(selected, root)}")
@@ -3568,6 +3932,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=command_status)
 
+    progress_event = subparsers.add_parser("progress-event", help="append a value-free lifecycle progress event")
+    progress_event.add_argument("phase", choices=PROGRESS_PHASES)
+    progress_event.add_argument("stage", choices=PROGRESS_STAGES)
+    progress_event.add_argument("--sequence", type=int)
+    progress_event.add_argument("--json", action="store_true")
+    progress_event.set_defaults(func=command_progress_event)
+
     plan = subparsers.add_parser("plan", help="resolve a delivery plan without launching children")
     add_plan_common(plan)
     plan.set_defaults(func=command_plan)
@@ -3641,6 +4012,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
         if args.status_path is not None:
             args.status_path = resolve_path(args.status_path, args.workspace)
+    elif args.command == "progress-event":
+        pass
     else:
         args.consumer_root = resolve_path(args.consumer_root) if getattr(args, "consumer_root", None) else invocation_workspace()
         if hasattr(args, "status_path") and args.status_path:

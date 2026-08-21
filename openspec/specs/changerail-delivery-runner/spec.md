@@ -61,6 +61,45 @@ available.
   `--runtime-root` is explicitly supplied
 - **AND** the record contains the workspace `HEAD` as `commit` when available
 
+### Requirement: Structured live delivery progress
+Delivery runner MUST publish optional `changerail.delivery-progress.v1` for a
+running single-card child based on validated lifecycle events and bounded
+activity heartbeat. Runner MUST NOT derive lifecycle transition from free-form
+prose, command text or output.
+
+#### Scenario: Lifecycle transition updates running status
+- **WHEN** a matching child sends a schema-valid progress event for major
+  transition `ff`, `do`, `review` or `publish`
+- **THEN** runner atomically updates `progress.phase`, `progress.stage`,
+  `heartbeat_at` and monotonic `event_counter`
+- **AND** existing semantics `phase: delivery` and `result: RUNNING` do not
+  change
+
+#### Scenario: Untrusted content is not progress
+- **WHEN** child prose, shell command or command output contains text that looks
+  like a lifecycle phase or a synthetic private value
+- **THEN** runner does not copy that value into progress
+- **AND** phase/stage can change only through validated value-free lifecycle
+  event
+
+### Requirement: Stale heartbeat is a non-terminal diagnostic
+Delivery runner MUST evaluate heartbeat age with observed process state and
+MUST NOT terminate or classify a live child only because one heartbeat interval
+was missed.
+
+#### Scenario: Live child misses heartbeat interval
+- **WHEN** heartbeat age exceeds documented stale threshold and child process
+  remains alive
+- **THEN** status reports bounded health `stale` and heartbeat age
+- **AND** terminal outcome remains unset until existing terminal evidence
+  appears
+
+#### Scenario: Child terminates after stale heartbeat
+- **WHEN** process exits after heartbeat became stale
+- **THEN** runner determines terminal result through the existing terminal
+  protocol
+- **AND** progress health may report termination without replacing result
+
 ### Requirement: Single-card runtime status reader
 The delivery runner MUST provide a read-only single-card status command that
 inspects an existing `changerail.delivery-run.v1` record without launching,
@@ -72,7 +111,8 @@ resuming, stopping or mutating delivery state.
 - **THEN** the command validates the selected record as
   `changerail.delivery-run.v1`
 - **AND** it prints compact human-readable fields for card, phase, result,
-  `updated_at`, `terminal_reason` when present and the selected status path
+  `updated_at`, progress/health when present, `terminal_reason` when present
+  and the selected status path
 - **AND** it does not modify board files, process state, locks, manifests,
   verdicts, evidence indexes, logs or status records
 

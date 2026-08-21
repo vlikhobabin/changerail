@@ -1,13 +1,13 @@
 # Публиковать структурированный live progress доставки
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Series
 - none
@@ -66,26 +66,37 @@ JSONL, который может содержать credentials/private runtime 
 - `expose-structured-live-delivery-progress`
 
 ## Verify
-- Contract/schema tests для single-card и aggregate status records.
-- Runner integration fixture с deterministic progress events и stalled
-  heartbeat.
-- Secret-bearing synthetic child output доказывает value-free progress.
+- `python3 scripts/smoke-contract-schemas.py` - passed; delivery-run and
+  plan-status progress/health fixtures validate and invalid enum/content
+  fixtures fail closed.
+- `python3 scripts/smoke-delivery-runner.py` - passed; normal progress,
+  stale heartbeat, resume, child termination, aggregate mirror and
+  non-disclosure fixtures passed.
+- `bin/openspec validate expose-structured-live-delivery-progress --strict` -
+  passed.
+- `bin/openspec validate --all --strict` - passed, 32 items.
+- `git diff --check` - passed.
+- `python3 scripts/public-surface-scan.py` - passed, 1206 files scanned, 0
+  findings.
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-21-expose-structured-live-delivery-progress/`
 
 ## Related
 - `bin/changerail-delivery-runner`
 - `schemas/changerail-delivery-run.schema.json`
 - `schemas/changerail-delivery-plan-status.schema.json`
-- `openspec/changes/expose-structured-live-delivery-progress/`
+- `openspec/changes/archive/2026-08-21-expose-structured-live-delivery-progress/`
 
 ## Result
-Проработка завершена; apply-ready artifacts созданы, реализация не начата.
+Реализация завершена; bounded live progress protocol, aggregate mirror,
+operator status view, lifecycle instructions, docs, tests and synced specs are
+ready for independent review.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить
-  `$chrl-deliver openspec/board/2.todo/expose-structured-live-delivery-progress.md`.
+- done
 
 ## Change 1: `expose-structured-live-delivery-progress`
 
@@ -117,7 +128,7 @@ commands или output values.
   event/status wire contract
 
 ### Related
-- `openspec/changes/expose-structured-live-delivery-progress/`
+- `openspec/changes/archive/2026-08-21-expose-structured-live-delivery-progress/`
 - `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Log
@@ -134,3 +145,20 @@ commands или output values.
 - 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
   exact progress event/status boundary, ceiling 500 и запрет raw child
   prose/output parsing.
+- 2026-08-21T14:10:59Z `$chrl-ff` подтвердил apply-ready artifacts,
+  `bin/openspec validate expose-structured-live-delivery-progress --strict`,
+  `bin/openspec validate --all --strict` и `git diff --check` прошли; карточка
+  переведена в `3.inprogress` для delivery.
+- 2026-08-21T14:30:05Z `$chrl-do` реализовал bounded progress event/status
+  protocol, synced specs and docs, выполнил `python3
+  scripts/smoke-contract-schemas.py`, `python3 scripts/smoke-delivery-runner.py`,
+  `bin/openspec validate --all --strict`, `git diff --check` и `python3
+  scripts/public-surface-scan.py`; change archived to
+  `openspec/changes/archive/2026-08-21-expose-structured-live-delivery-progress/`.
+- 2026-08-21T14:49:09Z focused re-review returned `NO-GO` for aliased queue
+  card progress identity; same-card rescue fixed mirror identity to use child
+  run id plus launched card path, added aliased queue progress smoke, and reran
+  `python3 scripts/smoke-delivery-runner.py`, `python3
+  scripts/smoke-contract-schemas.py`, `bin/openspec validate --all --strict`,
+  `git diff --check` and `python3 scripts/public-surface-scan.py` successfully.
+- 2026-08-21T14:56:23Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.

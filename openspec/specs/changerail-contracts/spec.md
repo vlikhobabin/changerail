@@ -480,6 +480,35 @@ terminal reason.
 - **THEN** the run record explicitly reports usage as unavailable instead of
   guessing values
 
+### Requirement: Delivery progress wire contract
+`changerail.delivery-run.v1` and `changerail.delivery-plan-status.v1` MUST
+support one optional `changerail.delivery-progress.v1` object with bounded
+phase/stage enums, date-time heartbeat and non-negative monotonic event
+counter. The object MUST reject undeclared content-bearing fields.
+
+#### Scenario: Safe progress validates
+- **WHEN** status contains known phase/stage, valid heartbeat timestamp and
+  non-negative event counter
+- **THEN** the applicable public schema validates the record
+- **AND** aggregate status can mirror the object without semantic conversion
+
+#### Scenario: Content-bearing progress fails validation
+- **WHEN** progress contains prompts, command bodies, environment values,
+  response bodies, raw log excerpts or unknown phase/stage
+- **THEN** schema validation fails closed
+- **AND** invalid object is not published as trusted live progress
+
+### Requirement: Bounded progress health contract
+Status contracts MUST represent progress health through bounded state,
+non-negative heartbeat age and process-alive observation, without giving the
+diagnostic terminal or mutation authority.
+
+#### Scenario: Stale health is compatible with running result
+- **WHEN** a schema-valid running record reports stale progress health and a
+  live process
+- **THEN** schema validation passes
+- **AND** `result` remains `RUNNING` instead of being derived from health alone
+
 ### Requirement: Delivery run performance summary contract
 ChangeRail MUST define schema-backed optional performance fields for
 `changerail.delivery-run.v1` status records without weakening the required base
@@ -685,6 +714,17 @@ ChangeRail MUST define a public schema-backed
 - **WHEN** a queue status record is written
 - **THEN** the default path is under ignored `.runtime/changerail/`
 - **AND** the status schema does not require raw logs or secrets
+
+#### Scenario: Queue mirrors matching child progress
+- **WHEN** an active child status contains schema-valid progress and matching
+  run/card identity
+- **THEN** aggregate card status may mirror `progress` and `progress_health`
+- **AND** it still references the child status instead of embedding raw logs
+
+#### Scenario: Queue rejects mismatched child progress
+- **WHEN** a child status progress record belongs to another run or card
+- **THEN** aggregate card status does not mirror that progress
+- **AND** it records bounded `progress_diagnostic` instead of child values
 
 ### Requirement: Delivery plan schema fixtures
 ChangeRail contract schema validation MUST cover delivery plan and delivery

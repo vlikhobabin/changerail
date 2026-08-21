@@ -138,13 +138,21 @@ bin/changerail-delivery-runner status --json
 
 Она валидирует selected `changerail.delivery-run.v1` record, fail-closed
 отклоняет missing/corrupt/unsupported input и в human output показывает card,
-phase, result, `updated_at`, `terminal_reason`, selected status path и
-canonical paths к manifest, review verdict/history и evidence index, если они
-однозначно выводятся из card/workspace. Manifest `runtime_pause_reasons`
+phase, result, `updated_at`, optional progress phase/stage, heartbeat, health,
+`terminal_reason`, selected status path и canonical paths к manifest, review
+verdict/history и evidence index, если они однозначно выводятся из
+card/workspace. Manifest `runtime_pause_reasons`
 показываются только из structured `summary`/`next_action`; команда не выводит
 guidance из raw stdout/stderr, process tree или session prose. `--json`
 возвращает исходный schema-valid delivery-run record без отдельного view
 wrapper.
+
+Live progress приходит из runner-owned ignored progress-event channel and
+coalesced heartbeat updates. Lifecycle events contain only run/card identity,
+bounded phase/stage, timestamp and counter; runner does not parse agent prose,
+shell commands or output values as progress. Stale heartbeat is advisory:
+`progress_health: stale` can coexist with `result: RUNNING` while the process is
+alive.
 
 Для dependency-ordered очередей через несколько независимых workspaces runner
 поддерживает отдельный JSON plan contract и plan-oriented команды:
@@ -179,7 +187,9 @@ Aggregate status пишется под
 single-card runner для каждого child, single-card runner запускает Codex, а
 `CODEX_WORKDIR` и effective `CODEX_HOME` выбирают workspace конкретного
 consumer child. Каждый live card сохраняет отдельный
-`changerail.delivery-run.v1` record.
+`changerail.delivery-run.v1` record. Aggregate status mirrors only schema-valid
+matching child progress; mismatched child identity records a bounded
+progress diagnostic instead of copying the child values.
 
 Workspace lock-и под ignored runtime state исключают два live child run в одном
 repository. Stale lock не удаляется автоматически: runner пишет structured

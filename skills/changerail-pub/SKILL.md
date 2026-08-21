@@ -57,6 +57,11 @@ Accept legacy prompt forms such as `/changerail:pub <card>`, `changerail:pub <ca
 - Commit only files tied to the named card, archived changes, synced specs,
   docs, tests and board state.
 - Stop if unrelated dirty files cannot be separated confidently.
+- When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free publish progress
+  with `bin/changerail-delivery-runner progress-event publish finalizing` before
+  final verification/staging and `publish complete` after successful push or
+  explicit `--no-push` publish metadata. Do not include prose, commands, paths,
+  environment values or output excerpts in progress.
 
 ## Review Gate
 

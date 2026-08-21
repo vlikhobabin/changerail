@@ -197,8 +197,28 @@ def delivery_run_minimal() -> dict[str, Any]:
     }
 
 
+def delivery_progress(phase: str = "do", stage: str = "implementation", counter: int = 3) -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-progress.v1",
+        "phase": phase,
+        "stage": stage,
+        "heartbeat_at": DATE,
+        "event_counter": counter,
+    }
+
+
+def progress_health(state: str = "active", age: float = 0.0, process_alive: bool = True) -> dict[str, Any]:
+    return {
+        "state": state,
+        "heartbeat_age_seconds": age,
+        "process_alive": process_alive,
+    }
+
+
 def delivery_run() -> dict[str, Any]:
     payload = delivery_run_minimal()
+    payload["progress"] = delivery_progress()
+    payload["progress_health"] = progress_health()
     payload["usage"] = {
         "available": True,
         "input_tokens": 10,
@@ -385,6 +405,8 @@ def delivery_plan_status() -> dict[str, Any]:
                 "run_id": "child-a",
                 "run_status_path": ".runtime/changerail/delivery-runs/child-a/status.json",
                 "result": "DELIVERED",
+                "progress": delivery_progress("publish", "complete", 5),
+                "progress_health": progress_health("terminated", 0.0, False),
             },
             {
                 "id": "service-b-card",
@@ -1111,6 +1133,21 @@ def main() -> int:
             invalid_output["performance"]["commands"][0]["output"]["raw_stdout"] = "raw payload must not be accepted"
             if not validator(invalid_output):
                 failures.append(f"{name}: raw command output payload unexpectedly passed")
+            running_stale = delivery_run_minimal()
+            running_stale["phase"] = "delivery"
+            running_stale["result"] = "RUNNING"
+            running_stale["progress"] = delivery_progress("do", "verification", 7)
+            running_stale["progress_health"] = progress_health("stale", 12.5, True)
+            if validator(running_stale):
+                failures.append(f"{name}: running stale progress fixture failed")
+            invalid_progress_enum = delivery_run()
+            invalid_progress_enum["progress"]["phase"] = "raw-child-output"
+            if not validator(invalid_progress_enum):
+                failures.append(f"{name}: unknown progress phase unexpectedly passed")
+            invalid_progress_content = delivery_run()
+            invalid_progress_content["progress"]["raw_log_excerpt"] = "synthetic raw child output"
+            if not validator(invalid_progress_content):
+                failures.append(f"{name}: content-bearing progress unexpectedly passed")
         if name == "changerail-consumer-lock.schema.json":
             unsafe_source = consumer_lock()
             unsafe_source["changerail"]["source"] = "https://user:secret@example.invalid/changerail.git"
@@ -1223,6 +1260,11 @@ def main() -> int:
     recovery_status["summary"]["recovered"] = 1
     if validate_delivery_plan_status(recovery_status):
         failures.append("changerail-delivery-plan-status.schema.json: recovery status fixture failed")
+
+    invalid_plan_progress = delivery_plan_status()
+    invalid_plan_progress["cards"][0]["progress"]["stage"] = "free-form-child-prose"
+    if not validate_delivery_plan_status(invalid_plan_progress):
+        failures.append("changerail-delivery-plan-status.schema.json: unknown progress stage unexpectedly passed")
 
     remote_failure_status = delivery_plan_status()
     remote_failure_status["result"] = "BLOCKED"

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -161,8 +162,34 @@ def write_fake_launcher(path: Path) -> None:
                 "    with open(call_log, 'a', encoding='utf-8') as handle:",
                 "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
                 "stdin = sys.stdin.read()",
-                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR'), 'CHANGERAIL_DISCOVERY_POLICY': os.environ.get('CHANGERAIL_DISCOVERY_POLICY'), 'CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES': os.environ.get('CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES')}))",
+                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_CARD_ID': os.environ.get('CHANGERAIL_ACTIVE_CARD_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR'), 'CHANGERAIL_PROGRESS_EVENT_PATH': os.environ.get('CHANGERAIL_PROGRESS_EVENT_PATH'), 'CHANGERAIL_DISCOVERY_POLICY': os.environ.get('CHANGERAIL_DISCOVERY_POLICY'), 'CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES': os.environ.get('CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES')}), flush=True)",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
+                "progress_path = os.environ.get('CHANGERAIL_PROGRESS_EVENT_PATH')",
+                "def emit_progress(sequence, phase, stage, run_id=None, card_id=None, extra=None):",
+                "    if not progress_path:",
+                "        return",
+                "    payload = {'schema': 'changerail.delivery-progress-event.v1', 'run_id': run_id or os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'card_id': card_id or os.environ.get('CHANGERAIL_ACTIVE_CARD_ID'), 'sequence': sequence, 'phase': phase, 'stage': stage, 'emitted_at': '2026-07-15T00:00:00Z'}",
+                "    if extra:",
+                "        payload.update(extra)",
+                "    os.makedirs(os.path.dirname(progress_path), exist_ok=True)",
+                "    with open(progress_path, 'a', encoding='utf-8') as handle:",
+                "        handle.write(json.dumps(payload, sort_keys=True) + '\\n')",
+                "if mode == 'progress':",
+                "    emit_progress(1, 'ff', 'planning')",
+                "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-progress', 'type': 'command_execution', 'command': '/bin/echo progress', 'status': 'in_progress'}}), flush=True)",
+                "    emit_progress(99, 'review', 'waiting', run_id='wrong-run', extra={'raw_log_excerpt': 'SYNTHETIC_PRIVATE_VALUE_SHOULD_NOT_APPEAR'})",
+                "    emit_progress(2, 'do', 'verification')",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-progress', 'type': 'command_execution', 'command': '/bin/echo progress', 'status': 'completed', 'exit_code': 0, 'stdout_bytes': 1, 'stderr_bytes': 0}}), flush=True)",
+                "if mode == 'progress-stall':",
+                "    emit_progress(1, 'do', 'implementation')",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-progress-stall', 'type': 'agent_message', 'text': 'stalling'}}), flush=True)",
+                "    release = os.environ.get('CHANGERAIL_FAKE_STALL_RELEASE')",
+                "    deadline = time.monotonic() + float(os.environ.get('CHANGERAIL_FAKE_STALL_SECONDS', '2.0'))",
+                "    if release:",
+                "        while not os.path.exists(release) and time.monotonic() < deadline:",
+                "            time.sleep(0.02)",
+                "    else:",
+                "        time.sleep(float(os.environ.get('CHANGERAIL_FAKE_STALL_SECONDS', '0.35')))",
                 "if mode == 'non-terminal-error':",
                 "    print(json.dumps({'type': 'tool/result', 'data': {'status': 'failed', 'message': 'error'}}))",
                 "if mode == 'no-go':",
@@ -701,7 +728,7 @@ def write_fake_queue_runner(path: Path) -> None:
         "\n".join(
             [
                 "#!/usr/bin/env python3",
-                "import argparse, json, os, sys",
+                "import argparse, json, os, sys, time",
                 "from pathlib import Path",
                 "parser = argparse.ArgumentParser()",
                 "sub = parser.add_subparsers(dest='command', required=True)",
@@ -772,6 +799,25 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    dirty = Path(args.workspace) / 'DIRTY.txt'",
                 "    if dirty.exists():",
                 "        dirty.unlink()",
+                "if mode == 'progress-stall' and 'service-a-card' in args.card:",
+                "    running_status = {",
+                "        'schema': 'changerail.delivery-run.v1',",
+                "        'run_id': args.run_id,",
+                "        'updated_at': '2026-07-15T00:00:00Z',",
+                "        'workspace': {'root': args.workspace},",
+                "        'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
+                "        'phase': 'delivery',",
+                "        'result': 'RUNNING',",
+                "        'timestamps': {'started_at': '2026-07-15T00:00:00Z'},",
+                "        'command': {'argv': sys.argv, 'launcher': sys.argv[0], 'stdin': 'closed', 'json': True},",
+                "        'usage': {'available': False, 'reason': 'fake queue runner'},",
+                "        'progress': {'schema': 'changerail.delivery-progress.v1', 'phase': 'do', 'stage': 'implementation', 'heartbeat_at': '2026-07-15T00:00:00Z', 'event_counter': 1},",
+                "        'progress_health': {'state': 'active', 'heartbeat_age_seconds': 0.0, 'process_alive': True},",
+                "    }",
+                "    path = Path(args.runtime_root) / args.run_id / 'status.json'",
+                "    path.parent.mkdir(parents=True, exist_ok=True)",
+                "    path.write_text(json.dumps(running_status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
+                "    time.sleep(0.05)",
                 "result = 'DELIVERED'",
                 "terminal_reason = None",
                 "if mode == 'no-go' and 'service-a-card' in args.card:",
@@ -814,6 +860,13 @@ def write_fake_queue_runner(path: Path) -> None:
                 "}",
                 "if terminal_reason:",
                 "    status['terminal_reason'] = terminal_reason",
+                "if mode == 'progress-stall' and 'service-a-card' in args.card:",
+                "    status['progress'] = {'schema': 'changerail.delivery-progress.v1', 'phase': 'publish', 'stage': 'complete', 'heartbeat_at': '2026-07-15T00:00:01Z', 'event_counter': 2}",
+                "    status['progress_health'] = {'state': 'terminated', 'heartbeat_age_seconds': 0.0, 'process_alive': False}",
+                "if mode == 'progress-mismatch' and 'service-a-card' in args.card:",
+                "    status['run_id'] = 'wrong-run'",
+                "    status['progress'] = {'schema': 'changerail.delivery-progress.v1', 'phase': 'review', 'stage': 'waiting', 'heartbeat_at': '2026-07-15T00:00:01Z', 'event_counter': 2}",
+                "    status['progress_health'] = {'state': 'terminated', 'heartbeat_age_seconds': 0.0, 'process_alive': False}",
                 "if terminal_reason == 'investigation_required':",
                 "    status['retained_payload'] = {",
                 "        'schema': 'changerail.retained-payload-identity.v1',",
@@ -2204,6 +2257,169 @@ def check_performance_summary_run(tmp: Path) -> None:
         raise AssertionError(f"terminal outcome timing missing from timeline: {timeline}")
     if status["usage"].get("cached_input_tokens") != 1 or status["usage"].get("reasoning_tokens") != 1:
         raise AssertionError(f"usage breakdown was not parsed: {status['usage']}")
+
+
+def check_progress_events_and_status_view(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "progress-workspace")
+    launcher = tmp / "fake-codex-progress"
+    runtime = tmp / "progress-runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("progress"),
+    )
+    require_ok(result, "runner progress events")
+    status = load_status(runtime, "progress")
+    progress = status.get("progress")
+    health = status.get("progress_health")
+    if not isinstance(progress, dict) or progress.get("schema") != "changerail.delivery-progress.v1":
+        raise AssertionError(f"progress object missing from status: {status}")
+    if progress.get("phase") != "terminal" or progress.get("stage") != "complete":
+        raise AssertionError(f"terminal progress was not recorded: {progress}")
+    if progress.get("event_counter", 0) < 2:
+        raise AssertionError(f"progress events were not counted monotonically: {progress}")
+    if not isinstance(health, dict) or health.get("state") != "terminated" or health.get("process_alive") is not False:
+        raise AssertionError(f"terminated progress health missing: {health}")
+    status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    if "SYNTHETIC_PRIVATE_VALUE_SHOULD_NOT_APPEAR" in status_text or "raw_log_excerpt" in status_text:
+        raise AssertionError(f"forged content-bearing progress leaked into status: {status_text}")
+    stdout = Path(status["logs"]["stdout"]).read_text(encoding="utf-8")
+    first = json.loads(stdout.splitlines()[0])
+    if first.get("CHANGERAIL_ACTIVE_CARD_ID") != Path(CARD).name.removesuffix(".md"):
+        raise AssertionError(f"active card id was not passed to child: {first}")
+    if not first.get("CHANGERAIL_PROGRESS_EVENT_PATH", "").endswith("progress-events.jsonl"):
+        raise AssertionError(f"progress event path was not passed to child: {first}")
+    view = run([str(RUNNER), "status", str(runtime / "progress" / "status.json")])
+    require_ok(view, "single-card progress status view")
+    if "progress: terminal/complete" not in view.stdout or "health: terminated" not in view.stdout:
+        raise AssertionError(f"status view did not render progress: {view.stdout}")
+
+
+def check_progress_stale_heartbeat_is_non_terminal(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "progress-stale-workspace")
+    launcher = tmp / "fake-codex-progress-stale"
+    runtime = tmp / "progress-stale-runtime"
+    write_fake_launcher(launcher)
+    env = runner_env("progress-stall")
+    env["CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS"] = "0.02"
+    env["CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS"] = "0.05"
+    env["CHANGERAIL_PROGRESS_POLL_INTERVAL_SECONDS"] = "0.01"
+    env["CHANGERAIL_FAKE_STALL_SECONDS"] = "2.0"
+    release_path = tmp / "progress-stale-release"
+    env["CHANGERAIL_FAKE_STALL_RELEASE"] = str(release_path)
+    process = subprocess.Popen(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress-stale",
+            "--launcher",
+            str(launcher),
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    status_path = runtime / "progress-stale" / "status.json"
+    observed_running_stale: dict[str, Any] | None = None
+    deadline = time.monotonic() + 3.0
+    try:
+        while time.monotonic() < deadline:
+            if status_path.is_file():
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                health = status.get("progress_health")
+                if isinstance(health, dict) and health.get("state") == "stale":
+                    observed_running_stale = status
+                    break
+            if process.poll() is not None:
+                break
+            time.sleep(0.01)
+        if observed_running_stale is None:
+            raise AssertionError("live child never produced stale progress health before exit")
+        if observed_running_stale.get("result") != "RUNNING" or observed_running_stale.get("terminal_outcome"):
+            raise AssertionError(f"stale heartbeat reclassified live child: {observed_running_stale}")
+        health = observed_running_stale["progress_health"]
+        if health.get("process_alive") is not True or health.get("heartbeat_age_seconds", 0) <= 0:
+            raise AssertionError(f"stale health did not include bounded process/age fields: {health}")
+        release_path.write_text("release\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=5)
+        if process.returncode != 0:
+            raise AssertionError(f"progress stale run failed: stdout={stdout} stderr={stderr}")
+        final_status = load_status(runtime, "progress-stale")
+        if final_status.get("progress_health", {}).get("state") != "terminated":
+            raise AssertionError(f"terminal progress health missing after child exit: {final_status}")
+    finally:
+        if process.poll() is None:
+            release_path.write_text("release\n", encoding="utf-8")
+            process.kill()
+            process.communicate()
+
+
+def check_progress_resume_after_remote_preflight(tmp: Path) -> None:
+    workspace, launcher, runtime = remote_preflight_workspace(tmp, "progress-resume")
+    prior = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress-resume-prior",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "dns"),
+    )
+    if prior.returncode == 0:
+        raise AssertionError("prior progress resume preflight unexpectedly passed")
+    env = fake_git_env(tmp, "success")
+    env["CHANGERAIL_FAKE_MODE"] = "progress"
+    resumed = run(
+        [
+            str(RUNNER),
+            "resume",
+            "--status-path",
+            str(runtime / "progress-resume-prior" / "status.json"),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress-resume",
+            "--launcher",
+            str(launcher),
+        ],
+        env=env,
+    )
+    require_ok(resumed, "progress resume")
+    status = load_status(runtime, "progress-resume")
+    if status.get("progress", {}).get("phase") != "terminal":
+        raise AssertionError(f"resume did not retain progress status: {status}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["resume prior status"]["status"] != "pass":
+        raise AssertionError(f"resume prior check did not pass: {checks['resume prior status']}")
 
 
 def check_oversized_output_summary_run(tmp: Path) -> None:
@@ -3890,6 +4106,125 @@ def check_queue_run_plan(tmp: Path) -> None:
         raise AssertionError(f"child status references missing: {status['cards']}")
 
 
+def check_queue_progress_mirror(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-progress-consumer")
+    runner = tmp / "fake-queue-progress-runner"
+    runtime = tmp / "queue-progress-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "progress-stall"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-progress",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue progress mirror")
+    status = load_status(runtime, "queue-progress")
+    first = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    progress = first.get("progress")
+    if not isinstance(progress, dict) or progress.get("phase") != "publish" or progress.get("stage") != "complete":
+        raise AssertionError(f"aggregate did not mirror child progress: {first}")
+    if first.get("progress_health", {}).get("state") != "terminated":
+        raise AssertionError(f"aggregate did not mirror child progress health: {first}")
+    status_result = run([str(RUNNER), "status-plan", str(runtime / "queue-progress" / "status.json")])
+    require_ok(status_result, "queue progress status-plan")
+    if "service-a-card: publish/complete" not in status_result.stdout:
+        raise AssertionError(f"status-plan did not render aggregate progress: {status_result.stdout}")
+
+
+def check_queue_progress_mirror_with_aliased_card_id(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-progress-alias-consumer")
+    runner = tmp / "fake-queue-progress-alias-runner"
+    runtime = tmp / "queue-progress-alias-runtime"
+    plan = consumer / "delivery-plan.json"
+    plan_payload = queue_plan_fixture()
+    plan_payload["cards"][0]["id"] = "service-a-alias"
+    plan_payload["cards"][1]["depends_on"] = ["service-a-alias"]
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, plan_payload)
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "progress-stall"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-progress-alias",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue progress alias mirror")
+    status = load_status(runtime, "queue-progress-alias")
+    first = next(card for card in status["cards"] if card["id"] == "service-a-alias")
+    progress = first.get("progress")
+    if not isinstance(progress, dict) or progress.get("phase") != "publish" or progress.get("stage") != "complete":
+        raise AssertionError(f"aggregate did not mirror aliased child progress: {first}")
+    if first.get("progress_diagnostic"):
+        raise AssertionError(f"aggregate reported alias as invalid child identity: {first}")
+    if not first.get("run_id", "").endswith("-service-a-alias"):
+        raise AssertionError(f"aggregate alias run id missing: {first}")
+
+
+def check_queue_rejects_mismatched_progress_identity(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-progress-mismatch-consumer")
+    runner = tmp / "fake-queue-progress-mismatch-runner"
+    runtime = tmp / "queue-progress-mismatch-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "progress-mismatch"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-progress-mismatch",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue mismatched progress identity")
+    status = load_status(runtime, "queue-progress-mismatch")
+    first = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    if "progress" in first or "progress_health" in first:
+        raise AssertionError(f"aggregate trusted mismatched child progress: {first}")
+    if first.get("progress_diagnostic") != "invalid_child_identity":
+        raise AssertionError(f"aggregate did not record bounded progress diagnostic: {first}")
+
+
 def check_queue_fail_fast_and_locks(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-fail-fast-consumer")
     runner = tmp / "fake-queue-runner-fail"
@@ -4555,6 +4890,9 @@ def main() -> int:
         check_success_run(workspace)
         check_default_workspace_run(workspace)
         check_performance_summary_run(workspace)
+        check_progress_events_and_status_view(workspace)
+        check_progress_stale_heartbeat_is_non_terminal(workspace)
+        check_progress_resume_after_remote_preflight(workspace)
         check_oversized_output_summary_run(workspace)
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
@@ -4590,6 +4928,9 @@ def main() -> int:
         check_queue_launcher_docs()
         check_queue_preflight_failures(workspace)
         check_queue_run_plan(workspace)
+        check_queue_progress_mirror(workspace)
+        check_queue_progress_mirror_with_aliased_card_id(workspace)
+        check_queue_rejects_mismatched_progress_identity(workspace)
         check_queue_fail_fast_and_locks(workspace)
         check_queue_terminal_reason_and_missing_status(workspace)
         check_queue_resume_plan(workspace)

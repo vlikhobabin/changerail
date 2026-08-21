@@ -69,6 +69,11 @@ If no card path is provided and it cannot be inferred, ask for it.
 - Work in the foreground and keep the user informed before major stages.
 - Keep changes scoped to the board card and `openspec/changes/<change>/`
   artifacts.
+- When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free progress with
+  `bin/changerail-delivery-runner progress-event ff planning` before artifact
+  work and `bin/changerail-delivery-runner progress-event ff complete` after
+  validation. Do not include prose, commands, paths, environment values or
+  output excerpts in progress.
 - When a project declares `.changerail/execution-target.json`, preserve that
   target identity as part of the delivery handoff and do not plan any provider,
   platform or CLI argument override that would substitute another target.
