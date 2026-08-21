@@ -1,13 +1,13 @@
 # Добавить версионируемые профили классификации исходников
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail maintainer
 
 ## OpenSpec Stage
-story
+artifacts
 
 ## Series
 - none
@@ -75,7 +75,7 @@ ChangeRail поддерживает проектный файл
 ## Review
 - Risk tier: `critical`
 - Milestone audit: `no`
-- New authority or wire protocol: `no`
+- New authority or wire protocol: `yes`
 - Credential or mutation authority: `no`
 - Repeated defect class: `yes`
 - Live admission: `no`
@@ -84,6 +84,10 @@ ChangeRail поддерживает проектный файл
 
 Критический уровень нужен потому, что изменение влияет на расчет объема
 прикладного кода и выбор обязательной независимой проверки.
+
+Перед implementation review требуется exact published investigation
+authorization для repeated risk-classification defect и новых profile/check
+contracts.
 
 ## Acceptance
 - Определен версионируемый договор профиля классификации, который может
@@ -152,7 +156,9 @@ ChangeRail поддерживает проектный файл
 - Доставленный расчет сложности по видам исходников.
 
 ## Change Set
-- none yet
+- `define-source-classification-profile-contract`
+- `detect-and-materialize-source-classification-profiles`
+- `report-source-classification-profile-drift`
 
 ## Verify
 - Проверки схемы профиля и недопустимых путей.
@@ -174,26 +180,99 @@ ChangeRail поддерживает проектный файл
 - `templates/project/openspec/board/README.md.tpl`
 - `openspec/specs/changerail-contracts/spec.md`
 - `openspec/specs/changerail-project-templates/spec.md`
+- `openspec/changes/define-source-classification-profile-contract/`
+- `openspec/changes/detect-and-materialize-source-classification-profiles/`
+- `openspec/changes/report-source-classification-profile-drift/`
 
 ## Result
-not started
+Проработка завершена; три apply-ready changes созданы, реализация не начата.
 
 ## Next
-- Выполнить `$chrl-explore` и выбрать минимальную схему профиля, способ передачи
-  профиля предметной интеграцией и точные команды без расширения доверенной
-  поверхности.
-- После исследования перевести карточку в `2.todo` и сформировать не более трех
-  изменений: договор профиля, определение и создание, проверка расхождений и
-  документация.
+- После published investigation authorization выполнить
+  `$chrl-deliver openspec/board/2.todo/materialize-versioned-source-classification-profiles.md`.
 
 ## Change Plan Notes
-Карточка пока не готова к выполнению: необходимо сначала решить, является ли
-профиль отдельным документом или версионируемой оболочкой существующей
-классификации, и где хранится подтверждение выбора. Реализация должна сначала
-сохранить неизменным существующий предварительный расчет, затем добавить
-создание файла и только после этого — предупреждения о расхождениях.
+Профиль выбран как отдельный versioned data document. Optional provenance с
+ordered id/version/checksum/source and exact override paths хранится внутри
+существующего `.changerail/source-classification.yaml`; конечные rules этого
+файла остаются единственным input для review preflight. Реализация сначала
+добавляет contract, затем explicit detection/materialization и только потом
+blocking/advisory drift reporting.
+
+## Change 1: `define-source-classification-profile-contract`
+
+### Why
+Current classification file не имеет reusable profile identity, checksum,
+detection signals или deterministic merge semantics.
+
+### Goal
+Добавить data-only profile schema, canonical checksum, built-in/local source
+validation, fail-closed merge и backward-compatible provenance.
+
+### Acceptance
+- Profile выражает classification payload и path-only signals без code/network.
+- Same id/version with another checksum и measurement conflicts block.
+- Existing v1 files without provenance remain valid and effective.
+- Final project file остается единственным risk-policy source.
+
+### Depends On
+- delivered `changerail.source-classification.v1` and source-kind complexity
+- exact published investigation authorization for this card's profile/check
+  contracts and repeated defect class
+
+### Related
+- `openspec/changes/define-source-classification-profile-contract/`
+
+## Change 2: `detect-and-materialize-source-classification-profiles`
+
+### Why
+Новый project не может read-only определить кандидатов и preview/создать
+classification без ручного YAML copying.
+
+### Goal
+Добавить `detect` against tracked HEAD и explicit preview-first
+`materialize --write` с idempotence/existing-file protection.
+
+### Acceptance
+- Detect emits candidates/signals/confidence/ambiguities and writes nothing.
+- Explicit profile selection and preview precede atomic creation.
+- Same selection is no-op; differing existing file is never overwritten.
+- Unaccepted candidate never affects current preflight risk.
+
+### Depends On
+- `define-source-classification-profile-contract`
+
+### Related
+- `openspec/changes/detect-and-materialize-source-classification-profiles/`
+
+## Change 3: `report-source-classification-profile-drift`
+
+### Why
+После materialization нет safe report для provenance, intentional overrides,
+confirmed drift и likely uncovered source.
+
+### Goal
+Добавить read-only `check`, project/preflight integration и explicit
+`detect -> review -> materialize -> check` guidance.
+
+### Acceptance
+- Confirmed checksum/measure/undeclared profile drift blocks verification.
+- Unaccepted low/high-confidence candidate remains advisory and cannot change
+  risk calculation.
+- Report explains effective profile/overrides/covered/excluded/uncovered rules
+  without source contents or machine paths.
+- Migration remains a separate explicit reviewed edit; no force overwrite.
+
+### Depends On
+- `detect-and-materialize-source-classification-profiles`
+
+### Related
+- `openspec/changes/report-source-classification-profile-drift/`
 
 ## Log
 - 2026-08-21T04:33:11Z карточка создана по результатам проверки подключения
   предметно-специфичного проекта: ручная классификация работает, но следующий
   проект не получает ее воспроизводимо.
+- 2026-08-21T07:43:31Z research selected a separate versioned data profile plus
+  optional provenance in the final classification; contract,
+  detect/materialize and drift changes reached apply-ready state.

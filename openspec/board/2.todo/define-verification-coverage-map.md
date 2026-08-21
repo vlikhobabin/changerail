@@ -1,13 +1,13 @@
 # Определить минимальную карту verification coverage
 
 ## Status
-1.backlog
+2.todo
 
 ## Owner
 ChangeRail maintainer
 
 ## OpenSpec Stage
-story
+artifacts
 
 ## Series
 - none
@@ -22,6 +22,20 @@ story
 - `skills/changerail-review/SKILL.md`
 - `templates/project/openspec/config.yaml.tpl`
 - `openspec/specs/changerail-project-verification/spec.md`
+
+## Review
+- Risk tier: `critical`
+- Milestone audit: `no`
+- New authority or wire protocol: `yes`
+- Credential or mutation authority: `no`
+- Repeated defect class: `yes`
+- Live admission: `no`
+- Final certification: `no`
+- Published investigation authorization: `none`
+
+Field evidence обосновывает contract, но перед implementation review новый
+verification-admission protocol требует exact published investigation
+authorization.
 
 ## Summary
 ChangeRail требует concrete verification commands, retained evidence и
@@ -72,10 +86,16 @@ reliability gates, не переносить полный каталог maturit
 - Реализация same-repository parallel workers или worktree orchestration.
 
 ## Change Set
-- none yet
+- `define-verification-coverage-map`
+- `enforce-verification-coverage-ledger`
 
 ## Verify
-- not started
+- `python3 scripts/smoke-contract-schemas.py`
+- `python3 scripts/smoke-review-preflight.py`
+- `python3 scripts/smoke-verify-project.py`
+- `python3 scripts/smoke-bootstrap-project.py`
+- `bin/openspec validate --all --strict`
+- `python3 scripts/public-surface-scan.py`
 
 ## Archive
 - not started
@@ -88,29 +108,75 @@ reliability gates, не переносить полный каталог maturit
 - `templates/project/openspec/config.yaml.tpl`
 - `openspec/specs/changerail-agent-methodology/spec.md`
 - `openspec/specs/changerail-project-verification/spec.md`
+- `openspec/changes/define-verification-coverage-map/`
+- `openspec/changes/enforce-verification-coverage-ledger/`
 
 ## Result
-not started
+Проработка завершена; field evidence принято, два apply-ready changes созданы.
 
 ## Next
-- Оставить exploration до появления конкретного воспроизводимого случая, где
-  project-declared verification floor и acceptance mapping дали false-green.
-- После такого evidence выполнить `$chrl-explore` на минимальном generic
-  contract и одном Python proof.
+- После published investigation authorization выполнить
+  `$chrl-deliver openspec/board/2.todo/define-verification-coverage-map.md`.
 
 ## Triage Decision
-- Keep в `1.backlog`, но не переводить в `2.todo` без доказанного verification
-  gap: новая schema не должна дублировать OpenSpec tasks и review acceptance.
-- Priority: strategic/deferred. Доставленная source classification учитывает
-  BSL и Designer XML в complexity guard, но не связывает changed surface с
-  invariant, oracle и required evidence, поэтому не supersede эту exploration.
+- Перевести в `2.todo`: field validation доказала verification gap, а выбранный
+  contract ссылается на acceptance/tasks/evidence вместо их копирования.
+- Priority: high. Source classification остается отдельным complexity guard и
+  не заменяет invariant/oracle/evidence coverage.
 
 ## Change Plan Notes
-Карточка намеренно остается exploration story. До перевода в `2.todo` нужно
-доказать, что новый machine-readable contract уменьшает реальные пропуски
-verification и не дублирует OpenSpec tasks, project instructions и review
-acceptance mapping. Первая реализация, если она будет обоснована, должна
-ограничиться generic extension boundary и одним Python proof.
+Tracked project map содержит только five-field rules; per-change plan хранит
+rule ids/acceptance hashes, ignored ledger — fingerprints и evidence refs.
+Review verdict остается единственным acceptance authority. Реализация
+ограничена generic extension boundary и одним synthetic Python proof.
+
+## Change 1: `define-verification-coverage-map`
+
+### Why
+Current floor не может детерминированно отличить green known commands от
+пропущенного known invariant/oracle.
+
+### Goal
+Добавить optional five-field project map, tracked per-change references,
+ignored runtime ledger schema и namespaced domain extension boundary.
+
+### Acceptance
+- Entries ограничены `id`, `applies_to`, `invariant`, `oracle`,
+  `required_evidence` и fail closed на unsafe/incomplete policy.
+- Map/card остаются sources; plan/ledger хранят ids, hashes and refs.
+- No-map consumers сохраняют current verification floor.
+- Generic Python example и domain namespaced IDs не встраивают 1С rules в core.
+
+### Depends On
+- exact published investigation authorization for this card's verification
+  coverage protocol
+
+### Related
+- `openspec/changes/define-verification-coverage-map/`
+
+## Change 2: `enforce-verification-coverage-ledger`
+
+### Why
+Schema не предотвращает false-green без reconciliation actual scope и evidence
+до independent review.
+
+### Goal
+Связать `ff -> do -> deterministic preflight -> review` через один
+fingerprint-bound plan/ledger и существующий evidence index/manifest/verdict.
+
+### Acceptance
+- `ff` объявляет selected ids, `do` reconciles actual scope/evidence.
+- Missing/stale applicable coverage blocks deterministic preflight.
+- Reviewer проверяет published boundary/test adequacy; path/exit zero не дают
+  automatic acceptance pass.
+- Synthetic Python proof ловит missing positive route, internal-only timeout и
+  disconnected integration paths.
+
+### Depends On
+- `define-verification-coverage-map`
+
+### Related
+- `openspec/changes/enforce-verification-coverage-ledger/`
 
 ## Log
 - 2026-08-12T09:30:49Z карточка создана по итогам сравнения ChangeRail с Orca;
@@ -125,3 +191,6 @@ acceptance mapping. Первая реализация, если она буде�
   assertion that did not exercise the published boundary, and a renderer/form
   proof that used disconnected paths. Promote this from strategic/deferred to
   high-priority exploration of a deterministic pre-review acceptance ledger.
+- 2026-08-21T07:43:31Z research accepted an optional project map plus tracked
+  id/hash plan and ignored evidence ledger; contract and enforcement changes
+  reached apply-ready state.
