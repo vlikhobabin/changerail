@@ -892,9 +892,13 @@ signals являются preferred source of truth; если их нет, fallba
 `exit_code == 0` допустим только после проверки, что есть доказательство
 опубликованной карточки под `openspec/board/4.done`. Для текущей card runner
 сначала проверяет canonical verdict
-`.runtime/changerail/reviews/<card-id>.json`: свежий unpublished `result: no-go`
-дает terminal outcome `NO-GO`, а stale/invalid unpublished verdict блокирует
-успешный fallback как `BLOCKED`. Если verdict fallback не применим и карточка
+`.runtime/changerail/reviews/<card-id>.json`: schema-valid unpublished
+`result: no-go` дает terminal outcome `NO-GO`, даже если обязательная tracked
+rescue/replacement card после review сделала negative fingerprint stale. Такой
+negative verdict только блокирует публикацию и не требует freshness. Для
+`result: go` current-tree freshness остается обязательной; stale/invalid
+positive verdict блокирует fallback как `BLOCKED/review_verdict_invalid`. Если
+verdict fallback не применим и карточка
 не опубликована, successful child exit записывается как `BLOCKED` с
 `terminal_reason: unpublished_card`. `fix_budget_exhausted`,
 `external_blocker` и другие stable reasons сохраняются в status как

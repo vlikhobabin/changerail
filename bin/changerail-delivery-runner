@@ -2209,9 +2209,6 @@ def review_verdict_fallback_signal(args: argparse.Namespace) -> TerminalSignal:
             str(helper),
             "validate",
             str(verdict),
-            "--check-fresh",
-            "--workspace",
-            str(root),
             "--json",
         ],
         capture_output=True,
@@ -2227,8 +2224,31 @@ def review_verdict_fallback_signal(args: argparse.Namespace) -> TerminalSignal:
     if payload.get("result") == "no-go":
         return TerminalSignal("NO-GO")
     if payload.get("result") == "go":
+        fresh = subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                "validate",
+                str(verdict),
+                "--check-fresh",
+                "--workspace",
+                str(root),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if fresh.returncode != 0:
+            return TerminalSignal("BLOCKED", "review_verdict_invalid")
+        try:
+            fresh_payload = json.loads(fresh.stdout)
+        except json.JSONDecodeError:
+            return TerminalSignal("BLOCKED", "review_verdict_invalid")
+        if fresh_payload.get("result") != "go":
+            return TerminalSignal("BLOCKED", "review_verdict_invalid")
         return TerminalSignal("BLOCKED", "unpublished_go_verdict")
-    return TerminalSignal()
+    return TerminalSignal("BLOCKED", "review_verdict_invalid")
 
 
 def fallback_terminal_signal(args: argparse.Namespace, exit_code: int, structured_signal: TerminalSignal) -> TerminalSignal:

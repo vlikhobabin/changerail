@@ -579,7 +579,13 @@ def run_success(card_path):
 def run_review_budget_exhausted(card_path):
     verdict_path, _tree = write_verdict(card_path, "no-go", card_path)
     write_history(card_path, "no-go", verdict_path, True)
-    emit({"type": "external-review/no-go", "data": {"result": "no-go", "rescue_budget": {"exhausted": True}}})
+    rescue = WORKSPACE / "openspec" / "board" / "2.todo" / "one-command-delivery-smoke-rescue.md"
+    rescue.parent.mkdir(parents=True, exist_ok=True)
+    rescue.write_text(
+        "# Review budget rescue\n\n## Status\n2.todo\n\n"
+        "## Source\n- final schema-valid no-go\n",
+        encoding="utf-8",
+    )
 
 
 stdin = sys.stdin.read()
@@ -1970,6 +1976,9 @@ def check_one_command_delivery_review_budget_no_go(tmp: Path) -> None:
     status = load_status(runtime, "one-command-review-budget")
     if status.get("result") != "NO-GO" or status.get("terminal_outcome") != "NO-GO":
         raise AssertionError(f"exhausted review budget did not report NO-GO: {status}")
+    stdout = Path(status["logs"]["stdout"]).read_text(encoding="utf-8")
+    if "external-review/no-go" in stdout or "terminal_outcome: NO-GO" in stdout:
+        raise AssertionError("review budget regression used an authoritative terminal signal instead of verdict fallback")
     if remote_head(workspace) != baseline or head_commit(workspace) != baseline:
         raise AssertionError("exhausted review budget scenario unexpectedly committed or pushed")
     if not (workspace / ONE_COMMAND_CARD).is_file() or (workspace / ONE_COMMAND_DONE_CARD).exists():
@@ -1985,13 +1994,27 @@ def check_one_command_delivery_review_budget_no_go(tmp: Path) -> None:
             str(VERDICT_HELPER),
             "validate",
             str(verdict_path),
+            "--json",
+        ]
+    )
+    require_ok(validate, "exhausted review budget verdict validate")
+    rescue_path = workspace / "openspec" / "board" / "2.todo" / "one-command-delivery-smoke-rescue.md"
+    if not rescue_path.is_file():
+        raise AssertionError("exhausted review budget did not retain tracked rescue handoff")
+    stale = run(
+        [
+            sys.executable,
+            str(VERDICT_HELPER),
+            "validate",
+            str(verdict_path),
             "--check-fresh",
             "--workspace",
             str(workspace),
             "--json",
         ]
     )
-    require_ok(validate, "exhausted review budget verdict validate")
+    if stale.returncode == 0:
+        raise AssertionError("tracked rescue handoff did not make negative verdict stale")
 
 
 def check_success_run(tmp: Path) -> None:

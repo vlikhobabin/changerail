@@ -298,7 +298,9 @@ used in performance summaries.
 
 ### Requirement: Explicit terminal outcomes
 The runner MUST report terminal outcomes `DELIVERED`, `NO-GO` and `BLOCKED`
-without relying on free-text log interpretation.
+without relying on free-text log interpretation, MUST preserve a schema-valid
+negative review signal across mandatory post-review rescue handoff mutation,
+and MUST require current-tree freshness before accepting any positive verdict.
 
 #### Scenario: Codex exits successfully
 - **WHEN** the non-interactive delivery command exits `0`
@@ -316,6 +318,21 @@ without relying on free-text log interpretation.
 - **WHEN** Codex JSONL contains a structured event such as
   `external-review/no-go`
 - **THEN** the runner records and prints terminal outcome `NO-GO`
+
+#### Scenario: Final no-go creates a tracked rescue handoff
+- **WHEN** the latest canonical unpublished verdict is schema-valid and has
+  `result: no-go`
+- **AND** a required tracked rescue or replacement card created after review
+  makes the negative verdict fingerprint stale
+- **THEN** the runner records terminal outcome `NO-GO`
+- **AND** it does not publish the reviewed payload
+
+#### Scenario: Unpublished go verdict is stale
+- **WHEN** the latest canonical unpublished verdict has `result: go`
+- **AND** its fingerprint, head commit or reviewed tree is not fresh
+- **THEN** the runner records `BLOCKED` with
+  `terminal_reason: review_verdict_invalid`
+- **AND** it does not publish the payload
 
 #### Scenario: Structured review stop awaits external review
 - **WHEN** Codex JSONL contains a structured `awaiting-review` event
@@ -375,20 +392,21 @@ The runner MUST fail closed when no authoritative terminal event exists and
 structured card or review evidence does not prove that review-gated publish
 completed.
 
-#### Scenario: Fresh no-go verdict after successful child exit
-- **WHEN** Codex exits `0` without an authoritative terminal outcome
+#### Scenario: Schema-valid no-go verdict after child exit
+- **WHEN** Codex exits without an authoritative terminal outcome
 - **AND** the current card is not published under `openspec/board/4.done`
-- **AND** the canonical review verdict for that card validates fresh with
-  `result: no-go`
+- **AND** the canonical review verdict for that card validates schema and
+  semantic consistency with `result: no-go`
 - **THEN** the runner records `NO-GO`
 - **AND** the wrapper exits non-zero
 
-#### Scenario: Invalid or stale verdict after successful child exit
-- **WHEN** Codex exits `0` without an authoritative terminal outcome
+#### Scenario: Invalid verdict or stale go after child exit
+- **WHEN** Codex exits without an authoritative terminal outcome
 - **AND** the current card is not published under `openspec/board/4.done`
-- **AND** the canonical review verdict for that card exists but fails validation
-  or freshness checks
+- **AND** the canonical review verdict is invalid, or has `result: go` and fails
+  current-tree freshness checks
 - **THEN** the runner records `BLOCKED`
+- **AND** `terminal_reason` is `review_verdict_invalid`
 - **AND** the wrapper exits non-zero
 
 #### Scenario: Unpublished card without verdict after successful child exit
@@ -440,18 +458,21 @@ from a deliver-ready board card and proves the runner-supervised
   preflight and publishes only after the local bare remote is reachable
 - **AND** the resumed terminal status is `DELIVERED` for the same card
 
-#### Scenario: One-command delivery fails closed on stale verdict
-- **WHEN** the smoke provides a stale canonical review verdict for an unpublished
-  card after a child exits successfully without authoritative delivery evidence
-- **THEN** the runner records `BLOCKED`
+#### Scenario: One-command delivery fails closed on stale go verdict
+- **WHEN** the smoke provides a canonical `result: go` review verdict whose
+  fingerprint, head commit or reviewed tree is stale for an unpublished card
+- **AND** the child exits without authoritative delivery evidence
+- **THEN** the runner records `BLOCKED` with
+  `terminal_reason: review_verdict_invalid`
 - **AND** the card remains outside `4.done`
 - **AND** no payload commit is pushed to the local bare remote
 
-#### Scenario: One-command delivery fails closed on exhausted review budget
-- **WHEN** the smoke simulates a final external review `NO-GO` after the
+#### Scenario: One-command delivery preserves exhausted-budget no-go
+- **WHEN** the smoke writes a schema-valid final `result: no-go` after the
   same-card review rescue budget is exhausted
-- **THEN** the runner records `NO-GO` or a documented review-gated blocked
-  terminal outcome
+- **AND** a tracked rescue handoff makes that negative verdict stale
+- **AND** the child exits without an authoritative terminal event
+- **THEN** the runner records `NO-GO`
 - **AND** the card remains unpublished
 - **AND** no payload commit is pushed to the local bare remote
 
