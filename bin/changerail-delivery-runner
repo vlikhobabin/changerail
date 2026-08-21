@@ -57,6 +57,7 @@ MAX_COMMAND_LABEL_LENGTH = 120
 REMOTE_REACHABILITY_TIMEOUT_SECONDS = float(os.environ.get("CHANGERAIL_REMOTE_REACHABILITY_TIMEOUT_SECONDS", "10.0"))
 REMOTE_PREFLIGHT_MAX_ATTEMPTS = 2
 REMOTE_PREFLIGHT_BACKOFF_SECONDS = 0.05
+PUBLISH_TARGET_PREFLIGHT_FAILED = "publish_target_preflight_failed"
 REMOTE_FAILURE_CLASSES = (
     "ssh_config",
     "dns",
@@ -124,6 +125,13 @@ def check_payload(check: Check) -> dict[str, Any]:
     if check.data:
         payload.update(check.data)
     return payload
+
+
+def preflight_terminal_reason(checks: list[Check]) -> str | None:
+    for check in checks:
+        if check.status == "fail" and check.name == "publish target":
+            return PUBLISH_TARGET_PREFLIGHT_FAILED
+    return None
 
 
 def repo_root_from_script() -> Path:
@@ -1422,6 +1430,57 @@ def apply_plan_card_overrides(data: dict[str, Any], cards: list[dict[str, Any]])
             card["reasoning_effort"] = source["reasoning_effort"]
 
 
+def run_single_card_preflight_check(
+    args: argparse.Namespace,
+    card: dict[str, Any],
+    workspace: dict[str, Any],
+    checks: list[Check],
+    mode: str,
+    *,
+    check_name: str = "single-card preflight",
+) -> bool:
+    child_preflight_run_id = child_run_id(args, card) + "-preflight"
+    child_status_path = child_runtime_root(workspace) / child_preflight_run_id / "status.json"
+    command = [
+        str(args.launcher),
+        "preflight",
+        card.get("resolved_path") or card["card"],
+        "--workspace",
+        workspace["root"],
+        "--runtime-root",
+        str(child_runtime_root(workspace)),
+        "--run-id",
+        child_preflight_run_id,
+        "--json",
+        "--write-status",
+    ]
+    if mode == "no-push":
+        command.append("--deliver-arg=--no-push")
+    result = subprocess.run(command, cwd=Path(workspace["root"]), capture_output=True, text=True, check=False)
+    if result.returncode == 0:
+        checks.append(Check(check_name, "pass", f"{card['id']}: ready"))
+        return True
+
+    card["run_id"] = child_preflight_run_id
+    card["run_status_path"] = repository_relative(child_status_path, args.consumer_root)
+    child_status = load_json_object(child_status_path)
+    failed = first_failed_child_check(child_status)
+    if failed:
+        name, reason, failure_class, terminal_reason = failed
+        compact = f"{name} fail: {reason}"
+        if failure_class:
+            card["failure_class"] = failure_class
+        if terminal_reason:
+            card["terminal_reason"] = terminal_reason
+            card["result"] = "BLOCKED"
+    else:
+        compact = f"child preflight failed: status missing or invalid; exit {result.returncode}"
+    card["state"] = "blocked"
+    card["reason"] = compact
+    checks.append(Check(check_name, "fail", f"{card['id']}: {compact}"))
+    return False
+
+
 def append_single_card_preflight_checks(
     args: argparse.Namespace,
     cards: list[dict[str, Any]],
@@ -1435,44 +1494,10 @@ def append_single_card_preflight_checks(
         workspace = workspaces.get(card["workspace"])
         if not workspace:
             continue
-        child_preflight_run_id = child_run_id(args, card) + "-preflight"
-        child_status_path = child_runtime_root(workspace) / child_preflight_run_id / "status.json"
-        command = [
-            str(args.launcher),
-            "preflight",
-            card.get("resolved_path") or card["card"],
-            "--workspace",
-            workspace["root"],
-            "--runtime-root",
-            str(child_runtime_root(workspace)),
-            "--run-id",
-            child_preflight_run_id,
-            "--json",
-            "--write-status",
-        ]
-        if mode == "no-push":
-            command.append("--deliver-arg=--no-push")
-        result = subprocess.run(command, cwd=Path(workspace["root"]), capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            checks.append(Check("single-card preflight", "pass", f"{card['id']}: ready"))
-        else:
-            card["run_id"] = child_preflight_run_id
-            card["run_status_path"] = repository_relative(child_status_path, args.consumer_root)
-            child_status = load_json_object(child_status_path)
-            failed = first_failed_child_check(child_status)
-            if failed:
-                name, reason, failure_class = failed
-                compact = f"{name} fail: {reason}"
-                if failure_class:
-                    card["failure_class"] = failure_class
-            else:
-                compact = f"child preflight failed: status missing or invalid; exit {result.returncode}"
-            card["state"] = "blocked"
-            card["reason"] = compact
-            checks.append(Check("single-card preflight", "fail", f"{card['id']}: {compact}"))
+        run_single_card_preflight_check(args, card, workspace, checks, mode)
 
 
-def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str, str | None] | None:
+def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str, str | None, str | None] | None:
     if not isinstance(child_status, dict):
         return None
     checks = child_status.get("preflight", {}).get("checks")
@@ -1481,14 +1506,20 @@ def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, 
     for check in checks:
         if not isinstance(check, dict) or check.get("status") != "fail":
             continue
-        name = compact_reason(check.get("name") or "child preflight")
+        raw_name = check.get("name") if isinstance(check.get("name"), str) else "child preflight"
+        name = compact_reason(raw_name)
         message = compact_reason(check.get("message") or "failed")
         failure_class = check.get("failure_class")
         if not isinstance(failure_class, str):
             failure_class = None
         if failure_class:
             message = f"{failure_class}: {message}"
-        return name, message, failure_class
+        terminal_reason = child_status.get("terminal_reason")
+        if not isinstance(terminal_reason, str):
+            terminal_reason = None
+        if raw_name == "publish target":
+            terminal_reason = PUBLISH_TARGET_PREFLIGHT_FAILED
+        return name, message, failure_class, terminal_reason
     return None
 
 
@@ -2270,6 +2301,9 @@ def command_preflight(args: argparse.Namespace) -> int:
     checks = check_preflight(args)
     record = base_record(args, "preflight", "DELIVERED" if all(c.status != "fail" for c in checks) else "BLOCKED")
     record["preflight"] = {"checks": [check_payload(check) for check in checks]}
+    reason = preflight_terminal_reason(checks)
+    if record["result"] == "BLOCKED" and reason:
+        record["terminal_reason"] = reason
     record["timestamps"]["ended_at"] = utc_now()
     record_commit(record, args.workspace.resolve(strict=False))
     if args.write_status:
@@ -2291,9 +2325,14 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         record["phase"] = "terminal"
         record["result"] = "BLOCKED"
         record["terminal_outcome"] = "BLOCKED"
+        reason = preflight_terminal_reason(checks)
+        if reason:
+            record["terminal_reason"] = reason
         record["timestamps"]["ended_at"] = utc_now()
         atomic_write_json(status_path(args), record)
         print("terminal_outcome: BLOCKED")
+        if reason:
+            print(f"terminal_reason: {reason}")
         print(f"status: {status_path(args)}")
         return 1
     atomic_write_json(status_path(args), record)
@@ -2975,6 +3014,17 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 break
             card = candidates[0]
             workspace = workspace_by_alias[card["workspace"]]
+            if not run_single_card_preflight_check(
+                args,
+                card,
+                workspace,
+                checks,
+                mode,
+                check_name="dispatch preflight",
+            ):
+                card["result"] = "BLOCKED"
+                result = "BLOCKED"
+                break
             lock, lock_error = create_workspace_lock(args, workspace)
             locks.append(lock)
             if lock_error:

@@ -881,6 +881,10 @@ count и bounded detail. Failure classes: `ssh_config`, `dns`, `auth`,
 config и branch uncertainty остаются fail-closed. Connectivity diagnostics
 записывают только sanitized endpoint metadata, status или exception class; raw
 URL, query values и raw exception text не являются частью structured status.
+Если single-card preflight не может доказать remote publish target, written
+status records `terminal_reason: publish_target_preflight_failed`; failed
+`publish target` check remains the source for sanitized `failure_class`,
+retryability, attempts and evidence.
 Child stdout/stderr logs остаются raw ignored runtime evidence и не должны
 публиковаться как public artifacts. `DELIVERED`, `NO-GO` и
 `BLOCKED` являются терминальными outcome для supervisor-а и печатаются в stdout
@@ -1011,8 +1015,13 @@ uses the existing single-card runner and keeps its own
 `.runtime/changerail/delivery-runs/<run-id>/status.json`. Queue status stores
 references such as child run ids and status paths; raw stdout/stderr logs stay
 ignored runtime evidence and are not embedded in aggregate status.
-Если child preflight блокируется на remote publish target, aggregate card status
-сохраняет compact reason/failure class и `run_status_path`, а не raw child logs.
+Queue admission uses the configured single-card runner `preflight
+--write-status` command as a child-equivalent publish-target receipt before
+workspace locks or delivery children. `run-plan` and `resume-plan` rerun that
+receipt immediately before dispatching each later unresolved card. Если child
+preflight блокируется на remote publish target, aggregate card status
+сохраняет `terminal_reason: publish_target_preflight_failed`, compact
+reason/failure class и `run_status_path`, а не raw child logs.
 For queue plans, plan runner запускает ChangeRail single-card runner, the
 single-card runner запускает Codex, and `CODEX_WORKDIR` и effective
 `CODEX_HOME` bind each child to its consumer workspace.

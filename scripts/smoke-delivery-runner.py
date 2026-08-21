@@ -682,7 +682,7 @@ def write_fake_queue_runner(path: Path) -> None:
         "\n".join(
             [
                 "#!/usr/bin/env python3",
-                "import argparse, json, os, sys",
+                "import argparse, json, os, subprocess, sys",
                 "from pathlib import Path",
                 "parser = argparse.ArgumentParser()",
                 "sub = parser.add_subparsers(dest='command', required=True)",
@@ -727,6 +727,11 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    if preflight_mode == 'remote-fail' and 'service-a-card' in args.card:",
                 "        result = 'BLOCKED'",
                 "        checks = [{'name': 'publish target', 'status': 'fail', 'message': 'mode=remote-push remote=origin branch=main remote_url_class=ssh reachable=false failure_class=dns detail=ssh: Could not resolve hostname example.invalid', 'result': 'failed', 'remote': 'origin', 'branch': 'main', 'remote_url_class': 'ssh', 'failure_class': 'dns', 'retryable': True, 'attempts': 2, 'detail': 'ssh: Could not resolve hostname example.invalid', 'evidence': {'command': 'git ls-remote --exit-code <remote> refs/heads/<branch>', 'result': 'failed', 'detail': 'ssh: Could not resolve hostname example.invalid'}}]",
+                "    log_text = Path(call_log).read_text(encoding='utf-8') if call_log and Path(call_log).exists() else ''",
+                "    service_a_was_run = '\"run\"' in log_text and 'service-a-card' in log_text",
+                "    if preflight_mode == 'remote-fail-after-service-a' and 'service-b-card' in args.card and service_a_was_run:",
+                "        result = 'BLOCKED'",
+                "        checks = [{'name': 'publish target', 'status': 'fail', 'message': 'mode=remote-push remote=origin branch=main remote_url_class=ssh reachable=false failure_class=dns detail=ssh: Could not resolve hostname example.invalid', 'result': 'failed', 'remote': 'origin', 'branch': 'main', 'remote_url_class': 'ssh', 'failure_class': 'dns', 'retryable': True, 'attempts': 2, 'detail': 'ssh: Could not resolve hostname example.invalid', 'evidence': {'command': 'git ls-remote --exit-code <remote> refs/heads/<branch>', 'result': 'failed', 'detail': 'ssh: Could not resolve hostname example.invalid'}}]",
                 "    status = {",
                 "        'schema': 'changerail.delivery-run.v1',",
                 "        'run_id': args.run_id,",
@@ -740,6 +745,8 @@ def write_fake_queue_runner(path: Path) -> None:
                 "        'usage': {'available': False, 'reason': 'fake queue preflight'},",
                 "        'preflight': {'checks': checks},",
                 "    }",
+                "    if result == 'BLOCKED' and any(check.get('name') == 'publish target' for check in checks):",
+                "        status['terminal_reason'] = 'publish_target_preflight_failed'",
                 "    path = Path(args.runtime_root) / args.run_id / 'status.json'",
                 "    path.parent.mkdir(parents=True, exist_ok=True)",
                 "    path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
@@ -780,6 +787,16 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    if mode in resume_reasons:",
                 "        result = 'BLOCKED'",
                 "        terminal_reason = resume_reasons[mode]",
+                "if mode == 'publish-success' and result == 'DELIVERED' and args.command == 'run':",
+                "    root = Path(args.workspace)",
+                "    source = root / args.card",
+                "    if source.exists():",
+                "        target = root / 'openspec' / 'board' / '4.done' / source.name",
+                "        target.parent.mkdir(parents=True, exist_ok=True)",
+                "        source.rename(target)",
+                "        subprocess.run(['git', '-C', str(root), 'add', 'openspec/board'], check=True)",
+                "        subprocess.run(['git', '-C', str(root), '-c', 'user.name=ChangeRail Smoke', '-c', 'user.email=changerail-smoke@example.invalid', 'commit', '-m', 'publish smoke card'], check=True, stdout=subprocess.DEVNULL)",
+                "        subprocess.run(['git', '-C', str(root), 'push'], check=True, stdout=subprocess.DEVNULL)",
                 "status = {",
                 "    'schema': 'changerail.delivery-run.v1',",
                 "    'run_id': args.run_id,",
@@ -3799,6 +3816,140 @@ def queue_run_calls(call_log: Path) -> list[dict[str, Any]]:
     return calls
 
 
+def queue_preflight_calls(call_log: Path) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for line in call_log.read_text(encoding="utf-8").splitlines():
+        call = json.loads(line)
+        argv = call.get("argv", [])
+        if len(argv) > 1 and argv[1] == "preflight":
+            calls.append(call)
+    return calls
+
+
+def assert_no_workspace_lock(runtime: Path, workspace: Path) -> None:
+    lock = queue_lock_path(runtime, workspace)
+    if lock.exists():
+        raise AssertionError(f"workspace lock was created before child preflight passed: {lock}")
+
+
+def check_single_card_publish_target_preflight_terminal_reason(tmp: Path) -> None:
+    workspace, launcher, runtime = remote_preflight_workspace(tmp, "remote-terminal-reason")
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-terminal-reason",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "ssh_config"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("publish-target failure preflight unexpectedly passed")
+    status = load_status(runtime, "remote-terminal-reason")
+    if status.get("terminal_reason") != "publish_target_preflight_failed":
+        raise AssertionError(f"single-card preflight did not record publish-target terminal reason: {status}")
+    check = publish_target_check(status)
+    if check.get("failure_class") != "ssh_config" or check.get("retryable") is not False:
+        raise AssertionError(f"publish-target evidence was not preserved: {check}")
+
+
+def check_queue_child_publish_target_blocks_before_lock_and_launch(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-remote-before-lock")
+    runner = tmp / "fake-queue-before-lock-runner"
+    runtime = tmp / "queue-remote-before-lock-runtime"
+    call_log = tmp / "queue-remote-before-lock-calls.jsonl"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_PREFLIGHT_MODE"] = "remote-fail"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-before-lock",
+            "--launcher",
+            str(runner),
+            "--json",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError(f"queue remote preflight unexpectedly passed: {result.stdout}")
+    status = load_status(runtime, "remote-before-lock")
+    service_a_card = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    if service_a_card.get("terminal_reason") != "publish_target_preflight_failed":
+        raise AssertionError(f"aggregate card did not retain publish-target terminal reason: {service_a_card}")
+    if service_a_card.get("failure_class") != "dns":
+        raise AssertionError(f"aggregate card did not retain child failure class: {service_a_card}")
+    if queue_run_calls(call_log):
+        raise AssertionError(f"queue launched delivery child before child preflight passed: {call_log.read_text(encoding='utf-8')}")
+    assert_no_workspace_lock(runtime, service_a)
+
+
+def check_queue_dispatch_revalidates_publish_target_before_lock(tmp: Path) -> None:
+    consumer, service_a, service_b = create_queue_consumer(tmp, "queue-dispatch-revalidate")
+    runner = tmp / "fake-queue-dispatch-revalidate-runner"
+    runtime = tmp / "queue-dispatch-revalidate-runtime"
+    call_log = tmp / "queue-dispatch-revalidate-calls.jsonl"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "publish-success"
+    env["CHANGERAIL_QUEUE_PREFLIGHT_MODE"] = "remote-fail-after-service-a"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "dispatch-revalidate",
+            "--launcher",
+            str(runner),
+            "--json",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("dispatch revalidation drift unexpectedly delivered")
+    status = load_status(runtime, "dispatch-revalidate")
+    service_a_card = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    service_b_card = next(card for card in status["cards"] if card["id"] == "service-b-card")
+    if service_a_card.get("state") != "delivered":
+        raise AssertionError(f"first card should have delivered before later drift: {status['cards']}")
+    if service_b_card.get("terminal_reason") != "publish_target_preflight_failed":
+        raise AssertionError(f"dispatch preflight did not block later card specifically: {service_b_card}")
+    calls = queue_run_calls(call_log)
+    if len(calls) != 1 or "service-a-card" not in calls[0].get("card", ""):
+        raise AssertionError(f"queue should launch only first delivery child before drift: {calls}")
+    preflight_cards = [call.get("card", "") for call in queue_preflight_calls(call_log)]
+    if not any("service-b-card" in card for card in preflight_cards):
+        raise AssertionError(f"dispatch did not re-run preflight for later card: {preflight_cards}")
+    assert_no_workspace_lock(runtime, service_b)
+
+
 def check_queue_run_plan(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-run-consumer")
     runner = tmp / "fake-queue-runner"
@@ -4528,6 +4679,7 @@ def main() -> int:
         check_default_launcher_requires_path_codex(workspace)
         check_publish_target_preflight(workspace)
         check_remote_preflight_failure_classes(workspace)
+        check_single_card_publish_target_preflight_terminal_reason(workspace)
         check_remote_preflight_resume_success(workspace)
         check_retained_payload_status_schema_and_single_card_resume(workspace)
         check_retained_payload_resume_fail_closed(workspace)
@@ -4539,10 +4691,12 @@ def main() -> int:
         check_queue_plan_preflight(workspace)
         check_queue_preflight_child_failure_compact(workspace)
         check_queue_preflight_remote_failure_class(workspace)
+        check_queue_child_publish_target_blocks_before_lock_and_launch(workspace)
         check_generated_queue_plan(workspace)
         check_queue_launcher_docs()
         check_queue_preflight_failures(workspace)
         check_queue_run_plan(workspace)
+        check_queue_dispatch_revalidates_publish_target_before_lock(workspace)
         check_queue_fail_fast_and_locks(workspace)
         check_queue_terminal_reason_and_missing_status(workspace)
         check_queue_resume_plan(workspace)
