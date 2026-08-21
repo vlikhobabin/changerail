@@ -28,14 +28,21 @@ artifacts
 - Milestone audit: `no`
 - New authority or wire protocol: `yes`
 - Credential or mutation authority: `no`
-- Repeated defect class: `yes`
+- Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
 - Published investigation authorization: `none`
 
-Field evidence обосновывает contract, но перед implementation review новый
-verification-admission protocol требует exact published investigation
-authorization.
+Published investigation `investigate-bounded-field-validation-batch` закрывает
+repeated-defect classification для одного bounded verification-coverage
+hypothesis. Field evidence обосновывает contract, но перед implementation
+review новый verification-admission protocol все еще требует отдельную exact
+published authorization card.
+
+## Depends On
+- `investigate-bounded-field-validation-batch`
+- separate exact published authorization source for
+  `define-verification-coverage-map`
 
 ## Summary
 ChangeRail требует concrete verification commands, retained evidence и
@@ -148,11 +155,13 @@ ignored runtime ledger schema и namespaced domain extension boundary.
 - Generic Python example и domain namespaced IDs не встраивают 1С rules в core.
 
 ### Depends On
-- exact published investigation authorization for this card's verification
-  coverage protocol
+- `investigate-bounded-field-validation-batch`
+- separate exact published investigation authorization for this card's
+  verification coverage protocol
 
 ### Related
 - `openspec/changes/define-verification-coverage-map/`
+- `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Change 2: `enforce-verification-coverage-ledger`
 
@@ -194,3 +203,6 @@ fingerprint-bound plan/ledger и существующий evidence index/manifes
 - 2026-08-21T07:43:31Z research accepted an optional project map plus tracked
   id/hash plan and ignored evidence ledger; contract and enforcement changes
   reached apply-ready state.
+- 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
+  exact verification-coverage hypothesis, one shared loader boundary, ceiling
+  500 и requirement нового split при повторе того же blocker.

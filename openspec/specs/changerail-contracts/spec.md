@@ -1269,6 +1269,59 @@ ceiling 500 and `allow_new_authority_or_wire_protocol` true.
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable waiver
 
+### Requirement: Field-validation successors MUST use bounded investigation decisions
+ChangeRail MUST require bounded decisions for exact successors
+`enforce-declared-execution-target-invariant`,
+`expose-structured-live-delivery-progress`,
+`resume-retained-payload-after-external-blocker`,
+`report-recovery-aware-delivery-episodes`,
+`define-verification-coverage-map` and
+`materialize-versioned-source-classification-profiles`, which receive separate
+published authorization sources with a ceiling no higher than 500 and protocol
+allowance only after a tracked investigation decision that lists them in
+`Blocks`. The decision MUST identify every successor id, its authorization-time
+`3.inprogress` path, accepted protocol boundary and verification floor. It
+MUST NOT act as a reusable/global waiver, authorize another successor, raise
+the global ceiling or allow provider discovery, provision, credential handling,
+target substitution, prose/raw-log parsing or a second acceptance source of
+truth outside the accepted successor boundary.
+
+#### Scenario: Exact successor uses bounded source
+- **WHEN** a successor references its own separate `4.done` authorization
+  source, bound to this investigation and the exact `3.inprogress` successor
+  card path
+- **THEN** deterministic preflight can apply the source's ceiling up to 500
+  and the accepted protocol allowance
+- **AND** reciprocal relation checks still require the successor, authorization
+  source and investigation cards to name the same exact ids and canonical
+  board paths
+
+#### Scenario: Payload expands the decision
+- **WHEN** production LOC is above 500, successor/path does not match, the
+  implementation adds authority outside the accepted boundary or the same
+  unresolved blocker hypothesis repeats
+- **THEN** the authorization is not applicable
+- **AND** delivery requires a split or a new investigation instead of extending
+  the same-card rescue
+
+### Requirement: Repeated field defect MUST become one bounded hypothesis
+Investigation MUST allow a post-investigation successor to clear the
+repeated-defect stop only when the decision fixes a single-source
+implementation boundary, verification floor and absence of extra same-card
+rescue budget for the exact successor.
+
+#### Scenario: Bounded successor implements the decision
+- **WHEN** the successor preserves exact investigated scope and dependency
+  lineage
+- **THEN** the card can declare `Repeated defect class: no`
+- **AND** protocol/LOC authorization remains mandatory
+
+#### Scenario: The same defect repeats after bounded implementation
+- **WHEN** verification or review again finds the same unresolved invariant or
+  blocker class
+- **THEN** the successor does not expand scope under the current authorization
+- **AND** a linked investigation or split decision is required
+
 ### Requirement: Go test files are not production LOC
 The deterministic preflight MUST exclude paths ending in `*_test.go` from
 added production LOC while continuing to count other scoped Go source files.

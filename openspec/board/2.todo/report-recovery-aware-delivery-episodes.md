@@ -32,6 +32,13 @@ artifacts
 Перед реализацией episode/attempt schemas требуется exact published
 investigation authorization.
 
+## Depends On
+- `expose-structured-live-delivery-progress`
+- `resume-retained-payload-after-external-blocker`
+- `investigate-bounded-field-validation-batch`
+- separate exact published authorization source for
+  `report-recovery-aware-delivery-episodes`
+
 ## Problem
 ChangeRail независимо записывает каждый runner process, preflight и review
 artifact. Поэтому у blocked/resumed карточки нет canonical delivery episode,
@@ -125,11 +132,13 @@ episode index и complete aggregate telemetry с bounded samples.
 ### Depends On
 - `expose-structured-live-delivery-progress`
 - `resume-retained-payload-after-external-blocker`
-- exact published investigation authorization for this card's episode/attempt
-  wire contracts
+- `investigate-bounded-field-validation-batch`
+- separate exact published investigation authorization for this card's
+  episode/attempt wire contracts
 
 ### Related
 - `openspec/changes/record-recovery-aware-delivery-episodes/`
+- `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Change 2: `report-recovery-aware-delivery-metrics`
 
@@ -157,3 +166,6 @@ denominators, recovery cost, complete totals и honest unknowns.
 - 2026-08-20T17:30:00Z карточка создана из sanitized field-validation evidence.
 - 2026-08-21T07:43:31Z исследование разделило owner-artifact lineage/episode
   materialization и metrics rollup; оба OpenSpec changes достигли apply-ready.
+- 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
+  exact episode/attempt boundary, split budget 300/200, ceiling 500 и запрет
+  raw-log reconstruction.

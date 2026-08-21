@@ -77,7 +77,7 @@ ChangeRail поддерживает проектный файл
 - Milestone audit: `no`
 - New authority or wire protocol: `yes`
 - Credential or mutation authority: `no`
-- Repeated defect class: `yes`
+- Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
 - Published investigation authorization: `none`
@@ -85,9 +85,15 @@ ChangeRail поддерживает проектный файл
 Критический уровень нужен потому, что изменение влияет на расчет объема
 прикладного кода и выбор обязательной независимой проверки.
 
-Перед implementation review требуется exact published investigation
-authorization для repeated risk-classification defect и новых profile/check
-contracts.
+Published investigation `investigate-bounded-field-validation-batch` закрывает
+repeated-defect classification для одного bounded source-profile hypothesis.
+Перед implementation review все еще требуется отдельная exact published
+authorization card для новых profile/check contracts.
+
+## Depends On
+- `investigate-bounded-field-validation-batch`
+- separate exact published authorization source for
+  `materialize-versioned-source-classification-profiles`
 
 ## Acceptance
 - Определен версионируемый договор профиля классификации, который может
@@ -217,11 +223,13 @@ validation, fail-closed merge и backward-compatible provenance.
 
 ### Depends On
 - delivered `changerail.source-classification.v1` and source-kind complexity
-- exact published investigation authorization for this card's profile/check
-  contracts and repeated defect class
+- `investigate-bounded-field-validation-batch`
+- separate exact published investigation authorization for this card's
+  profile/check contracts
 
 ### Related
 - `openspec/changes/define-source-classification-profile-contract/`
+- `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Change 2: `detect-and-materialize-source-classification-profiles`
 
@@ -276,3 +284,6 @@ confirmed drift и likely uncovered source.
 - 2026-08-21T07:43:31Z research selected a separate versioned data profile plus
   optional provenance in the final classification; contract,
   detect/materialize and drift changes reached apply-ready state.
+- 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
+  exact source-profile hypothesis, single effective classification source,
+  ceiling 500 и requirement нового split при повторе того же blocker.

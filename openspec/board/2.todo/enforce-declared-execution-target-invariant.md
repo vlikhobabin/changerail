@@ -38,14 +38,21 @@ independent review и запрещает неявную подмену.
 - Milestone audit: `no`
 - New authority or wire protocol: `yes`
 - Credential or mutation authority: `no`
-- Repeated defect class: `yes`
+- Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
 - Published investigation authorization: `none`
 
-Перед реализацией требуется exact published investigation authorization:
-изменение добавляет новый project/delivery/evidence contract и обязательный
-fail-closed preflight.
+Published investigation `investigate-bounded-field-validation-batch` закрывает
+repeated-defect classification для одного bounded target-identity hypothesis.
+Перед реализацией все еще требуется отдельная exact published authorization
+card для нового project/delivery/evidence contract и обязательного fail-closed
+preflight.
+
+## Depends On
+- `investigate-bounded-field-validation-batch`
+- separate exact published authorization source for
+  `enforce-declared-execution-target-invariant`
 
 ## Acceptance
 - Проект может объявить универсальную цель выполнения: логический id,
@@ -135,11 +142,13 @@ fail-closed substitution policy без platform-specific provision logic.
   loader/comparator.
 
 ### Depends On
-- exact published investigation authorization for this card's target identity
-  protocol and repeated defect simplification
+- `investigate-bounded-field-validation-batch`
+- separate exact published investigation authorization for this card's target
+  identity protocol
 
 ### Related
 - `openspec/changes/enforce-declared-execution-target-invariant/`
+- `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Log
 - 2026-08-21 карточка создана по подтвержденному случаю неявной подмены среды
@@ -147,3 +156,6 @@ fail-closed substitution policy без platform-specific provision logic.
 - 2026-08-21T08:38:00Z `$changerail-ff` выбрал один optional tracked contract,
   shared validator и bounded implementation ceiling 500; apply-ready proposal,
   design, delta specs и tasks созданы.
+- 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
+  exact target-identity hypothesis, ceiling 500, shared loader/comparator
+  boundary и requirement нового split при повторе того же blocker.

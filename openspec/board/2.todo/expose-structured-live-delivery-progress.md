@@ -31,6 +31,11 @@ artifacts
 Перед implementation review требуется exact published investigation
 authorization для нового progress event/status wire contract.
 
+## Depends On
+- `investigate-bounded-field-validation-batch`
+- separate exact published authorization source for
+  `expose-structured-live-delivery-progress`
+
 ## Summary
 Пока Codex child работает, single-card status показывает только
 `phase=delivery`, `result=RUNNING`, process id и исходное start time. Aggregate
@@ -108,11 +113,13 @@ commands или output values.
 - Existing terminal/raw-evidence/package compatibility сохраняется.
 
 ### Depends On
-- exact published investigation authorization for this card's progress
+- `investigate-bounded-field-validation-batch`
+- separate exact published investigation authorization for this card's progress
   event/status wire contract
 
 ### Related
 - `openspec/changes/expose-structured-live-delivery-progress/`
+- `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Log
 - 2026-08-20T09:54:00Z карточка создана из sanitized supervised delivery
@@ -125,3 +132,6 @@ commands или output values.
 - 2026-08-21T07:43:31Z исследование выбрало runner-owned value-free event
   channel, coalesced activity heartbeat и non-terminal stale diagnostic; один
   OpenSpec change доведен до apply-ready artifacts.
+- 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
+  exact progress event/status boundary, ceiling 500 и запрет raw child
+  prose/output parsing.

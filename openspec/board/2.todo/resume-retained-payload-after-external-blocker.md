@@ -24,14 +24,23 @@ artifacts
 - Milestone audit: `no`
 - New authority or wire protocol: `yes`
 - Credential or mutation authority: `yes`
-- Repeated defect class: `yes`
+- Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
 - Published investigation authorization: `none`
 
-Перед реализацией требуется exact published investigation authorization:
-change расширяет dirty retained-payload launch authority и blocker/evidence
-wire contract.
+Published investigation `investigate-bounded-field-validation-batch` закрывает
+repeated-defect classification для одного bounded external-blocker resume
+hypothesis. Перед реализацией все еще требуется отдельная exact published
+authorization card: change расширяет dirty retained-payload launch authority и
+blocker/evidence wire contract.
+
+## Depends On
+- `support-runner-resume-after-investigation-required`
+- `investigate-bounded-field-validation-batch`
+- separate exact published authorization source for
+  `resume-retained-payload-after-external-blocker`
+- `enforce-declared-execution-target-invariant`
 
 ## Summary
 Single-card и package resume сейчас разрешают exact dirty retained payload
@@ -118,12 +127,14 @@ fingerprint resume для single-card/queue без общего dirty-tree bypas
 
 ### Depends On
 - `openspec/board/4.done/support-runner-resume-after-investigation-required.md`
-- exact published investigation authorization for this card's dirty-resume
-  authority and blocker/evidence wire contract
-- `openspec/board/1.backlog/enforce-declared-execution-target-invariant.md`
+- `investigate-bounded-field-validation-batch`
+- separate exact published investigation authorization for this card's
+  dirty-resume authority and blocker/evidence wire contract
+- `openspec/board/2.todo/enforce-declared-execution-target-invariant.md`
 
 ### Related
 - `openspec/changes/resume-retained-payload-after-external-blocker/`
+- `openspec/board/4.done/investigate-bounded-field-validation-batch.md`
 
 ## Log
 - 2026-08-20T07:55:00Z карточка создана из sanitized package-runner recovery
@@ -139,3 +150,6 @@ fingerprint resume для single-card/queue без общего dirty-tree bypas
 - 2026-08-21: добавлен declared-target invariant: восстановление внешнего
   условия не разрешает provision/rebind/substitution, а target drift требует
   нового clean delivery attempt.
+- 2026-08-21T09:10:00Z bounded field-validation investigation зафиксировало
+  exact retained-payload resume hypothesis, ceiling 500, scoped evidence-index
+  boundary и requirement нового split при повторе того же blocker.
