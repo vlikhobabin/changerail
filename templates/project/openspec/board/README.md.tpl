@@ -27,6 +27,11 @@
 - Domain-specific production source kinds can be declared in project-owned
   `.changerail/source-classification.yaml`; generated templates do not create
   application-specific production roots by default.
+- Source classification profiles follow explicit `detect -> review ->
+  materialize -> check`: detected candidates are advisory until maintainers
+  preview and write the tracked project classification. Existing divergent
+  classifications require a separate reviewed migration; force overwrite and
+  automatic Git commit are not part of this flow.
 - Domain-specific verification coverage can be declared through
   `verification.coverage_map` and a tracked project-owned map; generated
   templates keep that reference `null` by default.

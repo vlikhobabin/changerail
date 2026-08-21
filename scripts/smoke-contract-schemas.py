@@ -598,11 +598,20 @@ def review_cycle_history() -> dict[str, Any]:
 def source_classification() -> dict[str, Any]:
     return {
         "schema": "changerail.source-classification.v1",
+        "profile_provenance": [
+            {
+                "id": "python",
+                "version": "1.0.0",
+                "checksum": SHA,
+                "source_kind": "built-in",
+                "declared_override_paths": ["source_kinds.python.production_roots"],
+            }
+        ],
         "source_kinds": [
             {
-                "id": "bsl",
-                "suffixes": [".bsl"],
-                "production_roots": ["src/production"],
+                "id": "python",
+                "suffixes": [".py"],
+                "production_roots": ["src"],
                 "measure": "lines",
             },
             {
@@ -613,6 +622,75 @@ def source_classification() -> dict[str, Any]:
             },
         ],
         "non_production_roots": ["src/examples"],
+    }
+
+
+def source_classification_profile() -> dict[str, Any]:
+    return {
+        "schema": "changerail.source-classification-profile.v1",
+        "id": "python",
+        "version": "1.0.0",
+        "description": "Generic Python source profile",
+        "classification": {
+            "source_kinds": [
+                {
+                    "id": "python",
+                    "suffixes": [".py"],
+                    "production_roots": ["src"],
+                    "measure": "lines",
+                }
+            ],
+            "non_production_roots": ["tests", "fixtures"],
+        },
+        "detection": {
+            "signals": [
+                {"id": "src-python", "path_glob": "src/**/*.py", "weight": 80},
+                {"id": "pyproject", "path_glob": "pyproject.toml", "weight": 20},
+            ]
+        },
+    }
+
+
+def source_classification_check() -> dict[str, Any]:
+    return {
+        "schema": "changerail.source-classification-check.v1",
+        "checked_at": DATE,
+        "target": {"path": ".changerail/source-classification.yaml", "snapshot": TREE},
+        "classification": {"present": True, "valid": True, "provenance": "available"},
+        "profiles": [
+            {
+                "id": "python",
+                "version": "1.0.0",
+                "checksum": SHA,
+                "source_kind": "built-in",
+                "state": "matched",
+            }
+        ],
+        "effective_rules": {
+            "source_kind_count": 1,
+            "non_production_root_count": 2,
+            "covered_path_count": 3,
+            "excluded_path_count": 1,
+            "source_kinds": [
+                {"id": "python", "suffixes": [".py"], "production_roots": ["src"], "measure": "lines"}
+            ],
+            "non_production_roots": ["tests", "fixtures"],
+            "declared_override_paths": ["source_kinds.python.production_roots"],
+        },
+        "uncovered_candidates": [
+            {
+                "id": "structured-xml",
+                "version": "1.0.0",
+                "confidence": "high",
+                "score": 100,
+                "matched_signal_count": 1,
+                "example_paths": ["src/designer/form.xml"],
+            }
+        ],
+        "diagnostics": [
+            {"severity": "advisory", "code": "local-profile-unavailable", "message": "local profile baseline not supplied"}
+        ],
+        "summary": {"status": "pass", "blocking": 0, "advisory": 2},
     }
 
 
@@ -1264,6 +1342,14 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         source_classification,
         schema_validator("changerail-source-classification.schema.json"),
     ),
+    "changerail-source-classification-profile.schema.json": (
+        source_classification_profile,
+        schema_validator("changerail-source-classification-profile.schema.json"),
+    ),
+    "changerail-source-classification-check.schema.json": (
+        source_classification_check,
+        schema_validator("changerail-source-classification-check.schema.json"),
+    ),
     "changerail-verification-coverage.schema.json": (
         verification_coverage_map,
         validate_coverage_map,
@@ -1462,6 +1548,23 @@ def main() -> int:
             traversal_root = source_classification()
             traversal_root["non_production_roots"] = ["src/../fixtures"]
             expect_invalid(failures, f"{name} traversal non-production root", validator, traversal_root, "non_production_roots")
+            invalid_override = source_classification()
+            invalid_override["profile_provenance"][0]["declared_override_paths"] = ["source_kinds.python"]
+            expect_invalid(failures, f"{name} invalid override path", validator, invalid_override, "declared_override_paths")
+        if name == "changerail-source-classification-profile.schema.json":
+            command_profile = source_classification_profile()
+            command_profile["detection"]["signals"][0]["command"] = "python inspect.py"
+            expect_invalid(failures, f"{name} command field", validator, command_profile, "Additional properties")
+            url_profile = source_classification_profile()
+            url_profile["detection"]["signals"][0]["path_glob"] = "https://example.invalid/profile"
+            expect_invalid(failures, f"{name} URL signal", validator, url_profile, "path_glob")
+        if name == "changerail-source-classification-check.schema.json":
+            invalid_status = source_classification_check()
+            invalid_status["summary"]["status"] = "maybe"
+            expect_invalid(failures, f"{name} invalid status", validator, invalid_status, "status")
+            invalid_override = source_classification_check()
+            invalid_override["effective_rules"]["declared_override_paths"] = ["source_kinds.python"]
+            expect_invalid(failures, f"{name} invalid override path", validator, invalid_override, "declared_override_paths")
         if name == "changerail-verification-coverage.schema.json":
             duplicate_ids = verification_coverage_map()
             duplicate_ids["entries"][1]["id"] = duplicate_ids["entries"][0]["id"]

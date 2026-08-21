@@ -58,6 +58,7 @@ SUPPORTED_HELPERS = (
     "changerail-delivery-manifest",
     "changerail-review-verdict",
     "changerail-evidence",
+    "changerail-source-classification",
 )
 MAINTENANCE_HELPERS = (
     "changerail-maintenance",

@@ -12,6 +12,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "bin" / "changerail-review-verdict"
+SOURCE_HELPER = ROOT / "bin" / "changerail-source-classification"
 MANIFEST_HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
 sys.path.insert(0, str(ROOT / "scripts"))
 from changerail_verification_coverage import (  # noqa: E402
@@ -459,6 +460,59 @@ def verbose_xml(raw_lines: int = 360) -> str:
     return f"<Form>\n{comments}\n  <Attribute>Value</Attribute>\n</Form>\n"
 
 
+def source_profile_helper_smoke(root: Path) -> None:
+    repo = root / "repo-source-profile-helper"
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "smoke@example.invalid")
+    git(repo, "config", "user.name", "ChangeRail Smoke")
+    write(repo / ".gitignore", ".runtime/\n")
+    write(repo / "pyproject.toml", "[project]\nname = \"synthetic\"\n")
+    write(repo / "src" / "app.py", "VALUE = 1\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "baseline")
+    write(repo / "src" / "designer" / "Form.xml", "<Form/>\n")
+
+    detect = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "detect"], repo)
+    require_ok(detect, "source profile detect")
+    assert [item["id"] for item in json.loads(detect.stdout)["candidates"]] == ["python"]
+    assert not (repo / ".changerail" / "source-classification.yaml").exists()
+
+    preview = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "materialize", "--profile", "python@1.0.0"], repo)
+    require_ok(preview, "source profile materialize preview")
+    assert json.loads(preview.stdout)["status"] == "preview"
+    assert not (repo / ".changerail" / "source-classification.yaml").exists()
+    duplicate = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "materialize", "--profile", "python@1.0.0", "--profile", "python@1.0.0"], repo)
+    require_ok(duplicate, "source profile duplicate selector")
+    assert len(json.loads(duplicate.stdout)["classification"]["profile_provenance"]) == 1
+
+    write_result = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "materialize", "--profile", "python@1.0.0", "--write"], repo)
+    require_ok(write_result, "source profile materialize write")
+    assert json.loads(write_result.stdout)["status"] == "created"
+    repeat = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "materialize", "--profile", "python@1.0.0", "--write"], repo)
+    require_ok(repeat, "source profile materialize idempotent")
+    assert json.loads(repeat.stdout)["status"] == "unchanged"
+    check = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "check"], repo)
+    require_ok(check, "source profile check")
+    check_data = json.loads(check.stdout)
+    assert check_data["summary"]["blocking"] == 0
+    assert check_data["classification"]["provenance"] == "available"
+    assert check_data["effective_rules"]["source_kinds"][0]["id"] == "python"
+    assert "tests" in check_data["effective_rules"]["non_production_roots"]
+    assert check_data["effective_rules"]["declared_override_paths"] == []
+    conflict = run(
+        [str(SOURCE_HELPER), "--workspace", str(repo), "--json", "materialize", "--profile", "structured-xml@1.0.0", "--write"],
+        repo,
+    )
+    assert conflict.returncode == 1
+    assert json.loads(conflict.stdout)["status"] == "migration-required"
+    policy = repo / ".changerail" / "source-classification.yaml"
+    policy.write_text(policy.read_text(encoding="utf-8").replace("production_roots:\n  - src", "production_roots:\n  - app"), encoding="utf-8")
+    drift = run([str(SOURCE_HELPER), "--workspace", str(repo), "--json", "check"], repo)
+    assert drift.returncode == 1
+    assert json.loads(drift.stdout)["summary"]["blocking"] == 1
+
+
 def preflight(
     repo: Path,
     manifest: Path,
@@ -891,6 +945,7 @@ def exact_source_profile_authorization_workspace(root: Path) -> tuple[Path, Path
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-review-preflight-") as temp:
         root = Path(temp)
+        source_profile_helper_smoke(root)
 
         repo, manifest = workspace(root, "ordinary", production_lines=3)
         payload = json.loads(manifest.read_text(encoding="utf-8"))

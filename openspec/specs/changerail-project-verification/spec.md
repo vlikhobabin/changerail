@@ -772,3 +772,36 @@ per-change plan или runtime ledger invalid, stale, scope-incomplete либо 
 - **WHEN** project не имеет reference `verification.coverage_map`
 - **THEN** preflight использует current project-declared verification floor
 - **AND** не требует generated coverage artifacts
+
+### Requirement: Materialized source classification verification
+Project verification MUST validate materialized source classification and
+optional profile provenance through public schemas while preserving legacy
+files without provenance.
+
+#### Scenario: Materialized classification valid
+- **WHEN** the helper creates a project file from selected profiles
+- **THEN** project verification and review preflight accept the schema and final
+  rules
+- **AND** reports show profile id/version/checksum without source content
+
+#### Scenario: Provenance malformed
+- **WHEN** profile checksum, source kind or override path is invalid
+- **THEN** project verification reports a blocking policy error
+- **AND** review preflight does not ignore malformed provenance
+
+### Requirement: Profile-aware source classification verification
+Project verification and review preflight MUST fail closed for invalid
+classification, immutable profile checksum conflict, measure conflict or
+confirmed undeclared profile drift while reporting unaccepted detection-only
+candidates as non-authoritative diagnostics.
+
+#### Scenario: Confirmed profile drift exists
+- **WHEN** `check` returns a blocking schema-valid drift finding
+- **THEN** project verification and preflight report a blocking policy check
+- **AND** semantic review does not launch with understated classification
+
+#### Scenario: Low-confidence unaccepted candidate exists
+- **WHEN** detection-only scan reports an uncovered low-confidence candidate
+- **THEN** verifier emits a non-blocking diagnostic and recommended explicit
+  review action
+- **AND** current risk values are derived only from tracked classification

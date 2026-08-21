@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from changerail_contract_schema import validate_with_schema
 from changerail_execution_target import describe_execution_target, execution_targets_match, load_execution_target
+from changerail_source_classification import SourceClassificationError, check_report as source_classification_check_report
 from changerail_verification_coverage import coverage_preflight_check
 import changerail_delivery_manifest as dm
 
@@ -648,6 +649,18 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         _check(checks, "source-classification", True, f"{SOURCE_CLASSIFICATION_PATH} declares {len(classification.rules)} source kinds")
     else:
         _check(checks, "source-classification", True, f"{SOURCE_CLASSIFICATION_PATH} absent; built-in classifier only")
+    try:
+        classification_report = source_classification_check_report(workspace, [], SOURCE_CLASSIFICATION_PATH)
+        blocking = classification_report["summary"]["blocking"]
+        advisory = classification_report["summary"]["advisory"]
+        _check(
+            checks,
+            "source-classification-check",
+            blocking == 0,
+            f"blocking={blocking} advisory={advisory} candidates={len(classification_report.get('uncovered_candidates', []))}",
+        )
+    except SourceClassificationError as exc:
+        _check(checks, "source-classification-check", False, str(exc))
     manifest_state = {"path": os.path.relpath(manifest_path, workspace), "valid": False, "normalized": False, "scope_ok": False}
     manifest: dict[str, Any] | None = None
     try:

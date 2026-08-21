@@ -179,6 +179,9 @@ def missing_workflow_guidance(project: Path) -> list[str]:
             "fresh machine receipt или independent `go` verdict",
             "`3.inprogress -> 4.done`",
             "До model launch выполняется deterministic preflight",
+            "detect -> review ->",
+            "force overwrite",
+            "detected candidates are advisory",
         ],
     }
     missing: list[str] = []
@@ -968,6 +971,7 @@ def check_post_bootstrap_configuration(changerail_root: Path, run_dir: Path) -> 
         failures.append("auth configuration output exposed credential content or source path")
 
     auth_marker.unlink(missing_ok=True)
+    auth_marker.parent.mkdir(parents=True, exist_ok=True)
     auth_marker.write_text("project-owned\n", encoding="utf-8")
     conflict = run(configure_command, changerail_root)
     if conflict.returncode == 0 or auth_marker.read_text(encoding="utf-8") != "project-owned\n":

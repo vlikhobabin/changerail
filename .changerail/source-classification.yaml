@@ -1,0 +1,11 @@
+schema: changerail.source-classification.v1
+source_kinds:
+  - id: changerail-python
+    suffixes: [".py"]
+    production_roots: ["scripts"]
+    measure: lines
+non_production_roots:
+  - scripts/smoke-contract-schemas.py
+  - scripts/smoke-review-preflight.py
+  - scripts/smoke-bootstrap-project.py
+  - scripts/smoke-verify-project.py

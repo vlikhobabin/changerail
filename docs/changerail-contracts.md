@@ -18,6 +18,8 @@
 - `changerail.execution-target.v1`
 - `changerail.review-cycle-history.v1`
 - `changerail.source-classification.v1`
+- `changerail.source-classification-profile.v1`
+- `changerail.source-classification-check.v1`
 - `changerail.verification-coverage.v1`
 - `changerail.verification-coverage-plan.v1`
 - `changerail.verification-coverage-ledger.v1`
@@ -48,6 +50,8 @@ schemas/changerail-delivery-plan-status.schema.json
 schemas/changerail-execution-target.schema.json
 schemas/changerail-review-cycle-history.schema.json
 schemas/changerail-source-classification.schema.json
+schemas/changerail-source-classification-profile.schema.json
+schemas/changerail-source-classification-check.schema.json
 schemas/changerail-verification-coverage.schema.json
 schemas/changerail-verification-coverage-plan.schema.json
 schemas/changerail-verification-coverage-ledger.schema.json
@@ -127,12 +131,46 @@ source_kinds:
     measure: xml-structure
 ```
 
+Версионируемый profile использует schema id
+`changerail.source-classification-profile.v1`. Built-in generic profiles и
+explicit local integration profiles валидируются одной схемой. Profile содержит
+только data: stable `id`, semantic `version`, classification payload и bounded
+path-only detection signals. Checksum считается как `sha256:<hex>` от
+canonical JSON полного validated profile; same `id@version` с другим checksum
+считается immutable-version conflict.
+
+Операторский helper:
+
+```bash
+bin/changerail-source-classification detect --json
+bin/changerail-source-classification materialize --profile python@1.0.0 --json
+bin/changerail-source-classification materialize --profile python@1.0.0 --write --json
+bin/changerail-source-classification check --json
+```
+
+`detect` по умолчанию читает tracked `HEAD`, а не dirty working tree, и ничего
+не пишет. `materialize` требует explicit `--profile id@version`; без `--write`
+он показывает preview, с `--write` атомарно создает
+`.changerail/source-classification.yaml` только если file отсутствует или уже
+семантически совпадает. Отличающийся existing file дает
+`migration-required` без overwrite или reformat. `check` выдает
+`changerail.source-classification-check.v1`: profile provenance, effective
+source-kind roots, non-production roots, declared override paths, blocking
+confirmed drift и advisory unaccepted candidates без source contents и
+machine-absolute paths.
+
 Paths в файле являются repository-relative POSIX prefixes, не shell glob-ами.
 Absolute paths, traversal, duplicate source-kind ids, unsafe roots или
 schema-invalid values блокируют preflight до LLM review. Если файл отсутствует,
 preflight использует прежний built-in classifier: common source suffixes и
 executable helpers считаются production, а domain-specific `.bsl`/`.xml` не
 становятся production по одному suffix.
+
+Preflight и `bin/verify-project` fail closed для invalid classification,
+immutable checksum conflict, measurement conflict или confirmed undeclared
+profile drift. Detection-only candidates остаются diagnostic/advisory и не
+меняют `added_production_loc`, risk route или investigation decision, пока
+проект не принял tracked schema-valid `.changerail/source-classification.yaml`.
 
 `complexity_guard.source_breakdown` содержит bounded детализацию по kind:
 `source_kind`, `measure_strategy`, counted `path_count`, `raw_added_lines`,

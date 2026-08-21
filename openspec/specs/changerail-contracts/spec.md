@@ -1658,6 +1658,171 @@ as a legacy fallback.
 - **AND** the result includes a failing deterministic check explaining the
   invalid classification
 
+### Requirement: Versioned source classification profile
+ChangeRail MUST validate `changerail.source-classification-profile.v1` as a
+data-only envelope with stable id/version, compatible classification payload
+and bounded repository-name detection signals. Contract and helper semantics
+MUST reject absolute or traversing paths, executable behavior, commands,
+imports, network sources and unsupported measurement strategies.
+
+#### Scenario: Built-in and integration profiles use shared validation
+- **WHEN** a tracked built-in generic profile or explicitly supplied local
+  integration profile contains safe rules and signals
+- **THEN** both validate through the same public schema and checksum helper
+- **AND** neither source can load executable code or network data
+
+#### Scenario: Unsafe profile is rejected
+- **WHEN** a profile contains machine-absolute paths, traversal, command, URL,
+  dynamic module or unsupported measurement strategy
+- **THEN** schema or semantic validation fails closed
+- **AND** no source classification is derived from that profile
+
+### Requirement: Stable profile checksum and identity
+ChangeRail MUST compute `sha256:<hex>` from documented canonical serialization
+of the complete validated profile. Equal id/version with different checksum
+MUST be treated as an immutable-version conflict.
+
+#### Scenario: Equivalent profile loaded twice
+- **WHEN** identical profile content is loaded from supported sources
+- **THEN** id, version and checksum match
+- **AND** source reports distinguish source kind without retaining an absolute
+  machine path
+
+#### Scenario: Published profile version changes content
+- **WHEN** profile id/version matches a known profile but canonical checksum
+  differs
+- **THEN** validation or merge blocks
+- **AND** maintainers must publish a new profile version
+
+### Requirement: Deterministic profile merge
+Multiple selected profiles MUST merge in declared order with deterministic
+canonical output, equivalent-rule deduplication and fail-closed conflicts for
+overlapping rules with conflicting measurements or different content under one
+source-kind id.
+
+#### Scenario: Compatible profiles merge
+- **WHEN** selected profiles have disjoint or exactly equivalent rules
+- **THEN** merge creates one stable source classification and ordered
+  provenance
+- **AND** repeated merge produces the same checksum and output
+
+#### Scenario: Measurement conflict is detected
+- **WHEN** overlapping suffix/root rules classify one source through different
+  measures such as `lines` and `xml-structure`
+- **THEN** merge stops with a machine-readable conflict
+- **AND** it does not choose by discovery or file-system order
+
+### Requirement: Classification profile provenance compatibility
+`changerail.source-classification.v1` MUST allow optional ordered profile
+identity/checksum/source provenance and normalized declared override paths
+while keeping final source kinds and non-production roots as the only rules
+used by review preflight.
+
+#### Scenario: Legacy project file has no provenance
+- **WHEN** an existing schema-valid classification has no profile provenance
+- **THEN** it remains valid and preflight behavior does not change
+- **AND** profile-aware diagnostics report provenance as unavailable
+
+#### Scenario: Materialized file declares overrides
+- **WHEN** final classification differs from profile baseline only in declared
+  normalized override paths
+- **THEN** check reports the differences as project overrides
+- **AND** values are read from final classification rather than duplicated in
+  provenance
+
+### Requirement: Read-only source profile detection
+ChangeRail MUST provide a machine-readable `detect` command that evaluates
+validated profile path signals against tracked `HEAD` or an explicit Git tree
+snapshot and reports candidates, matched signals, bounded confidence,
+ambiguities and recommended action without modifying files.
+
+#### Scenario: Detection runs in dirty working tree
+- **WHEN** the working tree adds a profile marker that is not in tracked `HEAD`
+  and no explicit snapshot is provided
+- **THEN** detection evaluates `HEAD` and ignores the dirty marker
+- **AND** review preflight risk and classification do not change
+
+#### Scenario: Multiple candidates match
+- **WHEN** a mixed repository matches signals for several profiles with equal
+  or overlapping confidence
+- **THEN** JSON output lists all candidates and ambiguities with stable scores
+- **AND** the command does not choose or materialize one automatically
+
+### Requirement: Explicit preview-first profile materialization
+ChangeRail MUST materialize source classification only from explicitly selected
+schema-valid profiles. Default materialization MUST be preview-only; mutation
+MUST require `--write`, revalidate inputs and atomically create a schema-valid
+project file.
+
+#### Scenario: New project confirms profile
+- **WHEN** the target file is absent and the operator previews then writes an
+  exact profile selection
+- **THEN** the helper creates `.changerail/source-classification.yaml` with
+  final rules and ordered id/version/checksum/source provenance
+- **AND** existing review preflight validates and uses that file
+
+#### Scenario: Existing file differs
+- **WHEN** project classification already exists with different effective rules
+  or provenance
+- **THEN** materialization returns non-zero with bounded semantic diff and
+  `migration-required`
+- **AND** it does not overwrite or reformat the existing file
+
+#### Scenario: Repeated materialization is idempotent
+- **WHEN** the same profile selection and inputs target an already matching
+  file
+- **THEN** the command reports no change and exits successfully
+- **AND** file bytes and effective rules remain stable
+
+### Requirement: Candidate has no classification authority
+Detected but unaccepted profiles MUST NOT affect `added_production_loc`, risk
+tier, investigation decision or source breakdown. Current review preflight may
+be affected only by tracked schema-valid `.changerail/source-classification.yaml`.
+
+#### Scenario: High-confidence candidate is not materialized
+- **WHEN** detect reports a high-confidence domain profile but project
+  classification is absent
+- **THEN** preflight continues with the current built-in classifier
+- **AND** the candidate report is advisory evidence only
+
+### Requirement: Source classification profile check report
+ChangeRail MUST emit schema-valid `changerail.source-classification-check.v1`
+with selected profile identities, source/checksum state, declared project
+overrides, effective rule summary, bounded covered/excluded/uncovered counts
+and diagnostics. The report MUST NOT include source contents or
+machine-absolute paths.
+
+#### Scenario: Final file matches profile and declared overrides
+- **WHEN** profile baseline is available and all final differences are in exact
+  declared override paths
+- **THEN** check reports matching provenance and named project overrides
+- **AND** effective rules come from the final project classification
+
+#### Scenario: Profile divergence is undeclared
+- **WHEN** a final rule differs from confirmed selected profile outside
+  declared override paths or same profile id/version has a different checksum
+- **THEN** check reports blocking `confirmed_profile_drift`
+- **AND** it does not rewrite or silently merge the file
+
+### Requirement: Detection-only drift has no risk authority
+Unaccepted candidate and uncovered-source diagnostics MUST remain value-free and
+advisory until they prove divergence from an explicitly selected schema-valid
+profile. Advisory detection MUST NOT change current source classification or
+risk calculation.
+
+#### Scenario: Unknown suffix points to candidate
+- **WHEN** tracked HEAD contains path signals for an unaccepted profile not
+  covered by built-in or final rules
+- **THEN** check reports bounded confidence, counts and capped normalized path
+  examples as advisory
+- **AND** `added_production_loc` and review route use final classification
+
+#### Scenario: Selected profile rule no longer covers matching source
+- **WHEN** a confirmed selected profile requires a source rule but final project
+  classification omits it without declared override
+- **THEN** check reports blocking drift
+- **AND** preflight cannot treat the omission as a lower-risk payload
+
 ### Requirement: Review preflight reports source-kind complexity detail
 The `changerail.review-preflight-result.v1` result MUST retain aggregate
 complexity guard fields and MUST include bounded source-kind detail for counted

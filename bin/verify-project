@@ -65,6 +65,9 @@ SCHEMAS = (
     "changerail-delivery-manifest.schema.json",
     "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
+    "changerail-source-classification.schema.json",
+    "changerail-source-classification-profile.schema.json",
+    "changerail-source-classification-check.schema.json",
     "changerail-verification-coverage.schema.json",
     "changerail-verification-coverage-plan.schema.json",
     "changerail-verification-coverage-ledger.schema.json",
@@ -72,6 +75,12 @@ SCHEMAS = (
 MAINTENANCE_HELPERS = (
     "changerail-maintenance",
     "changerail-maintenance-runner",
+)
+CORE_HELPERS = (
+    "changerail-delivery-manifest",
+    "changerail-review-verdict",
+    "changerail-evidence",
+    "changerail-source-classification",
 )
 MAINTENANCE_SCHEMAS = (
     "changerail-repository-knowledge.schema.json",
@@ -1838,27 +1847,8 @@ def check_targeted_openspec_validate(project: Path) -> Check:
 
 def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     checks = [
-        check_symlink(
-            project,
-            "bin/changerail-delivery-manifest",
-            changerail_root / "bin" / "changerail-delivery-manifest",
-            changerail_root,
-            aggregator_root,
-        ),
-        check_symlink(
-            project,
-            "bin/changerail-review-verdict",
-            changerail_root / "bin" / "changerail-review-verdict",
-            changerail_root,
-            aggregator_root,
-        ),
-        check_symlink(
-            project,
-            "bin/changerail-evidence",
-            changerail_root / "bin" / "changerail-evidence",
-            changerail_root,
-            aggregator_root,
-        ),
+        check_symlink(project, f"bin/{helper}", changerail_root / "bin" / helper, changerail_root, aggregator_root)
+        for helper in CORE_HELPERS
     ]
     for schema in SCHEMAS:
         path = changerail_root / "schemas" / schema
@@ -1875,33 +1865,49 @@ def check_schemas_and_helper_with_wiring(
     checks = [
         check_wiring_path(
             project,
-            "bin/changerail-delivery-manifest",
-            changerail_root / "bin" / "changerail-delivery-manifest",
+            f"bin/{helper}",
+            changerail_root / "bin" / helper,
             changerail_root,
             aggregator_root,
             manifest,
-        ),
-        check_wiring_path(
-            project,
-            "bin/changerail-review-verdict",
-            changerail_root / "bin" / "changerail-review-verdict",
-            changerail_root,
-            aggregator_root,
-            manifest,
-        ),
-        check_wiring_path(
-            project,
-            "bin/changerail-evidence",
-            changerail_root / "bin" / "changerail-evidence",
-            changerail_root,
-            aggregator_root,
-            manifest,
-        ),
+        )
+        for helper in CORE_HELPERS
     ]
     for schema in SCHEMAS:
         path = changerail_root / "schemas" / schema
         checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from ChangeRail root" if path.is_file() else "missing"))
     return checks
+
+
+def check_source_classification_policy(project: Path, changerail_root: Path) -> Check:
+    helper = changerail_root / "bin" / "changerail-source-classification"
+    if not helper.is_file():
+        return Check("source classification profile check", False, "helper missing")
+    result = subprocess.run(
+        [str(helper), "--workspace", str(project), "--json", "check"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    raw = result.stdout.strip() or result.stderr.strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        detail = raw or "helper produced no JSON"
+        return Check("source classification profile check", False, detail)
+    if result.returncode == 2:
+        message = payload.get("error", {}).get("message", "helper input error")
+        return Check("source classification profile check", False, str(message))
+    summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+    blocking = int(summary.get("blocking", 0))
+    advisory = int(summary.get("advisory", 0))
+    ok = result.returncode == 0 and blocking == 0
+    return Check(
+        "source classification profile check",
+        ok,
+        f"blocking={blocking} advisory={advisory}",
+    )
 
 
 def check_yaml_schema_key(project: Path, rel_path: str, schema: str) -> Check:
@@ -2347,6 +2353,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
     checks.extend(
         [
             check_openspec_config(project),
+            check_source_classification_policy(project, changerail_root),
             check_verification_coverage_map(project, changerail_root, policy),
             targeted_openspec_validate,
             openspec_validate,

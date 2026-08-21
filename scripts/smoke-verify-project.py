@@ -181,6 +181,7 @@ def create_fixture(project: Path, changerail_root: Path, *, with_maintenance: bo
     symlink_force(changerail_root / "bin" / "changerail-delivery-manifest", project / "bin" / "changerail-delivery-manifest")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
     symlink_force(changerail_root / "bin" / "changerail-evidence", project / "bin" / "changerail-evidence")
+    symlink_force(changerail_root / "bin" / "changerail-source-classification", project / "bin" / "changerail-source-classification")
     if with_maintenance:
         symlink_force(changerail_root / "bin" / "changerail-maintenance", project / "bin" / "changerail-maintenance")
         symlink_force(
@@ -933,6 +934,33 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "absent execution target is compatible",
             "pass" if verify.returncode == 0 and "PASS .changerail/execution-target.json: optional declaration absent" in verify.stdout else "fail",
             verify.stdout.strip(),
+        )
+    )
+    checks.append(
+        Check(
+            "source classification policy check passes",
+            "pass" if verify.returncode == 0 and "PASS source classification profile check" in verify.stdout else "fail",
+            verify.stdout.strip(),
+        )
+    )
+    bad_source_project = run_dir / "bad-source-classification-project"
+    shutil.copytree(good_project, bad_source_project, symlinks=True)
+    (bad_source_project / ".changerail").mkdir(exist_ok=True)
+    (bad_source_project / ".changerail" / "source-classification.yaml").write_text(
+        "schema: changerail.source-classification.v1\n"
+        "source_kinds:\n"
+        "  - id: python\n"
+        "    suffixes: [\".py\"]\n"
+        "    production_roots: [\"/absolute\"]\n"
+        "    measure: lines\n",
+        encoding="utf-8",
+    )
+    bad_source_verify = run([str(changerail_root / "bin" / "verify-project"), str(bad_source_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "invalid source classification blocks verify",
+            "pass" if bad_source_verify.returncode != 0 and "source classification profile check" in bad_source_verify.stdout else "fail",
+            bad_source_verify.stdout.strip(),
         )
     )
     target_project = run_dir / "execution-target-project"
