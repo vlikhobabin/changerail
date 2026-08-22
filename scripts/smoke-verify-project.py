@@ -23,12 +23,16 @@ SPECIAL_OUTPUTS = {
 }
 EXPECTED_SCHEMAS = (
     "schemas/changerail-consumer-lock.schema.json",
+    "schemas/changerail-execution-target.schema.json",
     "schemas/changerail-review-verdict.schema.json",
     "schemas/changerail-review-preflight-result.schema.json",
     "schemas/changerail-review-cycle-history.schema.json",
     "schemas/changerail-delivery-manifest.schema.json",
     "schemas/changerail-delivery-run.schema.json",
     "schemas/changerail-evidence-index.schema.json",
+    "schemas/changerail-verification-coverage.schema.json",
+    "schemas/changerail-verification-coverage-plan.schema.json",
+    "schemas/changerail-verification-coverage-ledger.schema.json",
 )
 EXPECTED_MAINTENANCE_CHECKS = (
     ".changerail/knowledge.yaml",
@@ -177,6 +181,7 @@ def create_fixture(project: Path, changerail_root: Path, *, with_maintenance: bo
     symlink_force(changerail_root / "bin" / "changerail-delivery-manifest", project / "bin" / "changerail-delivery-manifest")
     symlink_force(changerail_root / "bin" / "changerail-review-verdict", project / "bin" / "changerail-review-verdict")
     symlink_force(changerail_root / "bin" / "changerail-evidence", project / "bin" / "changerail-evidence")
+    symlink_force(changerail_root / "bin" / "changerail-source-classification", project / "bin" / "changerail-source-classification")
     if with_maintenance:
         symlink_force(changerail_root / "bin" / "changerail-maintenance", project / "bin" / "changerail-maintenance")
         symlink_force(
@@ -781,6 +786,24 @@ def set_bootstrap_profiles(
     path.write_text(text, encoding="utf-8")
 
 
+def configure_verification_coverage(project: Path, map_text: str) -> None:
+    map_path = project / ".changerail" / "verification-coverage.yaml"
+    map_path.parent.mkdir(parents=True, exist_ok=True)
+    map_path.write_text(map_text, encoding="utf-8")
+    config = project / "openspec" / "config.yaml"
+    text = config.read_text(encoding="utf-8")
+    if "  coverage_map:" in text:
+        text = text.replace("  coverage_map: null", "  coverage_map: .changerail/verification-coverage.yaml")
+    else:
+        text = text.replace(
+            "  profile: all-surfaces",
+            "  profile: all-surfaces\n  coverage_map: .changerail/verification-coverage.yaml",
+        )
+    config.write_text(text, encoding="utf-8")
+    if (project / ".git").exists():
+        run(["git", "add", "openspec/config.yaml", ".changerail/verification-coverage.yaml"], project)
+
+
 def remove_surface_path(path: Path) -> None:
     if path.is_symlink() or path.is_file():
         path.unlink()
@@ -795,6 +818,27 @@ def verify_json(changerail_root: Path, project: Path, env: dict[str, str]) -> tu
     except json.JSONDecodeError:
         data = {}
     return result, data
+
+
+def write_execution_target(project: Path, payload: dict[str, object] | None = None) -> Path:
+    path = project / ".changerail" / "execution-target.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = payload or {
+        "schema": "changerail.execution-target.v1",
+        "id": "database-primary",
+        "fingerprint": "sha256:" + ("1" * 64),
+        "target_substitution_policy": "forbid",
+    }
+    path.write_text(json.dumps(data, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def init_git_and_track(project: Path, *paths: str) -> None:
+    git(project, "init")
+    git(project, "config", "user.email", "smoke@example.invalid")
+    git(project, "config", "user.name", "Smoke Test")
+    if paths:
+        git(project, "add", "--", *paths)
 
 
 def drift_report(
@@ -883,6 +927,115 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             "valid fixture passes",
             "pass" if verify.returncode == 0 else "fail",
             verify.stdout.strip(),
+        )
+    )
+    checks.append(
+        Check(
+            "absent execution target is compatible",
+            "pass" if verify.returncode == 0 and "PASS .changerail/execution-target.json: optional declaration absent" in verify.stdout else "fail",
+            verify.stdout.strip(),
+        )
+    )
+    checks.append(
+        Check(
+            "source classification policy check passes",
+            "pass" if verify.returncode == 0 and "PASS source classification profile check" in verify.stdout else "fail",
+            verify.stdout.strip(),
+        )
+    )
+    bad_source_project = run_dir / "bad-source-classification-project"
+    shutil.copytree(good_project, bad_source_project, symlinks=True)
+    (bad_source_project / ".changerail").mkdir(exist_ok=True)
+    (bad_source_project / ".changerail" / "source-classification.yaml").write_text(
+        "schema: changerail.source-classification.v1\n"
+        "source_kinds:\n"
+        "  - id: python\n"
+        "    suffixes: [\".py\"]\n"
+        "    production_roots: [\"/absolute\"]\n"
+        "    measure: lines\n",
+        encoding="utf-8",
+    )
+    bad_source_verify = run([str(changerail_root / "bin" / "verify-project"), str(bad_source_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "invalid source classification blocks verify",
+            "pass" if bad_source_verify.returncode != 0 and "source classification profile check" in bad_source_verify.stdout else "fail",
+            bad_source_verify.stdout.strip(),
+        )
+    )
+    target_project = run_dir / "execution-target-project"
+    shutil.copytree(good_project, target_project, symlinks=True)
+    write_execution_target(target_project)
+    init_git_and_track(target_project, ".changerail/execution-target.json")
+    target_verify = run([str(changerail_root / "bin" / "verify-project"), str(target_project)], changerail_root, fake_env)
+    checks.append(
+        Check(
+            "valid execution target passes",
+            "pass" if target_verify.returncode == 0 and "declares id=database-primary" in target_verify.stdout else "fail",
+            target_verify.stdout.strip(),
+        )
+    )
+    untracked_target_project = run_dir / "bad-untracked-execution-target"
+    shutil.copytree(good_project, untracked_target_project, symlinks=True)
+    write_execution_target(untracked_target_project)
+    init_git_and_track(untracked_target_project)
+    untracked_target = run(
+        [str(changerail_root / "bin" / "verify-project"), str(untracked_target_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "untracked execution target fails",
+            "pass"
+            if untracked_target.returncode != 0 and ".changerail/execution-target.json must be tracked by git" in untracked_target.stdout
+            else "fail",
+            untracked_target.stdout.strip(),
+        )
+    )
+    unknown_target_project = run_dir / "bad-unknown-field-execution-target"
+    shutil.copytree(good_project, unknown_target_project, symlinks=True)
+    write_execution_target(
+        unknown_target_project,
+        {
+            "schema": "changerail.execution-target.v1",
+            "id": "database-primary",
+            "fingerprint": "sha256:" + ("1" * 64),
+            "target_substitution_policy": "forbid",
+            "endpoint": "database.example.invalid",
+        },
+    )
+    init_git_and_track(unknown_target_project, ".changerail/execution-target.json")
+    unknown_target = run(
+        [str(changerail_root / "bin" / "verify-project"), str(unknown_target_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "unknown execution target field fails",
+            "pass"
+            if unknown_target.returncode != 0 and "Additional properties are not allowed" in unknown_target.stdout
+            else "fail",
+            unknown_target.stdout.strip(),
+        )
+    )
+    symlink_target_project = run_dir / "bad-symlink-execution-target"
+    shutil.copytree(good_project, symlink_target_project, symlinks=True)
+    outside_target = run_dir / "outside-execution-target.json"
+    outside_target.write_text("{}", encoding="utf-8")
+    (symlink_target_project / ".changerail").mkdir(exist_ok=True)
+    os.symlink(outside_target, symlink_target_project / ".changerail" / "execution-target.json")
+    symlink_target = run(
+        [str(changerail_root / "bin" / "verify-project"), str(symlink_target_project)],
+        changerail_root,
+        fake_env,
+    )
+    checks.append(
+        Check(
+            "symlink execution target fails",
+            "pass" if symlink_target.returncode != 0 and "must be a regular file, not a symlink" in symlink_target.stdout else "fail",
+            symlink_target.stdout.strip(),
         )
     )
     warning_env = {
@@ -1960,6 +2113,89 @@ def run_smoke(changerail_root: Path, run_dir: Path) -> dict[str, object]:
             and check_result(weaken_target_data, name="verification policy", status="fail", severity="blocking")
             else "fail",
             weaken_target.stdout.strip(),
+        )
+    )
+
+    coverage_project = run_dir / "coverage-map-project"
+    shutil.copytree(good_project, coverage_project, symlinks=True)
+    configure_verification_coverage(
+        coverage_project,
+        "schema: changerail.verification-coverage.v1\n"
+        "entries:\n"
+        "  - id: python-runtime-route\n"
+        "    applies_to:\n"
+        "      path_globs: [\"src/**/*.py\"]\n"
+        "      operation_kinds: [add, modify]\n"
+        "      surface_kinds: [python.runtime]\n"
+        "    invariant: \"positive runtime route remains observable\"\n"
+        "    oracle:\n"
+        "      kind: command\n"
+        "      ref: pytest-positive-route\n"
+        "    required_evidence:\n"
+        "      - kind: command\n"
+        "        oracle_ref: pytest-positive-route\n"
+        "      - kind: runtime\n"
+        "        oracle_ref: pytest-positive-route\n"
+        "  - id: python-type-policy\n"
+        "    applies_to:\n"
+        "      path_globs: [\"src/**/*.py\"]\n"
+        "    invariant: \"project-owned type policy remains clean when configured\"\n"
+        "    oracle:\n"
+        "      kind: typecheck\n"
+        "      ref: mypy-explicit-policy\n"
+        "    required_evidence:\n"
+        "      - kind: typecheck\n"
+        "        oracle_ref: mypy-explicit-policy\n",
+    )
+    coverage_valid, coverage_valid_data = verify_json(changerail_root, coverage_project, fake_env)
+    checks.append(
+        Check(
+            "configured verification coverage map validates",
+            "pass"
+            if coverage_valid.returncode == 0
+            and check_result(
+                coverage_valid_data,
+                name="verification coverage map",
+                status="pass",
+                severity="blocking",
+            )
+            else "fail",
+            coverage_valid.stdout.strip(),
+        )
+    )
+
+    bad_coverage_project = run_dir / "bad-coverage-map-project"
+    shutil.copytree(good_project, bad_coverage_project, symlinks=True)
+    configure_verification_coverage(
+        bad_coverage_project,
+        "schema: changerail.verification-coverage.v1\n"
+        "entries:\n"
+        "  - id: python-runtime-route\n"
+        "    applies_to:\n"
+        "      path_globs: [\"/absolute/**/*.py\"]\n"
+        "    invariant: \"unsafe selector should fail\"\n"
+        "    oracle:\n"
+        "      kind: command\n"
+        "      ref: pytest-positive-route\n"
+        "    required_evidence:\n"
+        "      - kind: command\n"
+        "        oracle_ref: another-oracle\n",
+    )
+    coverage_invalid, coverage_invalid_data = verify_json(changerail_root, bad_coverage_project, fake_env)
+    checks.append(
+        Check(
+            "invalid verification coverage map fails closed",
+            "pass"
+            if coverage_invalid.returncode != 0
+            and coverage_invalid_data.get("summary", {}).get("status") == "fail"
+            and check_result(
+                coverage_invalid_data,
+                name="verification coverage map",
+                status="fail",
+                severity="blocking",
+            )
+            else "fail",
+            coverage_invalid.stdout.strip(),
         )
     )
 

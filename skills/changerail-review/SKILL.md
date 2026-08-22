@@ -19,6 +19,12 @@ The reviewer produces evidence, not fixes. Its writes are ignored runtime
 review evidence under `.runtime/changerail/reviews/`: the latest canonical verdict and
 optional review-cycle history. It must not modify reviewed payload files.
 
+When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free review progress
+with `bin/changerail-delivery-runner progress-event review waiting` before
+payload audit and `review complete` after verdict validation. Progress events
+must use only the helper's bounded phase/stage contract and must not include
+prose, commands, paths, environment values or output excerpts.
+
 ## Independence Requirement
 
 This skill must run in a context that did not plan or implement the card:
@@ -51,6 +57,21 @@ Resolve the repository root from the current working directory or
 3. The target card and ordered `## Change N:` sections.
 4. Archived OpenSpec changes referenced by the card.
 5. `.runtime/changerail/delivery-manifests/<card-id>.json` when present.
+
+## Parent-Owned Active Runner Evidence
+
+When `CHANGERAIL_ACTIVE_RUN_DIR` is set, that directory belongs to the parent
+delivery runner until the child exits. Do not read, search, tail, cite or
+summarize files under `CHANGERAIL_ACTIVE_RUN_DIR` while the parent run is
+active. This includes `status.json`, `stdout.jsonl`, `stderr.log` and any other
+file created inside that directory. Exclude the directory from broad workspace
+discovery commands.
+
+Review the card, manifest, preflight, tracked payload and retained card-owned
+evidence outside the protected active-run directory. If a mandatory claim is
+backed only by protected active-run output, record it as unbacked instead of
+reading the raw log. The parent orchestrator may inspect the structured run
+status and may expose retained evidence after the child terminates.
 
 ## Shared Review Verdict
 
@@ -152,6 +173,9 @@ For every verification claim in the card, archived tasks and manifest:
 
 - identify the command that allegedly ran;
 - identify the retained output, evidence path or observed output summary;
+- when the project declares `.changerail/execution-target.json`, confirm the
+  current declaration, manifest and retained evidence have one exact matching
+  target identity;
 - re-run cheap read-only checks when feasible;
 - mark unbacked mandatory claims as findings.
 
@@ -164,6 +188,14 @@ toolchain. Missing command/outcome evidence for a mandatory check is an
 evidence finding. Formatter, strict typing and environment-matrix checks are
 mandatory only when those sources declare them or the changed surface makes
 them necessary.
+
+When a configured verification coverage map is present, read the tracked
+per-change coverage plan, ignored ledger and manifest `coverage_summary`.
+For every applicable id, audit the map invariant, linked evidence-index refs,
+published boundary and test adequacy against card acceptance. A complete ledger
+proves process identity and freshness only; if the oracle observes an internal,
+disconnected or wrong boundary, write a blocker finding instead of treating the
+ledger as an acceptance pass.
 
 ### 4. Diff Review
 
@@ -217,6 +249,8 @@ Stop without writing a verdict when:
 
 - this session implemented or planned the card;
 - deterministic preflight is absent, blocked or requires investigation;
+- declared execution target identity is missing, mismatched, substituted or
+  backed by multiple retained evidence targets;
 - card-owned changes are not archived;
 - neither a manifest nor a reconstructable publish scope exists;
 - the workspace is not a git repository or the fingerprint cannot be computed;

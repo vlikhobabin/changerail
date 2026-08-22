@@ -480,6 +480,54 @@ terminal reason.
 - **THEN** the run record explicitly reports usage as unavailable instead of
   guessing values
 
+### Requirement: Recoverable external blocker contract
+`changerail.delivery-run.v1` MUST разрешать bounded объект
+`changerail.external-blocker.v1` только для blocked attempt. Объект MUST
+содержать run-local blocker id, known class, observation timestamp,
+`retryable: true` и bounded required evidence ids/maximum age, а также MUST
+отклонять prompts, values, response bodies, screenshots и raw output.
+
+#### Scenario: Value-free blocker проходит валидацию
+- **WHEN** blocked run записывает known class и normalized evidence ids без
+  content-bearing fields
+- **THEN** delivery-run schema validation проходит
+- **AND** последующий resume может проверить policy без parsing terminal prose
+
+#### Scenario: Secret-bearing blocker не проходит валидацию
+- **WHEN** blocker metadata включает entered credential, environment value,
+  response body, screen content или arbitrary project-specific reason
+- **THEN** schema validation fail closed
+- **AND** record не может разрешить retained resume
+
+### Requirement: Delivery progress wire contract
+`changerail.delivery-run.v1` and `changerail.delivery-plan-status.v1` MUST
+support one optional `changerail.delivery-progress.v1` object with bounded
+phase/stage enums, date-time heartbeat and non-negative monotonic event
+counter. The object MUST reject undeclared content-bearing fields.
+
+#### Scenario: Safe progress validates
+- **WHEN** status contains known phase/stage, valid heartbeat timestamp and
+  non-negative event counter
+- **THEN** the applicable public schema validates the record
+- **AND** aggregate status can mirror the object without semantic conversion
+
+#### Scenario: Content-bearing progress fails validation
+- **WHEN** progress contains prompts, command bodies, environment values,
+  response bodies, raw log excerpts or unknown phase/stage
+- **THEN** schema validation fails closed
+- **AND** invalid object is not published as trusted live progress
+
+### Requirement: Bounded progress health contract
+Status contracts MUST represent progress health through bounded state,
+non-negative heartbeat age and process-alive observation, without giving the
+diagnostic terminal or mutation authority.
+
+#### Scenario: Stale health is compatible with running result
+- **WHEN** a schema-valid running record reports stale progress health and a
+  live process
+- **THEN** schema validation passes
+- **AND** `result` remains `RUNNING` instead of being derived from health alone
+
 ### Requirement: Delivery run performance summary contract
 ChangeRail MUST define schema-backed optional performance fields for
 `changerail.delivery-run.v1` status records without weakening the required base
@@ -496,6 +544,34 @@ status contract.
 - **THEN** the status record remains valid without guessing those values
 - **AND** the required base fields still include schema, card, phase, result,
   timestamps, command and usage availability
+
+### Requirement: Delivery episode and attempt contracts
+Runtime owner schemas MUST support explicit recovery-aware episode lineage
+without making legacy records invalid.
+
+#### Scenario: Delivery run declares an attempt
+- **WHEN** a delivery-run status includes `episode.id` and a typed `attempt`
+- **THEN** schema validation accepts `preflight`, `delivery` or `recovery`
+  attempts with optional previous/source linkage
+- **AND** legacy status records without these optional fields remain valid
+
+#### Scenario: Review and publish owners link to the episode
+- **WHEN** review-cycle history or delivery manifest publish metadata declares
+  the same episode and linked attempt ids
+- **THEN** schema validation accepts the owner-scoped lineage
+- **AND** raw prompts, command bodies and log payloads are still not valid
+  fields in those owner artifacts
+
+### Requirement: Derived delivery episode contract
+ChangeRail MUST define `changerail.delivery-episode.v1` as an ignored,
+public-safe derived index over schema-valid owner artifacts.
+
+#### Scenario: Episode index summarizes owner artifacts
+- **WHEN** a delivery episode record is materialized
+- **THEN** it contains typed attempt summaries, owner artifact references,
+  final outcome and bounded sampling metadata
+- **AND** it does not contain prompts, raw commands, MCP payloads, screenshots,
+  source content or raw logs
 
 ### Requirement: Delivery run schema bounds command output metadata
 The `changerail.delivery-run.v1` schema MUST allow structured command output
@@ -523,6 +599,13 @@ The delivery-run contract MUST keep output amplification diagnostics bounded so
 - **THEN** the status record includes aggregate counts and bounded top-command
   metadata rather than every raw output payload
 - **AND** ignored raw evidence paths remain outside committable scope
+
+#### Scenario: Detail samples are truncated
+- **WHEN** command or timeline detail retention is smaller than observed count
+- **THEN** the status record exposes observed count, retained count, limit and
+  truncation state
+- **AND** aggregate command counts and durations remain based on the complete
+  observed set
 
 ### Requirement: Delivery run usage breakdown contract
 ChangeRail MUST allow delivery run records to expose available token usage
@@ -685,6 +768,17 @@ ChangeRail MUST define a public schema-backed
 - **WHEN** a queue status record is written
 - **THEN** the default path is under ignored `.runtime/changerail/`
 - **AND** the status schema does not require raw logs or secrets
+
+#### Scenario: Queue mirrors matching child progress
+- **WHEN** an active child status contains schema-valid progress and matching
+  run/card identity
+- **THEN** aggregate card status may mirror `progress` and `progress_health`
+- **AND** it still references the child status instead of embedding raw logs
+
+#### Scenario: Queue rejects mismatched child progress
+- **WHEN** a child status progress record belongs to another run or card
+- **THEN** aggregate card status does not mirror that progress
+- **AND** it records bounded `progress_diagnostic` instead of child values
 
 ### Requirement: Delivery plan schema fixtures
 ChangeRail contract schema validation MUST cover delivery plan and delivery
@@ -1269,6 +1363,261 @@ ceiling 500 and `allow_new_authority_or_wire_protocol` true.
 - **AND** it does not launch an LLM review or treat the authorization as a
   reusable waiver
 
+### Requirement: Published bounded execution-target authorization source
+ChangeRail MUST publish the bounded execution-target authorization as one clean
+tracked `4.done` board card before successor
+`enforce-declared-execution-target-invariant` can use the bounded
+production-LOC and target-identity protocol-boundary exception. The
+authorization source MUST contain exactly one schema-valid investigation
+authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`enforce-declared-execution-target-invariant`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true.
+
+#### Scenario: Authorization source binds the exact execution-target card chain
+- **WHEN** deterministic review preflight evaluates
+  `enforce-declared-execution-target-invariant` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor references
+  `openspec/board/4.done/authorize-bounded-execution-target-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `enforce-declared-execution-target-invariant`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Execution-target authorization cannot be reused
+- **WHEN** another card references the published execution-target
+  authorization source or the exact reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable waiver
+
+### Requirement: Published bounded live-progress authorization source
+ChangeRail MUST publish the bounded live-progress authorization as one clean
+tracked `4.done` board card before successor
+`expose-structured-live-delivery-progress` can use the bounded production-LOC
+and progress/status protocol-boundary exception. The authorization source MUST
+contain exactly one schema-valid investigation authorization object bound to
+investigation `investigate-bounded-field-validation-batch`, successor
+`expose-structured-live-delivery-progress`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true.
+
+#### Scenario: Authorization source binds the exact live-progress card chain
+- **WHEN** deterministic review preflight evaluates
+  `expose-structured-live-delivery-progress` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor references
+  `openspec/board/4.done/authorize-bounded-live-progress-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `expose-structured-live-delivery-progress`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Live-progress authorization cannot be reused
+- **WHEN** another card references the published live-progress authorization
+  source, raw-log telemetry authority is attempted, or the exact reciprocal
+  card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable telemetry waiver
+
+### Requirement: Published bounded external-blocker resume authorization source
+ChangeRail MUST publish the bounded external-blocker resume authorization as
+one clean tracked `4.done` board card before successor
+`resume-retained-payload-after-external-blocker` can use the bounded
+production-LOC and retained-payload blocker/evidence protocol-boundary
+exception. The authorization source MUST contain exactly one schema-valid
+investigation authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`resume-retained-payload-after-external-blocker`, production LOC ceiling 500
+and `allow_new_authority_or_wire_protocol` true.
+
+#### Scenario: Authorization source binds the exact external-blocker resume chain
+- **WHEN** deterministic review preflight evaluates
+  `resume-retained-payload-after-external-blocker` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-external-blocker-resume-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `resume-retained-payload-after-external-blocker`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: External-blocker resume authorization cannot be reused
+- **WHEN** another card references the published external-blocker resume
+  authorization source, generic dirty bypass or credential/target authority is
+  attempted, or the exact reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable dirty-resume waiver
+
+### Requirement: Published bounded recovery-episodes authorization source
+ChangeRail MUST publish the bounded recovery-episodes authorization as one clean
+tracked `4.done` board card before successor
+`report-recovery-aware-delivery-episodes` can use the bounded production-LOC
+and episode/attempt lineage plus derived metrics protocol-boundary exception.
+The authorization source MUST contain exactly one schema-valid investigation
+authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`report-recovery-aware-delivery-episodes`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true. The accepted split is runner
+lineage up to 300 production LOC and metrics collection/output up to 200
+production LOC, and it MUST NOT authorize raw-log reconstruction, prompt/tool
+payload retention or broader content-bearing telemetry.
+
+#### Scenario: Authorization source binds the exact recovery-episodes chain
+- **WHEN** deterministic review preflight evaluates
+  `report-recovery-aware-delivery-episodes` after the investigation and
+  authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-recovery-episodes-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `report-recovery-aware-delivery-episodes`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Recovery-episodes authorization cannot be reused
+- **WHEN** another card references the published recovery-episodes
+  authorization source, raw-log reconstruction or broader telemetry authority
+  is attempted, one side exceeds its accepted split budget, or the exact
+  reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable telemetry waiver
+
+### Requirement: Published bounded verification-coverage authorization source
+ChangeRail MUST publish the bounded verification-coverage authorization as one
+clean tracked `4.done` board card before successor
+`define-verification-coverage-map` can use the bounded production-LOC and
+verification map/ledger protocol-boundary exception. The authorization source
+MUST contain exactly one schema-valid investigation authorization object bound
+to investigation `investigate-bounded-field-validation-batch`, successor
+`define-verification-coverage-map`, production LOC ceiling 500 and
+`allow_new_authority_or_wire_protocol` true. The accepted boundary is one
+five-field project map and derived runtime ledger with references to
+acceptance, tasks and evidence instead of copied secondary truth.
+
+#### Scenario: Authorization source binds the exact verification-coverage chain
+- **WHEN** deterministic review preflight evaluates
+  `define-verification-coverage-map` after the investigation and authorization
+  cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-verification-coverage-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `define-verification-coverage-map`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Verification-coverage authorization cannot be reused
+- **WHEN** another card references the published verification-coverage
+  authorization source, a payload copies acceptance/tasks/evidence into a
+  second source of truth, or the exact reciprocal card links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable coverage-catalog waiver
+
+### Requirement: Published bounded source-profile authorization source
+ChangeRail MUST publish the bounded source-profile authorization as one clean
+tracked `4.done` board card before successor
+`materialize-versioned-source-classification-profiles` can use the bounded
+production-LOC and profile provenance/materialization/check protocol-boundary
+exception. The authorization source MUST contain exactly one schema-valid
+investigation authorization object bound to investigation
+`investigate-bounded-field-validation-batch`, successor
+`materialize-versioned-source-classification-profiles`, production LOC ceiling
+500 and `allow_new_authority_or_wire_protocol` true. The accepted boundary is
+the existing `.changerail/source-classification.yaml` as the only effective
+rules input, with profile detection, materialization and drift reporting using
+one canonical normalization path.
+
+#### Scenario: Authorization source binds the exact source-profile chain
+- **WHEN** deterministic review preflight evaluates
+  `materialize-versioned-source-classification-profiles` after the
+  investigation and authorization cards are published in `4.done`
+- **THEN** it accepts the bounded authorization only if the successor
+  references
+  `openspec/board/4.done/authorize-bounded-source-profile-payload.md`
+- **AND** the authorization source depends on
+  `investigate-bounded-field-validation-batch`
+- **AND** the published investigation blocks
+  `materialize-versioned-source-classification-profiles`
+- **AND** the authorization object uses the exact investigation id, successor
+  id, canonical board paths, ceiling 500 and protocol allowance true
+
+#### Scenario: Source-profile authorization cannot be reused
+- **WHEN** another card references the published source-profile authorization
+  source, a second effective rules source is added, or the exact reciprocal card
+  links do not match
+- **THEN** deterministic review preflight returns `investigation-required`
+- **AND** it does not launch an LLM review or treat the authorization as a
+  reusable source-classification waiver
+
+### Requirement: Field-validation successors MUST use bounded investigation decisions
+ChangeRail MUST require bounded decisions for exact successors
+`enforce-declared-execution-target-invariant`,
+`expose-structured-live-delivery-progress`,
+`resume-retained-payload-after-external-blocker`,
+`report-recovery-aware-delivery-episodes`,
+`define-verification-coverage-map` and
+`materialize-versioned-source-classification-profiles`, which receive separate
+published authorization sources with a ceiling no higher than 500 and protocol
+allowance only after a tracked investigation decision that lists them in
+`Blocks`. The decision MUST identify every successor id, its authorization-time
+`3.inprogress` path, accepted protocol boundary and verification floor. It
+MUST NOT act as a reusable/global waiver, authorize another successor, raise
+the global ceiling or allow provider discovery, provision, credential handling,
+target substitution, prose/raw-log parsing or a second acceptance source of
+truth outside the accepted successor boundary.
+
+#### Scenario: Exact successor uses bounded source
+- **WHEN** a successor references its own separate `4.done` authorization
+  source, bound to this investigation and the exact `3.inprogress` successor
+  card path
+- **THEN** deterministic preflight can apply the source's ceiling up to 500
+  and the accepted protocol allowance
+- **AND** reciprocal relation checks still require the successor, authorization
+  source and investigation cards to name the same exact ids and canonical
+  board paths
+
+#### Scenario: Payload expands the decision
+- **WHEN** production LOC is above 500, successor/path does not match, the
+  implementation adds authority outside the accepted boundary or the same
+  unresolved blocker hypothesis repeats
+- **THEN** the authorization is not applicable
+- **AND** delivery requires a split or a new investigation instead of extending
+  the same-card rescue
+
+### Requirement: Repeated field defect MUST become one bounded hypothesis
+Investigation MUST allow a post-investigation successor to clear the
+repeated-defect stop only when the decision fixes a single-source
+implementation boundary, verification floor and absence of extra same-card
+rescue budget for the exact successor.
+
+#### Scenario: Bounded successor implements the decision
+- **WHEN** the successor preserves exact investigated scope and dependency
+  lineage
+- **THEN** the card can declare `Repeated defect class: no`
+- **AND** protocol/LOC authorization remains mandatory
+
+#### Scenario: The same defect repeats after bounded implementation
+- **WHEN** verification or review again finds the same unresolved invariant or
+  blocker class
+- **THEN** the successor does not expand scope under the current authorization
+- **AND** a linked investigation or split decision is required
+
 ### Requirement: Go test files are not production LOC
 The deterministic preflight MUST exclude paths ending in `*_test.go` from
 added production LOC while continuing to count other scoped Go source files.
@@ -1308,6 +1657,171 @@ as a legacy fallback.
 - **THEN** preflight returns `blocked`
 - **AND** the result includes a failing deterministic check explaining the
   invalid classification
+
+### Requirement: Versioned source classification profile
+ChangeRail MUST validate `changerail.source-classification-profile.v1` as a
+data-only envelope with stable id/version, compatible classification payload
+and bounded repository-name detection signals. Contract and helper semantics
+MUST reject absolute or traversing paths, executable behavior, commands,
+imports, network sources and unsupported measurement strategies.
+
+#### Scenario: Built-in and integration profiles use shared validation
+- **WHEN** a tracked built-in generic profile or explicitly supplied local
+  integration profile contains safe rules and signals
+- **THEN** both validate through the same public schema and checksum helper
+- **AND** neither source can load executable code or network data
+
+#### Scenario: Unsafe profile is rejected
+- **WHEN** a profile contains machine-absolute paths, traversal, command, URL,
+  dynamic module or unsupported measurement strategy
+- **THEN** schema or semantic validation fails closed
+- **AND** no source classification is derived from that profile
+
+### Requirement: Stable profile checksum and identity
+ChangeRail MUST compute `sha256:<hex>` from documented canonical serialization
+of the complete validated profile. Equal id/version with different checksum
+MUST be treated as an immutable-version conflict.
+
+#### Scenario: Equivalent profile loaded twice
+- **WHEN** identical profile content is loaded from supported sources
+- **THEN** id, version and checksum match
+- **AND** source reports distinguish source kind without retaining an absolute
+  machine path
+
+#### Scenario: Published profile version changes content
+- **WHEN** profile id/version matches a known profile but canonical checksum
+  differs
+- **THEN** validation or merge blocks
+- **AND** maintainers must publish a new profile version
+
+### Requirement: Deterministic profile merge
+Multiple selected profiles MUST merge in declared order with deterministic
+canonical output, equivalent-rule deduplication and fail-closed conflicts for
+overlapping rules with conflicting measurements or different content under one
+source-kind id.
+
+#### Scenario: Compatible profiles merge
+- **WHEN** selected profiles have disjoint or exactly equivalent rules
+- **THEN** merge creates one stable source classification and ordered
+  provenance
+- **AND** repeated merge produces the same checksum and output
+
+#### Scenario: Measurement conflict is detected
+- **WHEN** overlapping suffix/root rules classify one source through different
+  measures such as `lines` and `xml-structure`
+- **THEN** merge stops with a machine-readable conflict
+- **AND** it does not choose by discovery or file-system order
+
+### Requirement: Classification profile provenance compatibility
+`changerail.source-classification.v1` MUST allow optional ordered profile
+identity/checksum/source provenance and normalized declared override paths
+while keeping final source kinds and non-production roots as the only rules
+used by review preflight.
+
+#### Scenario: Legacy project file has no provenance
+- **WHEN** an existing schema-valid classification has no profile provenance
+- **THEN** it remains valid and preflight behavior does not change
+- **AND** profile-aware diagnostics report provenance as unavailable
+
+#### Scenario: Materialized file declares overrides
+- **WHEN** final classification differs from profile baseline only in declared
+  normalized override paths
+- **THEN** check reports the differences as project overrides
+- **AND** values are read from final classification rather than duplicated in
+  provenance
+
+### Requirement: Read-only source profile detection
+ChangeRail MUST provide a machine-readable `detect` command that evaluates
+validated profile path signals against tracked `HEAD` or an explicit Git tree
+snapshot and reports candidates, matched signals, bounded confidence,
+ambiguities and recommended action without modifying files.
+
+#### Scenario: Detection runs in dirty working tree
+- **WHEN** the working tree adds a profile marker that is not in tracked `HEAD`
+  and no explicit snapshot is provided
+- **THEN** detection evaluates `HEAD` and ignores the dirty marker
+- **AND** review preflight risk and classification do not change
+
+#### Scenario: Multiple candidates match
+- **WHEN** a mixed repository matches signals for several profiles with equal
+  or overlapping confidence
+- **THEN** JSON output lists all candidates and ambiguities with stable scores
+- **AND** the command does not choose or materialize one automatically
+
+### Requirement: Explicit preview-first profile materialization
+ChangeRail MUST materialize source classification only from explicitly selected
+schema-valid profiles. Default materialization MUST be preview-only; mutation
+MUST require `--write`, revalidate inputs and atomically create a schema-valid
+project file.
+
+#### Scenario: New project confirms profile
+- **WHEN** the target file is absent and the operator previews then writes an
+  exact profile selection
+- **THEN** the helper creates `.changerail/source-classification.yaml` with
+  final rules and ordered id/version/checksum/source provenance
+- **AND** existing review preflight validates and uses that file
+
+#### Scenario: Existing file differs
+- **WHEN** project classification already exists with different effective rules
+  or provenance
+- **THEN** materialization returns non-zero with bounded semantic diff and
+  `migration-required`
+- **AND** it does not overwrite or reformat the existing file
+
+#### Scenario: Repeated materialization is idempotent
+- **WHEN** the same profile selection and inputs target an already matching
+  file
+- **THEN** the command reports no change and exits successfully
+- **AND** file bytes and effective rules remain stable
+
+### Requirement: Candidate has no classification authority
+Detected but unaccepted profiles MUST NOT affect `added_production_loc`, risk
+tier, investigation decision or source breakdown. Current review preflight may
+be affected only by tracked schema-valid `.changerail/source-classification.yaml`.
+
+#### Scenario: High-confidence candidate is not materialized
+- **WHEN** detect reports a high-confidence domain profile but project
+  classification is absent
+- **THEN** preflight continues with the current built-in classifier
+- **AND** the candidate report is advisory evidence only
+
+### Requirement: Source classification profile check report
+ChangeRail MUST emit schema-valid `changerail.source-classification-check.v1`
+with selected profile identities, source/checksum state, declared project
+overrides, effective rule summary, bounded covered/excluded/uncovered counts
+and diagnostics. The report MUST NOT include source contents or
+machine-absolute paths.
+
+#### Scenario: Final file matches profile and declared overrides
+- **WHEN** profile baseline is available and all final differences are in exact
+  declared override paths
+- **THEN** check reports matching provenance and named project overrides
+- **AND** effective rules come from the final project classification
+
+#### Scenario: Profile divergence is undeclared
+- **WHEN** a final rule differs from confirmed selected profile outside
+  declared override paths or same profile id/version has a different checksum
+- **THEN** check reports blocking `confirmed_profile_drift`
+- **AND** it does not rewrite or silently merge the file
+
+### Requirement: Detection-only drift has no risk authority
+Unaccepted candidate and uncovered-source diagnostics MUST remain value-free and
+advisory until they prove divergence from an explicitly selected schema-valid
+profile. Advisory detection MUST NOT change current source classification or
+risk calculation.
+
+#### Scenario: Unknown suffix points to candidate
+- **WHEN** tracked HEAD contains path signals for an unaccepted profile not
+  covered by built-in or final rules
+- **THEN** check reports bounded confidence, counts and capped normalized path
+  examples as advisory
+- **AND** `added_production_loc` and review route use final classification
+
+#### Scenario: Selected profile rule no longer covers matching source
+- **WHEN** a confirmed selected profile requires a source rule but final project
+  classification omits it without declared override
+- **THEN** check reports blocking drift
+- **AND** preflight cannot treat the omission as a lower-risk payload
 
 ### Requirement: Review preflight reports source-kind complexity detail
 The `changerail.review-preflight-result.v1` result MUST retain aggregate
@@ -1465,7 +1979,9 @@ or ignored runtime evidence content.
 resume validation as structured preflight checks with stable machine reasons.
 The contract MUST distinguish prior-status invalidity, card mismatch, workspace
 mismatch, missing retained identity, payload drift, authorization absence,
-authorization staleness, relation mismatch and authorization ceiling violation.
+authorization staleness, relation mismatch, authorization ceiling violation,
+missing/stale/mismatched external evidence, non-passing evidence and target
+identity mismatch.
 
 #### Scenario: Successful retained resume records fresh checks
 - **WHEN** retained-payload resume validation succeeds
@@ -1480,6 +1996,25 @@ authorization staleness, relation mismatch and authorization ceiling violation.
 - **THEN** the resumed delivery-run status has `terminal_outcome: BLOCKED`
 - **AND** `terminal_reason` is a stable lowercase machine value describing that
   class
+
+### Requirement: External resume evidence contract
+Retained external resume MUST ссылаться на schema-valid ignored evidence index,
+scope которого идентифицирует source run/card, а required entries имеют passed,
+fresh и redacted state согласно blocker policy.
+
+#### Scenario: Fresh evidence принимается
+- **WHEN** каждый required evidence id существует один раз, имеет
+  `status: passed`, принадлежит source scope и завершен после blocker observation
+  в пределах maximum age
+- **THEN** resume записывает fresh passing checks для blocker, evidence и
+  payload identity
+- **AND** raw evidence output не копируется в delivery status
+
+#### Scenario: Evidence нельзя переиспользовать между scope
+- **WHEN** evidence принадлежит другому card/run, не содержит required id,
+  является stale или сообщает non-passing status
+- **THEN** resume status становится `BLOCKED` со stable failure reason
+- **AND** child continuation не запускается
 
 ### Requirement: Published authorization remains source of truth for retained resume
 Retained-payload resume MUST use the published investigation authorization
@@ -1502,9 +2037,10 @@ Authorization paths MUST be tracked under `openspec/board/4.done/`, clean at
 
 ### Requirement: Queue retained recovery status metadata
 `changerail.delivery-plan-status.v1` MUST represent
-`investigation_required` recovery with bounded structured metadata. Aggregate
-card status MUST be able to identify the recovery kind, source run status path,
-source terminal reason and retained-payload fingerprint summary without
+`investigation_required` and `recoverable_external_blocker` recovery with
+bounded structured metadata. Aggregate card status MUST be able to identify the
+recovery kind, source run status path, source terminal reason, retained-payload
+fingerprint summary and external blocker policy when applicable without
 embedding raw child logs or raw source payload.
 
 #### Scenario: Aggregate status records retained recovery context
@@ -1519,11 +2055,23 @@ embedding raw child logs or raw source payload.
 - **THEN** queue validation records `BLOCKED`
 - **AND** it identifies the duplicate recovery as a stable machine reason
 
+### Requirement: Aggregate retained external recovery contract
+`changerail.delivery-plan-status.v1` MUST представлять source run/status, card,
+fingerprint, blocker id/class и evidence policy для resume одного original
+child, не изменяя существующий investigation recovery object.
+
+#### Scenario: Plan status сохраняет resumable context
+- **WHEN** child завершается на valid recoverable external blocker
+- **THEN** aggregate card status сохраняет bounded recovery context и source
+  identity
+- **AND** raw logs и evidence contents остаются indirect ignored references
+
 ### Requirement: Queue recovery terminal reasons are stable
 Queue retained recovery MUST use stable lowercase machine reasons for rejected
 resume or recovery augmentation. The contract MUST cover missing prior status,
 invalid prior status, wrong card, wrong workspace, missing retained identity,
-fingerprint drift, stale authorization and duplicate recovery path.
+fingerprint drift, stale authorization, missing/stale evidence, target mismatch
+and duplicate recovery path.
 
 #### Scenario: Failed queue recovery is machine-readable
 - **WHEN** `resume-plan` rejects an `investigation_required` recovery
@@ -1537,3 +2085,181 @@ fingerprint drift, stale authorization and duplicate recovery path.
 - **THEN** aggregate status keeps the downstream card pending or blocked
 - **AND** it does not infer success from the presence of an authorization card
   alone
+
+### Requirement: Declared execution target contract
+ChangeRail MUST принимать optional tracked `.changerail/execution-target.json`
+только как `changerail.execution-target.v1` с bounded logical `id`,
+non-sensitive `fingerprint` и `target_substitution_policy: forbid` и MUST
+отклонять physical endpoint, credentials, target contents и unknown fields.
+
+#### Scenario: Valid declaration принимается
+- **WHEN** project содержит regular tracked declaration с точным v1 shape
+- **THEN** ChangeRail получает canonical target identity projection
+- **AND** не выполняет discovery, network access или provider commands
+
+#### Scenario: Content-bearing declaration отклоняется
+- **WHEN** declaration содержит endpoint, credential, environment value,
+  arbitrary metadata или symlink/path escape
+- **THEN** verification и delivery fail closed до child launch
+
+### Requirement: Target-bound evidence contract
+Если declaration присутствует, manifest, delivery status и runtime evidence MUST
+ссылаться на один exact target id/fingerprint, а blocker и evidence MUST NOT
+давать authority на provision, rebind или substitution.
+
+#### Scenario: Evidence совпадает с declaration
+- **WHEN** applicable runtime evidence содержит одну identity, совпадающую с
+  captured declaration и manifest
+- **THEN** target identity gate может пройти вместе с domain oracle checks
+
+#### Scenario: Evidence не доказывает объявленную цель
+- **WHEN** evidence отсутствует, ссылается на другую или несколько identities
+- **THEN** review/publish gate fail closed
+- **AND** raw endpoint или credential не запрашивается как remediation
+
+### Requirement: Retained recovery SHALL preserve declared execution target
+The delivery contracts MUST сохранять logical id/fingerprint объявленной
+project execution target в retained identity и MUST NOT принимать
+blocker/evidence как authority на provision, rebind или substitution.
+
+#### Scenario: Target identity совпадает
+- **WHEN** blocker, current project declaration, evidence-index metadata and
+  every recovery evidence entry refer to the same logical id/fingerprint
+- **THEN** target identity check может пройти вместе с остальными resume gates
+- **AND** physical endpoint и credentials не копируются в status.
+
+#### Scenario: Target identity изменилась
+- **WHEN** current declaration отсутствует, имеет другой fingerprint или
+  evidence относится к другой/нескольким целям
+- **THEN** retained resume fail closed
+- **AND** explicit rebind требует нового clean delivery attempt.
+
+### Requirement: Explicit target rebind invalidates prior lineage
+Изменение tracked execution target MUST начинать новый clean delivery attempt и
+MUST делать prior retained status, evidence, manifest и review verdict
+неприменимыми.
+
+#### Scenario: Declaration изменилась после blocker
+- **WHEN** current target id/fingerprint не совпадает с retained identity
+- **THEN** dirty resume fail closed до child launch
+- **AND** оператор начинает новый clean attempt
+
+### Requirement: Episode and attempt identity contract
+Runtime owner schemas MUST использовать schema-valid episode ids и typed
+attempt objects с unique ids и optional parent/previous links. Links MUST
+разрешаться внутри одного workspace/card/episode и MUST отклонять cycles или
+conflicting duplicate attempt ids.
+
+#### Scenario: Cross-artifact lineage проходит валидацию
+- **WHEN** delivery status, review history и manifest используют один episode id
+  и distinct linked attempt ids
+- **THEN** contract validation и episode materialization проходят
+- **AND** каждый source остается authoritative для owned fields
+
+#### Scenario: Cross-episode link fail closed
+- **WHEN** attempt ссылается на parent/previous id другого episode либо duplicate
+  id имеет другое content
+- **THEN** episode refresh сообщает contract conflict
+- **AND** не merge ambiguous attempts
+
+### Requirement: Derived delivery episode record
+`changerail.delivery-episode.v1` MUST быть ignored public-safe derived index
+schema-valid attempt summaries и indirect owner-artifact references. Он MUST
+NOT включать prompts, raw commands, MCP payloads, screenshots, source content
+или raw logs.
+
+#### Scenario: Episode refresh объединяет owner artifacts
+- **WHEN** matching delivery, review и publish artifacts существуют для одного
+  episode
+- **THEN** refresh атомарно пишет ordered attempt summaries и final lifecycle
+  state
+- **AND** detailed evidence остается referenced через normalized ignored paths
+
+#### Scenario: Legacy run не имеет explicit lineage
+- **WHEN** reader встречает valid legacy delivery run без episode fields
+- **THEN** он может показать isolated synthetic episode для этого run
+- **AND** missing lineage и later review/publish data остаются `unknown`
+
+### Requirement: Sampling and duration contract
+Performance/episode schemas MUST отличать complete aggregate totals от bounded
+detail samples и MUST явно представлять incomplete intervals.
+
+#### Scenario: Detail sample усечен
+- **WHEN** retained detail count меньше observed count
+- **THEN** record объявляет truncation и sample limit
+- **AND** aggregate totals остаются valid для complete observed set
+
+### Requirement: Project-owned verification coverage map
+ChangeRail MUST валидировать optional tracked map
+`changerail.verification-coverage.v1`, entries которой содержат только `id`,
+`applies_to`, `invariant`, `oracle` и `required_evidence`. Invalid configured
+map MUST fail closed; отсутствующая map MUST сохранять current project-declared
+verification floor.
+
+#### Scenario: Minimal generic Python rule проходит валидацию
+- **WHEN** project rule использует normalized Python path selectors, stable
+  invariant, bounded project oracle ref и required command/runtime evidence
+- **THEN** schema validation проходит
+- **AND** rule не делает formatter, typing или environment matrix checks
+  mandatory вне explicit project policy
+
+#### Scenario: Настроено unsafe или incomplete rule
+- **WHEN** entry имеет duplicate id, absolute/traversing glob, не имеет selector,
+  содержит unknown oracle kind, unbound evidence ref или undeclared extra policy
+  field
+- **THEN** map validation fail closed
+- **AND** ни один coverage ledger этой map не считается trusted
+
+### Requirement: Verification coverage plan and ledger contracts
+ChangeRail MUST предоставлять tracked per-change plan-reference contract и
+ignored runtime ledger contract. Оба MUST быть fingerprint-bound и ссылаться на
+coverage ids/card acceptance hashes без дублирования invariant, oracle,
+commands, acceptance text или final verdict authority.
+
+#### Scenario: Planning ссылается на selected coverage
+- **WHEN** `ff` оценивает configured map для change
+- **THEN** tracked plan записывает map fingerprint, selected rule ids и exact
+  card acceptance hashes
+- **AND** map и card остаются sources referenced content
+
+#### Scenario: Runtime ledger записывает observed evidence
+- **WHEN** delivery reconciles actual manifest scope и записывает evidence
+- **THEN** ignored ledger связывает map/plan/manifest/review fingerprints и
+  evidence-index refs для каждого applicable rule
+- **AND** evidence refs содержат required kind/oracle_ref binding и указывают
+  на schema-valid passed evidence-index entries
+- **AND** не объявляет business acceptance и не включает raw outputs
+
+### Requirement: Domain verification surface extension boundary
+Coverage selectors MUST принимать schema-valid namespaced surface kinds от
+project/domain extension, не назначая domain semantics или execution tools
+generic ChangeRail core.
+
+#### Scenario: Domain extension различает specialized surfaces
+- **WHEN** extension выдает namespaced kinds для language modules, metadata,
+  forms, roles, posting, reports, migrations или runtime UI
+- **THEN** generic coverage matching может выбрать project-owned rules по ids
+- **AND** domain classification/oracle behavior остается owned by extension
+
+#### Scenario: Manifest сообщает extension surfaces
+- **WHEN** delivery manifest содержит schema-valid `extension_surfaces`
+- **THEN** deterministic preflight включает эти namespaced kinds в coverage
+  applicability
+- **AND** invalid surface report блокируется manifest schema validation
+
+### Requirement: Manifest coverage summary
+`changerail.delivery-manifest.v1` MUST поддерживать concise verification
+coverage summary, который ссылается на ignored ledger path/fingerprint и
+сообщает configured/applicable/covered/missing/invalid counts без map content
+или raw evidence.
+
+#### Scenario: Delivery обновляет coverage summary
+- **WHEN** actual manifest scope reconciled с configured map и ledger
+- **THEN** manifest записывает bounded counts и ledger reference
+- **AND** evidence contents остаются в ignored evidence index/output paths
+
+#### Scenario: Summary заявляет complete при stale ledger
+- **WHEN** manifest summary сообщает отсутствие missing entries, но ledger
+  fingerprints не совпадают с current map/card/scope/review target
+- **THEN** deterministic preflight отклоняет summary
+- **AND** independent review не запускается на его основании

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-verification-coverage-ledger.schema.json",
+  "title": "ChangeRail verification coverage ledger",
+  "type": "object",
+  "required": [
+    "schema",
+    "updated_at",
+    "workspace",
+    "card",
+    "change",
+    "map",
+    "plan",
+    "manifest",
+    "reviewed_tree",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "changerail.verification-coverage-ledger.v1"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "workspace": {
+      "type": "object",
+      "required": ["root", "head_commit", "tree_sha"],
+      "additionalProperties": false,
+      "properties": {
+        "root": {"type": "string", "minLength": 1},
+        "head_commit": {"type": "string", "minLength": 1},
+        "tree_sha": {"$ref": "#/$defs/gitTree"}
+      }
+    },
+    "card": {
+      "type": "object",
+      "required": ["id", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "path": {"$ref": "#/$defs/repositoryRelativePath"}
+      }
+    },
+    "change": {
+      "type": "object",
+      "required": ["slug"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}
+      }
+    },
+    "map": {"$ref": "#/$defs/fingerprintedArtifact"},
+    "plan": {"$ref": "#/$defs/fingerprintedArtifact"},
+    "manifest": {"$ref": "#/$defs/fingerprintedArtifact"},
+    "reviewed_tree": {
+      "type": "object",
+      "required": ["tree_sha", "diff_fingerprint"],
+      "additionalProperties": false,
+      "properties": {
+        "tree_sha": {"$ref": "#/$defs/gitTree"},
+        "diff_fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/ledgerEntry"}
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "gitTree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "repositoryRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "anyOf": [
+          {"pattern": "^/"},
+          {"pattern": "\\\\"},
+          {"pattern": "(^|/)\\.\\.(?:/|$)"},
+          {"pattern": "(^|/)\\.(?:/|$)"},
+          {"const": "."}
+        ]
+      }
+    },
+    "fingerprintedArtifact": {
+      "type": "object",
+      "required": ["path", "fingerprint"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"$ref": "#/$defs/repositoryRelativePath"},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "required": ["id", "index_path", "kind", "oracle_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "index_path": {"$ref": "#/$defs/repositoryRelativePath"},
+        "kind": {"enum": ["command", "test", "lint", "typecheck", "runtime", "manual", "schema", "smoke"]},
+        "oracle_ref": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]*$"},
+        "raw_output_path": {"$ref": "#/$defs/repositoryRelativePath"},
+        "classification": {"enum": ["mandatory", "diagnostic", "not_applicable"]}
+      }
+    },
+    "ledgerEntry": {
+      "type": "object",
+      "required": ["coverage_id", "applicability", "state", "oracle_ref", "evidence_refs"],
+      "additionalProperties": false,
+      "properties": {
+        "coverage_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "applicability": {"enum": ["applicable", "not_applicable", "unknown"]},
+        "state": {"enum": ["covered", "missing", "invalid", "not_applicable", "blocked"]},
+        "oracle_ref": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/#-]*$"},
+        "evidence_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/evidenceReference"}
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      }
+    }
+  }
+}

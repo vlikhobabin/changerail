@@ -735,3 +735,73 @@ project-owned surfaces.
 - **THEN** it reports that automatic adoption is unsafe
 - **AND** it does not recommend a command that would overwrite project-owned
   content
+
+### Requirement: Project verification MUST validate declared target safely
+`verify-project` MUST schema-validate regular tracked execution-target
+declaration и MUST fail closed на unsafe path, invalid shape или content-bearing
+fields без выполнения project/provider commands.
+
+#### Scenario: Declaration schema valid
+- **WHEN** optional declaration имеет exact v1 shape
+- **THEN** verification сообщает target identity contract pass без вывода
+  sensitive values
+
+#### Scenario: Declaration invalid or unsafe
+- **WHEN** declaration является symlink, содержит unknown fields либо не
+  проходит schema
+- **THEN** verification сообщает bounded failure и не запускает delivery
+
+### Requirement: Deterministic verification coverage preflight
+Review preflight MUST fail closed до model launch, когда configured coverage map,
+per-change plan или runtime ledger invalid, stale, scope-incomplete либо не
+содержит required observed evidence.
+
+#### Scenario: Ledger fresh и complete
+- **WHEN** map/plan/card/manifest/review fingerprints совпадают и каждая
+  applicable entry имеет schema-valid fresh evidence required kinds
+- **THEN** coverage process check проходит
+- **AND** deterministic check не расходует semantic review budget
+
+#### Scenario: Evidence направлен на internal disconnected path
+- **WHEN** process contract complete, но linked test/oracle не exercise
+  published boundary или connected integration route
+- **THEN** deterministic identity check не придумывает semantic pass
+- **AND** independent reviewer MUST оценить и может block test adequacy
+
+#### Scenario: Coverage map не настроена
+- **WHEN** project не имеет reference `verification.coverage_map`
+- **THEN** preflight использует current project-declared verification floor
+- **AND** не требует generated coverage artifacts
+
+### Requirement: Materialized source classification verification
+Project verification MUST validate materialized source classification and
+optional profile provenance through public schemas while preserving legacy
+files without provenance.
+
+#### Scenario: Materialized classification valid
+- **WHEN** the helper creates a project file from selected profiles
+- **THEN** project verification and review preflight accept the schema and final
+  rules
+- **AND** reports show profile id/version/checksum without source content
+
+#### Scenario: Provenance malformed
+- **WHEN** profile checksum, source kind or override path is invalid
+- **THEN** project verification reports a blocking policy error
+- **AND** review preflight does not ignore malformed provenance
+
+### Requirement: Profile-aware source classification verification
+Project verification and review preflight MUST fail closed for invalid
+classification, immutable profile checksum conflict, measure conflict or
+confirmed undeclared profile drift while reporting unaccepted detection-only
+candidates as non-authoritative diagnostics.
+
+#### Scenario: Confirmed profile drift exists
+- **WHEN** `check` returns a blocking schema-valid drift finding
+- **THEN** project verification and preflight report a blocking policy check
+- **AND** semantic review does not launch with understated classification
+
+#### Scenario: Low-confidence unaccepted candidate exists
+- **WHEN** detection-only scan reports an uncovered low-confidence candidate
+- **THEN** verifier emits a non-blocking diagnostic and recommended explicit
+  review action
+- **AND** current risk values are derived only from tracked classification

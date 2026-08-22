@@ -62,6 +62,9 @@
         "scope_ok": {"type": "boolean"}
       }
     },
+    "execution_target": {
+      "$ref": "#/$defs/executionTargetState"
+    },
     "risk": {
       "type": "object",
       "required": [
@@ -273,6 +276,45 @@
               "duration_ms": {"type": "number", "minimum": 0}
             }
           }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "executionTargetIdentity": {
+      "type": "object",
+      "required": ["schema", "id", "fingerprint", "target_substitution_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {"const": "changerail.execution-target.v1"},
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "target_substitution_policy": {"const": "forbid"}
+      }
+    },
+    "executionTargetState": {
+      "type": "object",
+      "required": ["present", "path", "evidence_identity_count"],
+      "additionalProperties": false,
+      "properties": {
+        "present": {"type": "boolean"},
+        "path": {"type": "string", "minLength": 1},
+        "identity": {"$ref": "#/$defs/executionTargetIdentity"},
+        "manifest_identity": {"$ref": "#/$defs/executionTargetIdentity"},
+        "evidence_identity_count": {"type": "integer", "minimum": 0},
+        "errors": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
         }
       }
     }

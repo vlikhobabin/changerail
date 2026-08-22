@@ -12,6 +12,9 @@ publish flow.
 
 Arguments: $ARGUMENTS
 
+If a runner provided `CHANGERAIL_PROGRESS_EVENT_PATH`, follow the canonical
+skill's value-free `progress-event publish <stage>` transition contract.
+
 Reminders from the skill contract:
 
 - Fail closed unless a fresh valid `go` review verdict is present.

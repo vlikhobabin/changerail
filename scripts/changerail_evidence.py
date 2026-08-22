@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from changerail_contract_schema import validate_with_schema
+from changerail_execution_target import describe_execution_target, execution_targets_match, load_execution_target
 
 SCHEMA_ID = "changerail.evidence-index.v1"
 SCHEMA_FILE = "changerail-evidence-index.schema.json"
@@ -195,13 +196,34 @@ def base_index(workspace: Path, args: argparse.Namespace) -> dict[str, Any]:
     repository = git_repository_identity(workspace)
     if repository:
         workspace_data["repository"] = repository
-    return {
+    index = {
         "schema": SCHEMA_ID,
         "updated_at": utc_now(),
         "workspace": workspace_data,
         "scope": scope,
         "entries": [],
     }
+    apply_execution_target(index, workspace)
+    return index
+
+
+def apply_execution_target(index: dict[str, Any], workspace: Path) -> None:
+    state = load_execution_target(workspace, require_tracked=True)
+    errors = state.get("errors")
+    if errors:
+        raise EvidenceError("execution target declaration invalid: " + "; ".join(errors), 1)
+    current = state.get("identity")
+    retained = index.get("execution_target")
+    if isinstance(current, dict):
+        if isinstance(retained, dict) and not execution_targets_match(retained, current):
+            raise EvidenceError(
+                "evidence index target identity differs from current declaration: "
+                f"index {describe_execution_target(retained)} current {describe_execution_target(current)}",
+                1,
+            )
+        index["execution_target"] = current
+    elif isinstance(retained, dict):
+        raise EvidenceError("evidence index retains execution_target but current declaration is absent", 1)
 
 
 def load_or_create_index(path: Path, workspace: Path, args: argparse.Namespace) -> dict[str, Any]:
@@ -210,6 +232,7 @@ def load_or_create_index(path: Path, workspace: Path, args: argparse.Namespace) 
     data = load_json(path)
     if not isinstance(data, dict):
         raise EvidenceError("evidence index must be an object", 1)
+    apply_execution_target(data, workspace)
     return data
 
 
@@ -217,6 +240,9 @@ def upsert_entry(index: dict[str, Any], entry: dict[str, Any]) -> None:
     entries = index.setdefault("entries", [])
     if not isinstance(entries, list):
         raise EvidenceError("evidence index entries must be an array", 1)
+    target = index.get("execution_target")
+    if isinstance(target, dict):
+        entry.setdefault("execution_target", target)
     entries[:] = [existing for existing in entries if not isinstance(existing, dict) or existing.get("id") != entry["id"]]
     entries.append(entry)
     index["updated_at"] = utc_now()
@@ -303,10 +329,17 @@ def validate_evidence_index(data: Any, workspace: Path) -> list[str]:
     errors = validate_with_schema(data, SCHEMA_FILE)
     if errors or not isinstance(data, dict):
         return errors
+    index_target = data.get("execution_target")
     for index, entry in enumerate(data.get("entries", [])):
         if not isinstance(entry, dict):
             continue
         label = f"entries[{index}]"
+        entry_target = entry.get("execution_target")
+        if isinstance(index_target, dict):
+            if not isinstance(entry_target, dict):
+                errors.append(f"{label}.execution_target must be present when index has execution_target")
+            elif not execution_targets_match(index_target, entry_target):
+                errors.append(f"{label}.execution_target must match index execution_target")
         role = entry.get("role")
         if role == "raw_output":
             for field in ("command", "status", "started_at", "ended_at", "raw_output_path", "summary"):
@@ -331,6 +364,7 @@ def cmd_capture(args: argparse.Namespace) -> int:
     argv = normalize_argv(args.argv)
     check_argv_safe(argv)
     index_path = default_index_path(workspace, args)
+    index = load_or_create_index(index_path, workspace, args)
     output_dir = index_path.parent / "outputs"
     output_path = output_dir / f"{args.id}.txt"
     started_at = utc_now()
@@ -361,7 +395,6 @@ def cmd_capture(args: argparse.Namespace) -> int:
     duration_seconds = round(max(0.0, time.monotonic() - started), 3)
     redacted_output, redacted = redact_text(output)
     atomic_write_text(output_path, redacted_output)
-    index = load_or_create_index(index_path, workspace, args)
     entry = command_entry(
         args,
         workspace,

@@ -58,16 +58,29 @@ FORBIDDEN_TRACKED_EXACT = {
 }
 SCHEMAS = (
     "changerail-consumer-lock.schema.json",
+    "changerail-execution-target.schema.json",
     "changerail-review-verdict.schema.json",
     "changerail-review-preflight-result.schema.json",
     "changerail-review-cycle-history.schema.json",
     "changerail-delivery-manifest.schema.json",
     "changerail-delivery-run.schema.json",
     "changerail-evidence-index.schema.json",
+    "changerail-source-classification.schema.json",
+    "changerail-source-classification-profile.schema.json",
+    "changerail-source-classification-check.schema.json",
+    "changerail-verification-coverage.schema.json",
+    "changerail-verification-coverage-plan.schema.json",
+    "changerail-verification-coverage-ledger.schema.json",
 )
 MAINTENANCE_HELPERS = (
     "changerail-maintenance",
     "changerail-maintenance-runner",
+)
+CORE_HELPERS = (
+    "changerail-delivery-manifest",
+    "changerail-review-verdict",
+    "changerail-evidence",
+    "changerail-source-classification",
 )
 MAINTENANCE_SCHEMAS = (
     "changerail-repository-knowledge.schema.json",
@@ -199,6 +212,7 @@ class VerificationPolicy:
     surfaces: dict[str, str]
     targeted_openspec_validation: str
     baseline_debt: tuple[BaselineDebt, ...]
+    coverage_map: str | None = None
 
 
 @dataclass(frozen=True)
@@ -247,6 +261,28 @@ def as_diagnostic(check: Check, message: str | None = None) -> Check:
 
 def policy_error(message: str) -> Check:
     return Check("verification policy", False, message)
+
+
+def check_execution_target_declaration(project: Path, changerail_root: Path) -> Check:
+    scripts = changerail_root / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_execution_target import describe_execution_target, load_execution_target
+    except Exception as exc:
+        return Check(
+            ".changerail/execution-target.json",
+            False,
+            f"execution target helper unavailable: {type(exc).__name__}: {exc}",
+        )
+    state = load_execution_target(project, require_tracked=True)
+    errors = state.get("errors")
+    if errors:
+        return Check(".changerail/execution-target.json", False, "; ".join(str(error) for error in errors))
+    identity = state.get("identity")
+    if isinstance(identity, dict):
+        return Check(".changerail/execution-target.json", True, "declares " + describe_execution_target(identity))
+    return Check(".changerail/execution-target.json", True, "optional declaration absent")
 
 
 def optional_missing(name: str, surface: str) -> Check:
@@ -1342,6 +1378,7 @@ def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Ch
         surfaces=dict(DEFAULT_SURFACE_POLICY),
         targeted_openspec_validation="required",
         baseline_debt=(),
+        coverage_map=None,
     )
     path = project / "openspec" / "config.yaml"
     try:
@@ -1377,6 +1414,15 @@ def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Ch
         errors.append(policy_error("targeted_openspec_validation must remain required"))
         targeted = "required"
 
+    coverage_map = next(
+        (
+            None if (value := yaml_scalar(line.split(":", 1)[1])).lower() in {"", "null", "none", "~"} else value
+            for indent, line in section
+            if indent == 2 and line.startswith("coverage_map:")
+        ),
+        default.coverage_map,
+    )
+
     baseline_debt: list[BaselineDebt] = []
     for index, entry in enumerate(parse_baseline_debt(section), start=1):
         command = entry.get("command", "")
@@ -1399,8 +1445,29 @@ def load_verification_policy(project: Path) -> tuple[VerificationPolicy, list[Ch
         surfaces=surfaces,
         targeted_openspec_validation=targeted,
         baseline_debt=tuple(baseline_debt),
+        coverage_map=coverage_map,
     )
     return policy, errors
+
+
+def check_verification_coverage_map(project: Path, changerail_root: Path, policy: VerificationPolicy) -> Check:
+    name = "verification coverage map"
+    if not policy.coverage_map:
+        return Check(name, True, "not configured; existing verification floor applies", severity="info", status="skip")
+    scripts = changerail_root / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_verification_coverage import load_coverage_map
+    except Exception as exc:
+        return Check(name, False, f"validator unavailable: {type(exc).__name__}: {exc}")
+    result = load_coverage_map(project, rel_path=policy.coverage_map, require_tracked=True)
+    if not result.get("present"):
+        return Check(name, False, f"configured map is missing: {policy.coverage_map}")
+    errors = result.get("errors", [])
+    if errors:
+        return Check(name, False, "; ".join(str(error) for error in errors))
+    return Check(name, True, f"{result['path']} valid with fingerprint {result['fingerprint']}")
 
 
 def load_bootstrap_profile(
@@ -1780,27 +1847,8 @@ def check_targeted_openspec_validate(project: Path) -> Check:
 
 def check_schemas_and_helper(project: Path, changerail_root: Path, aggregator_root: Path | None) -> list[Check]:
     checks = [
-        check_symlink(
-            project,
-            "bin/changerail-delivery-manifest",
-            changerail_root / "bin" / "changerail-delivery-manifest",
-            changerail_root,
-            aggregator_root,
-        ),
-        check_symlink(
-            project,
-            "bin/changerail-review-verdict",
-            changerail_root / "bin" / "changerail-review-verdict",
-            changerail_root,
-            aggregator_root,
-        ),
-        check_symlink(
-            project,
-            "bin/changerail-evidence",
-            changerail_root / "bin" / "changerail-evidence",
-            changerail_root,
-            aggregator_root,
-        ),
+        check_symlink(project, f"bin/{helper}", changerail_root / "bin" / helper, changerail_root, aggregator_root)
+        for helper in CORE_HELPERS
     ]
     for schema in SCHEMAS:
         path = changerail_root / "schemas" / schema
@@ -1817,33 +1865,49 @@ def check_schemas_and_helper_with_wiring(
     checks = [
         check_wiring_path(
             project,
-            "bin/changerail-delivery-manifest",
-            changerail_root / "bin" / "changerail-delivery-manifest",
+            f"bin/{helper}",
+            changerail_root / "bin" / helper,
             changerail_root,
             aggregator_root,
             manifest,
-        ),
-        check_wiring_path(
-            project,
-            "bin/changerail-review-verdict",
-            changerail_root / "bin" / "changerail-review-verdict",
-            changerail_root,
-            aggregator_root,
-            manifest,
-        ),
-        check_wiring_path(
-            project,
-            "bin/changerail-evidence",
-            changerail_root / "bin" / "changerail-evidence",
-            changerail_root,
-            aggregator_root,
-            manifest,
-        ),
+        )
+        for helper in CORE_HELPERS
     ]
     for schema in SCHEMAS:
         path = changerail_root / "schemas" / schema
         checks.append(Check(f"schemas/{schema}", path.is_file(), "reachable from ChangeRail root" if path.is_file() else "missing"))
     return checks
+
+
+def check_source_classification_policy(project: Path, changerail_root: Path) -> Check:
+    helper = changerail_root / "bin" / "changerail-source-classification"
+    if not helper.is_file():
+        return Check("source classification profile check", False, "helper missing")
+    result = subprocess.run(
+        [str(helper), "--workspace", str(project), "--json", "check"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    raw = result.stdout.strip() or result.stderr.strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        detail = raw or "helper produced no JSON"
+        return Check("source classification profile check", False, detail)
+    if result.returncode == 2:
+        message = payload.get("error", {}).get("message", "helper input error")
+        return Check("source classification profile check", False, str(message))
+    summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+    blocking = int(summary.get("blocking", 0))
+    advisory = int(summary.get("advisory", 0))
+    ok = result.returncode == 0 and blocking == 0
+    return Check(
+        "source classification profile check",
+        ok,
+        f"blocking={blocking} advisory={advisory}",
+    )
 
 
 def check_yaml_schema_key(project: Path, rel_path: str, schema: str) -> Check:
@@ -2161,6 +2225,7 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
 
     checks: list[Check] = [
         Check("project root", project.is_dir(), str(project)),
+        check_execution_target_declaration(project, changerail_root),
         check_wiring_path(
             project,
             "bin/openspec",
@@ -2288,6 +2353,8 @@ def build_checks(project: Path, changerail_root: Path, aggregator_root: Path | N
     checks.extend(
         [
             check_openspec_config(project),
+            check_source_classification_policy(project, changerail_root),
+            check_verification_coverage_map(project, changerail_root, policy),
             targeted_openspec_validate,
             openspec_validate,
             check_gitignore(project),

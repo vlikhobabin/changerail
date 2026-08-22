@@ -81,6 +81,13 @@ and wires:
 - `bin/changerail-maintenance`
 - `bin/changerail-maintenance-runner`
 
+The template also contains `.changerail/execution-target.json.example` as a
+public-safe optional declaration example. A maintainer may copy it to
+`.changerail/execution-target.json`, replace `id` and `fingerprint` with
+project-owned non-sensitive values, and track it in git when acceptance must be
+bound to one declared execution target. The example contains no endpoint,
+credential, provider id or generated target value.
+
 Native Windows generated-copy wiring records those maintenance helpers and their
 `.cmd` wrappers in `openspec/changerail-wiring.json` only when maintenance is
 opted in.

@@ -21,9 +21,8 @@ traces, dumps, local databases or agent session state to tracked files.
 
 {{CODEX_AUTHORITY_GUIDANCE}}
 
-Project source, board, rules, runtime policy and domain verification belong in
-this repository. Reusable ChangeRail methodology and tooling belong in the
-linked ChangeRail source of truth.
+Project source, board, rules, runtime policy and domain checks belong here.
+Reusable ChangeRail methodology and tooling belong in the linked source of truth.
 
 Board workflow guidance lives in ChangeRail
 `docs/board-and-two-agent-feature-flow.md`; the reusable contract follows.
@@ -66,14 +65,11 @@ runtime evidence with project-local `CODEX_HOME`. Raw probe output remains
 ignored under `.runtime/changerail/diagnostics/`; share only its redacted
 allowlisted summary and never credential values or local paths.
 
-Generated verification policy lives in `openspec/config.yaml`. The selected
-`{{SURFACES_PROFILE}}` profile treats Codex as `{{CODEX_SURFACE_STATE}}`, Claude
-as `{{CLAUDE_SURFACE_STATE}}`, legacy MCP as `{{LEGACY_MCP_SURFACE_STATE}}`, and
-stale legacy artifacts as `{{LEGACY_ARTIFACTS_SURFACE_STATE}}`. Project owners
-may edit tracked policy to mark a surface `optional` only when that surface is
-intentionally unused; optional missing surfaces can produce
-`pass-with-diagnostics`, but targeted card-owned OpenSpec validation remains
-mandatory and cannot be downgraded.
+Generated verification policy lives in `openspec/config.yaml`; it records
+`required`, `optional` or `forbidden` states for Codex, Claude, legacy MCP and
+legacy artifacts. Owners may mark intentionally unused surfaces optional;
+missing optional surfaces can produce `pass-with-diagnostics`, but targeted card-owned
+OpenSpec validation remains mandatory.
 
 <!-- CHANGERAIL_SHARED_AGENTS_BEGIN source="{{CHANGERAIL_SHARED_SOURCE}}" -->
 {{CHANGERAIL_SHARED_AGENTS}}

@@ -24,6 +24,13 @@ worker may be the same active session as the orchestrator for small or
 single-card work, but it must never act as the independent reviewer for the
 payload it planned or implemented.
 
+When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free delivery progress
+with `bin/changerail-delivery-runner progress-event do implementation` before
+implementation work, `do verification` before verification and `do complete`
+after archive/card handoff. Progress events must contain only bounded
+phase/stage identity through the helper; never include prose, commands, paths,
+environment values or output excerpts.
+
 ## Project Context
 
 Resolve the repository root from the current working directory or
@@ -51,6 +58,8 @@ Use the card filename without `.md` as `<card-id>`. Record repository-relative
 paths only:
 
 - card metadata and ordered planned change slugs;
+- optional `execution_target` projection from the project-owned
+  `.changerail/execution-target.json` declaration when present;
 - `preexisting_dirty` from `git status --short` at delivery start;
 - card-owned committable paths introduced by planning, implementation, synced
   specs, archives, docs, tests and board updates;
@@ -168,6 +177,12 @@ Every verification claim recorded in the card, tasks or manifest must name the
 executed command and observed outcome. Keep raw logs in ignored runtime state
 when needed; do not commit local runtime evidence.
 
+When the project declares `.changerail/execution-target.json`, verification
+evidence must retain the same target `id`/`fingerprint`. Do not create, clone,
+restore, register or select a substitute provider/platform/service/database as
+a way around unavailable access; record a structured blocker instead. External
+blocker, recovery and evidence paths do not authorize rebind or substitution.
+
 When a delivery manifest exists, verification must include a working-tree
 manifest scope reconciliation if the helper supports it:
 
@@ -176,6 +191,17 @@ bin/changerail-delivery-manifest scope-check \
   ".runtime/changerail/delivery-manifests/<card-id>.json" \
   --target working-tree --json
 ```
+
+When `openspec/config.yaml` declares `verification.coverage_map`, refresh the
+ignored runtime coverage ledger after verification and before review handoff.
+Reconcile actual manifest paths/operations and schema-valid namespaced extension
+surfaces against the tracked `verification-coverage.json` plan for each change.
+Block and return to planning if an actual applicable coverage id is absent from
+the plan. Keep planned-but-not-actual ids only with explicit not-applicable
+scope evidence. Link required observed evidence through existing
+`changerail.evidence-index.v1` refs and add only bounded counts plus ledger
+path/fingerprint to the delivery manifest; do not embed raw outputs or create an
+alternate acceptance verdict.
 
 Before handing off to any reviewer, the delivery/orchestrator context runs:
 

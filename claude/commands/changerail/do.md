@@ -20,3 +20,5 @@ Reminders from the skill contract:
 - Verify with project-required commands before sync/archive.
 - Do not commit, push or self-review.
 - Hand off to `/changerail:review <card-path>` when delivery is complete.
+- If a runner provided `CHANGERAIL_PROGRESS_EVENT_PATH`, follow the canonical
+  skill's value-free `progress-event do <stage>` transition contract.

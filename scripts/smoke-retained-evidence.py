@@ -13,6 +13,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "bin" / "changerail-evidence"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -54,6 +60,12 @@ def capture(workspace: Path, evidence_id: str, *argv: str, timeout: str = "5") -
             *argv,
         ]
     )
+
+
+def git(workspace: Path, *args: str) -> None:
+    result = subprocess.run(["git", "-C", str(workspace), *args], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed: {result.stderr or result.stdout}")
 
 
 def main() -> int:
@@ -132,6 +144,20 @@ def main() -> int:
         require_returncode(outside_index, 2, "outside-runtime index block")
         if (workspace / "tracked-evidence" / "index.json").exists():
             raise AssertionError("outside-runtime index path was written")
+
+        target_workspace = workspace / "target-evidence"
+        target_workspace.mkdir()
+        git(target_workspace, "init", "-q")
+        target_path = target_workspace / ".changerail" / "execution-target.json"
+        target_path.parent.mkdir()
+        target_path.write_text(json.dumps(TARGET, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        git(target_workspace, "add", ".changerail/execution-target.json")
+        target_capture = capture(target_workspace, "target-success", sys.executable, "-c", "print('target success')")
+        require_returncode(target_capture, 0, "target-bound capture")
+        target_payload = require_json(target_capture, "target-bound capture")
+        target_index = json.loads((target_workspace / target_payload["index_path"]).read_text(encoding="utf-8"))
+        if target_index.get("execution_target") != TARGET or target_index["entries"][0].get("execution_target") != TARGET:
+            raise AssertionError(f"target-bound evidence did not retain identity: {target_index!r}")
 
         note_workspace = workspace / "note-first"
         note_workspace.mkdir()

@@ -79,6 +79,17 @@ If no path is provided and it cannot be inferred, ask for it.
   with safety stop `awaiting external review`.
 - Preserve phase safety stops, manifest handling, evidence expectations and
   scoped publish rules.
+- When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free lifecycle
+  progress with `bin/changerail-delivery-runner progress-event <phase> <stage>`
+  at major transitions. Use only bounded phases/stages and never include prose,
+  commands, paths, environment values or output excerpts. Recommended
+  transitions are `preflight starting`, `ff planning`, `do implementation`,
+  `do verification`, `review waiting`, `publish finalizing`; terminal status is
+  runner-owned.
+- When a project declares `.changerail/execution-target.json`, preserve that
+  exact target identity through planning, delivery, blocker/resume, review and
+  publish. Do not create, clone, restore, register or select a substitute target
+  as recovery from unavailable provider/platform/service/credential access.
 - Start discovery with bounded, low-output evidence before reading broad
   repository content. Prefer scoped paths from the card or OpenSpec artifacts,
   `rg -l`, counts, top-level file lists or explicitly bounded excerpts. Narrow
@@ -310,6 +321,10 @@ Run the fresh-context review gate for:
 Boundaries:
 - You did not plan or implement this payload.
 - Do not stage, commit, push or modify tracked reviewed payload files.
+- When `CHANGERAIL_ACTIVE_RUN_DIR` is set, treat it as parent-owned active
+  runtime evidence: do not read, search, tail, cite or summarize any file
+  under that directory, including `status.json`, `stdout.jsonl` and
+  `stderr.log`; use card-owned evidence outside it instead.
 - Read AGENTS.md, AGENTS.shared.md, skills/changerail-review/SKILL.md and
   skills/changerail-review/references/changerail-review-verdict.md before
   writing a verdict.

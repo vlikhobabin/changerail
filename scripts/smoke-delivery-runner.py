@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,18 @@ CARD = "openspec/board/3.inprogress/harden-delivery-operations.md"
 ONE_COMMAND_CARD = "openspec/board/2.todo/one-command-delivery-smoke.md"
 ONE_COMMAND_DONE_CARD = "openspec/board/4.done/one-command-delivery-smoke.md"
 ONE_COMMAND_CHANGE = "one-command-delivery-smoke"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
+ALT_TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-rebound",
+    "fingerprint": "sha256:" + ("2" * 64),
+    "target_substitution_policy": "forbid",
+}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -127,6 +140,17 @@ def head_commit(workspace: Path) -> str:
     return git(["rev-parse", "HEAD"], workspace)
 
 
+def commit_execution_target(workspace: Path, identity: dict[str, str] = TARGET) -> None:
+    path = workspace / ".changerail" / "execution-target.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(identity, ensure_ascii=True, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    git(["add", ".changerail/execution-target.json"], workspace)
+    git(
+        ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "target"],
+        workspace,
+    )
+
+
 def write_fake_launcher(path: Path) -> None:
     path.write_text(
         "\n".join(
@@ -138,8 +162,34 @@ def write_fake_launcher(path: Path) -> None:
                 "    with open(call_log, 'a', encoding='utf-8') as handle:",
                 "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
                 "stdin = sys.stdin.read()",
-                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR'), 'CHANGERAIL_DISCOVERY_POLICY': os.environ.get('CHANGERAIL_DISCOVERY_POLICY'), 'CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES': os.environ.get('CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES')}))",
+                "print(json.dumps({'argv': sys.argv, 'stdin_len': len(stdin), 'cwd': os.getcwd(), 'CODEX_WORKDIR': os.environ.get('CODEX_WORKDIR'), 'CODEX_HOME': os.environ.get('CODEX_HOME'), 'CHANGERAIL_ACTIVE_RUN_ID': os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'CHANGERAIL_ACTIVE_CARD_ID': os.environ.get('CHANGERAIL_ACTIVE_CARD_ID'), 'CHANGERAIL_ACTIVE_RUN_DIR': os.environ.get('CHANGERAIL_ACTIVE_RUN_DIR'), 'CHANGERAIL_PROGRESS_EVENT_PATH': os.environ.get('CHANGERAIL_PROGRESS_EVENT_PATH'), 'CHANGERAIL_DISCOVERY_POLICY': os.environ.get('CHANGERAIL_DISCOVERY_POLICY'), 'CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES': os.environ.get('CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES'), 'CHANGERAIL_RECOVERY_CONTEXT': os.environ.get('CHANGERAIL_RECOVERY_CONTEXT')}), flush=True)",
                 "mode = os.environ.get('CHANGERAIL_FAKE_MODE')",
+                "progress_path = os.environ.get('CHANGERAIL_PROGRESS_EVENT_PATH')",
+                "def emit_progress(sequence, phase, stage, run_id=None, card_id=None, extra=None):",
+                "    if not progress_path:",
+                "        return",
+                "    payload = {'schema': 'changerail.delivery-progress-event.v1', 'run_id': run_id or os.environ.get('CHANGERAIL_ACTIVE_RUN_ID'), 'card_id': card_id or os.environ.get('CHANGERAIL_ACTIVE_CARD_ID'), 'sequence': sequence, 'phase': phase, 'stage': stage, 'emitted_at': '2026-07-15T00:00:00Z'}",
+                "    if extra:",
+                "        payload.update(extra)",
+                "    os.makedirs(os.path.dirname(progress_path), exist_ok=True)",
+                "    with open(progress_path, 'a', encoding='utf-8') as handle:",
+                "        handle.write(json.dumps(payload, sort_keys=True) + '\\n')",
+                "if mode == 'progress':",
+                "    emit_progress(1, 'ff', 'planning')",
+                "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-progress', 'type': 'command_execution', 'command': '/bin/echo progress', 'status': 'in_progress'}}), flush=True)",
+                "    emit_progress(99, 'review', 'waiting', run_id='wrong-run', extra={'raw_log_excerpt': 'SYNTHETIC_PRIVATE_VALUE_SHOULD_NOT_APPEAR'})",
+                "    emit_progress(2, 'do', 'verification')",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-progress', 'type': 'command_execution', 'command': '/bin/echo progress', 'status': 'completed', 'exit_code': 0, 'stdout_bytes': 1, 'stderr_bytes': 0}}), flush=True)",
+                "if mode == 'progress-stall':",
+                "    emit_progress(1, 'do', 'implementation')",
+                "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-progress-stall', 'type': 'agent_message', 'text': 'stalling'}}), flush=True)",
+                "    release = os.environ.get('CHANGERAIL_FAKE_STALL_RELEASE')",
+                "    deadline = time.monotonic() + float(os.environ.get('CHANGERAIL_FAKE_STALL_SECONDS', '2.0'))",
+                "    if release:",
+                "        while not os.path.exists(release) and time.monotonic() < deadline:",
+                "            time.sleep(0.02)",
+                "    else:",
+                "        time.sleep(float(os.environ.get('CHANGERAIL_FAKE_STALL_SECONDS', '0.35')))",
                 "if mode == 'persist-project-trust':",
                 "    codex_home = os.environ['CODEX_HOME']",
                 "    with open(os.path.join(codex_home, 'config.toml'), 'a', encoding='utf-8') as handle:",
@@ -159,10 +209,22 @@ def write_fake_launcher(path: Path) -> None:
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-fix-budget', 'type': 'agent_message', 'text': 'Verification remains red.\\nterminal_outcome: BLOCKED\\nterminal_reason: fix_budget_exhausted'}}))",
                 "if mode == 'external-blocker':",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-external', 'type': 'agent_message', 'text': 'Target unavailable.\\nterminal_outcome: BLOCKED\\nterminal_reason: external_blocker'}}))",
+                "if mode == 'structured-external-blocker':",
+                "    blocker = {'schema': 'changerail.external-blocker.v1', 'blocker_id': 'external-gate-ready', 'class': 'external_service', 'observed_at': '2026-07-15T00:00:00Z', 'retryable': True, 'evidence_policy': {'required_ids': ['external-gate-ready'], 'max_age_seconds': 315360000}}",
+                "    print(json.dumps({'type': 'delivery/blocked', 'terminal_outcome': 'BLOCKED', 'terminal_reason': 'recoverable_external_blocker', 'external_blocker': blocker}))",
+                "if mode == 'unknown-external-blocker':",
+                "    blocker = {'schema': 'changerail.external-blocker.v1', 'blocker_id': 'external-gate-ready', 'class': 'unknown_service', 'observed_at': '2026-07-15T00:00:00Z', 'retryable': True, 'evidence_policy': {'required_ids': ['external-gate-ready'], 'max_age_seconds': 315360000}}",
+                "    print(json.dumps({'type': 'delivery/blocked', 'terminal_outcome': 'BLOCKED', 'terminal_reason': 'recoverable_external_blocker', 'external_blocker': blocker}))",
                 "if mode == 'malformed-terminal-reason':",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-malformed', 'type': 'agent_message', 'text': 'Target unavailable.\\nterminal_outcome: BLOCKED\\nterminal_reason: delivery/blocked'}}))",
                 "if mode == 'marker-like-prose':",
                 "    print(json.dumps({'type': 'assistant-message', 'content': 'terminal_outcome: DELIVERED and terminal_reason: ignored are prose'}))",
+                "if mode == 'target-drift':",
+                "    os.makedirs('.changerail', exist_ok=True)",
+                "    drift = {'schema': 'changerail.execution-target.v1', 'id': 'database-rebound', 'fingerprint': 'sha256:' + ('2' * 64), 'target_substitution_policy': 'forbid'}",
+                "    with open(os.path.join('.changerail', 'execution-target.json'), 'w', encoding='utf-8') as handle:",
+                "        json.dump(drift, handle, sort_keys=True)",
+                "        handle.write('\\n')",
                 "if mode == 'performance':",
                 "    print(json.dumps({'type': 'item.started', 'item': {'id': 'cmd-1', 'type': 'command_execution', 'command': '/bin/echo one', 'status': 'in_progress'}}), flush=True)",
                 "    time.sleep(0.01)",
@@ -181,7 +243,7 @@ def write_fake_launcher(path: Path) -> None:
                 "    time.sleep(0.01)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'cmd-big', 'type': 'command_execution', 'command': command, 'status': 'completed', 'exit_code': 0, 'stdout': raw, 'stdout_bytes': len(raw.encode('utf-8')), 'stderr_bytes': 0, 'stdout_truncated': True}}), flush=True)",
                 "    print(json.dumps({'type': 'item.completed', 'item': {'id': 'msg-oversized', 'type': 'agent_message', 'text': 'done'}}), flush=True)",
-                "if mode not in {'unstructured-success', 'safety-stop-no-go', 'fix-budget-exhausted', 'external-blocker', 'malformed-terminal-reason', 'marker-like-prose', 'no-go', 'awaiting-review', 'ordered-conflict'}:",
+                "if mode not in {'unstructured-success', 'safety-stop-no-go', 'fix-budget-exhausted', 'external-blocker', 'structured-external-blocker', 'unknown-external-blocker', 'malformed-terminal-reason', 'marker-like-prose', 'no-go', 'awaiting-review', 'ordered-conflict'}:",
                 "    print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'cached_input_tokens': 1, 'uncached_input_tokens': 2, 'output_tokens': 5, 'reasoning_tokens': 1, 'total_tokens': 8}}))",
                 "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
@@ -710,7 +772,7 @@ def write_fake_queue_runner(path: Path) -> None:
         "\n".join(
             [
                 "#!/usr/bin/env python3",
-                "import argparse, json, os, subprocess, sys",
+                "import argparse, json, os, subprocess, sys, time",
                 "from pathlib import Path",
                 "parser = argparse.ArgumentParser()",
                 "sub = parser.add_subparsers(dest='command', required=True)",
@@ -733,6 +795,7 @@ def write_fake_queue_runner(path: Path) -> None:
                 "resume = sub.add_parser('resume')",
                 "resume.add_argument('card')",
                 "resume.add_argument('--status-path', required=True)",
+                "resume.add_argument('--evidence-index')",
                 "resume.add_argument('--workspace', required=True)",
                 "resume.add_argument('--runtime-root', required=True)",
                 "resume.add_argument('--run-id', required=True)",
@@ -788,6 +851,25 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    dirty = Path(args.workspace) / 'DIRTY.txt'",
                 "    if dirty.exists():",
                 "        dirty.unlink()",
+                "if mode == 'progress-stall' and 'service-a-card' in args.card:",
+                "    running_status = {",
+                "        'schema': 'changerail.delivery-run.v1',",
+                "        'run_id': args.run_id,",
+                "        'updated_at': '2026-07-15T00:00:00Z',",
+                "        'workspace': {'root': args.workspace},",
+                "        'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
+                "        'phase': 'delivery',",
+                "        'result': 'RUNNING',",
+                "        'timestamps': {'started_at': '2026-07-15T00:00:00Z'},",
+                "        'command': {'argv': sys.argv, 'launcher': sys.argv[0], 'stdin': 'closed', 'json': True},",
+                "        'usage': {'available': False, 'reason': 'fake queue runner'},",
+                "        'progress': {'schema': 'changerail.delivery-progress.v1', 'phase': 'do', 'stage': 'implementation', 'heartbeat_at': '2026-07-15T00:00:00Z', 'event_counter': 1},",
+                "        'progress_health': {'state': 'active', 'heartbeat_age_seconds': 0.0, 'process_alive': True},",
+                "    }",
+                "    path = Path(args.runtime_root) / args.run_id / 'status.json'",
+                "    path.parent.mkdir(parents=True, exist_ok=True)",
+                "    path.write_text(json.dumps(running_status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
+                "    time.sleep(0.05)",
                 "result = 'DELIVERED'",
                 "terminal_reason = None",
                 "if mode == 'no-go' and 'service-a-card' in args.card:",
@@ -803,6 +885,9 @@ def write_fake_queue_runner(path: Path) -> None:
                 "if mode == 'external-blocker' and 'service-a-card' in args.card:",
                 "    result = 'BLOCKED'",
                 "    terminal_reason = 'external_blocker'",
+                "if mode == 'structured-external-blocker' and 'service-a-card' in args.card and args.command == 'run':",
+                "    result = 'BLOCKED'",
+                "    terminal_reason = 'recoverable_external_blocker'",
                 "if mode == 'already-published-blocker' and '/4.done/' in args.card:",
                 "    result = 'BLOCKED'",
                 "    terminal_reason = 'already_published_card_requested_for_delivery'",
@@ -843,7 +928,28 @@ def write_fake_queue_runner(path: Path) -> None:
                 "}",
                 "if terminal_reason:",
                 "    status['terminal_reason'] = terminal_reason",
+                "if mode == 'progress-stall' and 'service-a-card' in args.card:",
+                "    status['progress'] = {'schema': 'changerail.delivery-progress.v1', 'phase': 'publish', 'stage': 'complete', 'heartbeat_at': '2026-07-15T00:00:01Z', 'event_counter': 2}",
+                "    status['progress_health'] = {'state': 'terminated', 'heartbeat_age_seconds': 0.0, 'process_alive': False}",
+                "if mode == 'progress-mismatch' and 'service-a-card' in args.card:",
+                "    status['run_id'] = 'wrong-run'",
+                "    status['progress'] = {'schema': 'changerail.delivery-progress.v1', 'phase': 'review', 'stage': 'waiting', 'heartbeat_at': '2026-07-15T00:00:01Z', 'event_counter': 2}",
+                "    status['progress_health'] = {'state': 'terminated', 'heartbeat_age_seconds': 0.0, 'process_alive': False}",
                 "if terminal_reason == 'investigation_required':",
+                "    status['retained_payload'] = {",
+                "        'schema': 'changerail.retained-payload-identity.v1',",
+                "        'source_run_id': args.run_id,",
+                "        'source_status_path': str(Path('.runtime/changerail/delivery-runs') / args.run_id / 'status.json'),",
+                "        'captured_at': '2026-07-15T00:00:00Z',",
+                "        'card': {'id': Path(args.card).name.removesuffix('.md'), 'path': args.card},",
+                "        'workspace': {'root': args.workspace},",
+                "        'head_commit': '1' * 40,",
+                "        'tree_sha': '2' * 40,",
+                "        'diff_fingerprint': 'sha256:' + '3' * 64,",
+                "        'review_target': {'kind': 'working-tree'},",
+                "    }",
+                "if terminal_reason == 'recoverable_external_blocker':",
+                "    status['external_blocker'] = {'schema': 'changerail.external-blocker.v1', 'blocker_id': 'external-gate-ready', 'class': 'external_service', 'observed_at': '2026-07-15T00:00:00Z', 'retryable': True, 'evidence_policy': {'required_ids': ['external-gate-ready'], 'max_age_seconds': 315360000}}",
                 "    status['retained_payload'] = {",
                 "        'schema': 'changerail.retained-payload-identity.v1',",
                 "        'source_run_id': args.run_id,",
@@ -1057,6 +1163,91 @@ def single_card_evidence_payload(workspace: Path, card: str = CARD) -> dict[str,
         },
         "entries": [],
     }
+
+
+def external_blocker_fixture(
+    *,
+    required_ids: list[str] | None = None,
+    observed_at: str = "2026-07-15T00:00:00Z",
+) -> dict[str, Any]:
+    return {
+        "schema": "changerail.external-blocker.v1",
+        "blocker_id": "external-gate-ready",
+        "class": "external_service",
+        "observed_at": observed_at,
+        "retryable": True,
+        "evidence_policy": {
+            "required_ids": required_ids or ["external-gate-ready"],
+            "max_age_seconds": 315360000,
+        },
+    }
+
+
+def external_evidence_payload(
+    workspace: Path,
+    *,
+    card: str = CARD,
+    run_id: str = "external-prior",
+    evidence_id: str = "external-gate-ready",
+    status: str = "passed",
+    ended_at: str = "2026-07-15T00:00:01Z",
+    redacted: bool = False,
+    execution_target: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "id": evidence_id,
+        "path": ".runtime/changerail/evidence/external-resume/outputs/external-gate-ready.txt",
+        "role": "raw_output",
+        "storage": "runtime",
+        "phase": "manual",
+        "classification": "mandatory",
+        "kind": "verification_command",
+        "reason": "external recovery smoke fixture",
+        "command": {
+            "argv": ["python3", "-c", "print('external gate ready')"],
+            "display": "python3 -c 'print external gate ready'",
+        },
+        "status": status,
+        "exit_code": 0 if status == "passed" else 1,
+        "started_at": "2026-07-15T00:00:00Z",
+        "ended_at": ended_at,
+        "duration_seconds": 0.1,
+        "summary": "external gate ready",
+        "raw_output_path": ".runtime/changerail/evidence/external-resume/outputs/external-gate-ready.txt",
+        "redacted": redacted,
+        "timed_out": False,
+    }
+    payload: dict[str, Any] = {
+        "schema": "changerail.evidence-index.v1",
+        "updated_at": ended_at,
+        "workspace": {
+            "root": str(workspace),
+            "repository": workspace.name,
+        },
+        "scope": {
+            "card_id": Path(card).name.removesuffix(".md"),
+            "card_path": card,
+            "run_id": run_id,
+        },
+        "entries": [entry],
+    }
+    if execution_target is not None:
+        payload["execution_target"] = execution_target
+        entry["execution_target"] = execution_target
+    return payload
+
+
+def write_external_evidence(
+    workspace: Path,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> Path:
+    path = workspace / ".runtime" / "changerail" / "evidence" / "external-resume" / "index.json"
+    output_path = workspace / ".runtime" / "changerail" / "evidence" / "external-resume" / "outputs" / "external-gate-ready.txt"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("external gate ready\n", encoding="utf-8")
+    write_json(path, payload or external_evidence_payload(workspace))
+    return path
 
 
 def file_digest(path: Path) -> str:
@@ -1775,6 +1966,9 @@ def create_retained_resume_workspace(
     successor_id: str = "retained-card",
     auth_dirty_before_fingerprint: bool = False,
     ceiling: int = 500,
+    execution_target: dict[str, str] | None = None,
+    terminal_reason: str = "investigation_required",
+    external_blocker: dict[str, Any] | None = None,
 ) -> tuple[Path, Path, Path]:
     workspace = create_workspace(tmp, name)
     (workspace / RETAINED_CARD).parent.mkdir(parents=True, exist_ok=True)
@@ -1793,6 +1987,8 @@ def create_retained_resume_workspace(
         ["-c", "user.name=ChangeRail Smoke", "-c", "user.email=changerail-smoke@example.invalid", "commit", "-m", "retained auth fixture"],
         workspace,
     )
+    if execution_target is not None:
+        commit_execution_target(workspace, execution_target)
     if auth_dirty_before_fingerprint:
         with (workspace / RETAINED_AUTHORIZATION).open("a", encoding="utf-8") as handle:
             handle.write("\n<!-- stale authorization smoke -->\n")
@@ -1814,7 +2010,7 @@ def create_retained_resume_workspace(
         "phase": "terminal",
         "result": "BLOCKED",
         "terminal_outcome": "BLOCKED",
-        "terminal_reason": "investigation_required",
+        "terminal_reason": terminal_reason,
         "timestamps": {"started_at": "2026-08-01T00:00:00Z", "ended_at": "2026-08-01T00:00:01Z"},
         "command": {"argv": ["fake"], "launcher": "fake", "stdin": "closed", "json": True},
         "usage": {"available": False, "reason": "smoke retained prior"},
@@ -1831,6 +2027,10 @@ def create_retained_resume_workspace(
             "review_target": {"kind": "working-tree"},
         },
     }
+    if external_blocker is not None:
+        prior["external_blocker"] = external_blocker
+    if execution_target is not None:
+        prior["retained_payload"]["execution_target"] = execution_target
     write_json(prior_path, prior)
     return workspace, runtime, prior_path
 
@@ -1843,23 +2043,27 @@ def run_retained_resume(
     *,
     run_id: str,
     card: str = RETAINED_CARD,
+    evidence_index: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    command = [
+        str(RUNNER),
+        "resume",
+        card,
+        "--status-path",
+        str(prior_path),
+        "--workspace",
+        str(workspace),
+        "--runtime-root",
+        str(runtime),
+        "--run-id",
+        run_id,
+        "--launcher",
+        str(launcher),
+    ]
+    if evidence_index is not None:
+        command.extend(["--evidence-index", str(evidence_index)])
     return run(
-        [
-            str(RUNNER),
-            "resume",
-            card,
-            "--status-path",
-            str(prior_path),
-            "--workspace",
-            str(workspace),
-            "--runtime-root",
-            str(runtime),
-            "--run-id",
-            run_id,
-            "--launcher",
-            str(launcher),
-        ],
+        command,
         env={**runner_env(), "CHANGERAIL_FAKE_MODE": "success"},
     )
 
@@ -1925,6 +2129,20 @@ def check_retained_payload_resume_fail_closed(tmp: Path) -> None:
     if load_status(drift_runtime, "retained-drift").get("terminal_reason") != "payload_drift":
         raise AssertionError("fingerprint drift did not use stable reason")
 
+    target_workspace, target_runtime, target_prior = create_retained_resume_workspace(
+        tmp,
+        "retained-target-mismatch",
+        execution_target=TARGET,
+    )
+    target_prior_payload = json.loads(target_prior.read_text(encoding="utf-8"))
+    target_prior_payload["retained_payload"]["execution_target"] = ALT_TARGET
+    write_json(target_prior, target_prior_payload)
+    target_result = run_retained_resume(target_workspace, target_runtime, target_prior, launcher, run_id="retained-target-mismatch")
+    if target_result.returncode == 0:
+        raise AssertionError("target-mismatch retained resume unexpectedly passed")
+    if load_status(target_runtime, "retained-target-mismatch").get("terminal_reason") != "target_identity_mismatch":
+        raise AssertionError("target mismatch did not use stable reason")
+
     stale_workspace, stale_runtime, stale_prior = create_retained_resume_workspace(
         tmp,
         "retained-stale-auth",
@@ -1957,6 +2175,190 @@ def check_retained_payload_resume_fail_closed(tmp: Path) -> None:
         raise AssertionError("over-ceiling retained resume unexpectedly passed")
     if load_status(ceiling_runtime, "retained-over-ceiling").get("terminal_reason") != "authorization_ceiling_violation":
         raise AssertionError("over-ceiling authorization did not use stable reason")
+
+
+def check_external_blocker_resume_evidence_success_and_fail_closed(tmp: Path) -> None:
+    launcher = tmp / "fake-external-retained-resume"
+    write_fake_launcher(launcher)
+
+    workspace, runtime, prior_path = create_retained_resume_workspace(
+        tmp,
+        "external-retained-resume-ok",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(),
+    )
+    evidence_path = write_external_evidence(
+        workspace,
+        payload=external_evidence_payload(workspace, card=RETAINED_CARD, run_id="retained-prior"),
+    )
+    result = run_retained_resume(
+        workspace,
+        runtime,
+        prior_path,
+        launcher,
+        run_id="external-retained-resume-ok",
+        evidence_index=evidence_path,
+    )
+    require_ok(result, "external retained single-card resume")
+    status = load_status(runtime, "external-retained-resume-ok")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["external blocker evidence"]["status"] != "pass":
+        raise AssertionError(f"external evidence check did not pass: {status}")
+    stdout = (runtime / "external-retained-resume-ok" / "stdout.jsonl").read_text(encoding="utf-8").splitlines()
+    first_event = json.loads(stdout[0])
+    context = json.loads(first_event.get("CHANGERAIL_RECOVERY_CONTEXT") or "{}")
+    if context.get("external_blocker", {}).get("class") != "external_service":
+        raise AssertionError(f"recovery context did not include blocker class: {context}")
+    if any(key in json.dumps(context) for key in ("credential", "password", "response_body", "raw_output")):
+        raise AssertionError(f"recovery context included content-bearing data: {context}")
+
+    missing_workspace, missing_runtime, missing_prior = create_retained_resume_workspace(
+        tmp,
+        "external-retained-missing-evidence",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(),
+    )
+    missing_result = run_retained_resume(missing_workspace, missing_runtime, missing_prior, launcher, run_id="external-missing-evidence")
+    if missing_result.returncode == 0:
+        raise AssertionError("external resume without evidence unexpectedly passed")
+    if load_status(missing_runtime, "external-missing-evidence").get("terminal_reason") != "missing_evidence":
+        raise AssertionError("missing evidence did not use stable reason")
+
+    stale_workspace, stale_runtime, stale_prior = create_retained_resume_workspace(
+        tmp,
+        "external-retained-stale-evidence",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(observed_at="2026-07-15T00:00:10Z"),
+    )
+    stale_evidence = write_external_evidence(
+        stale_workspace,
+        payload=external_evidence_payload(
+            stale_workspace,
+            card=RETAINED_CARD,
+            run_id="retained-prior",
+            ended_at="2026-07-15T00:00:01Z",
+        ),
+    )
+    stale_result = run_retained_resume(
+        stale_workspace,
+        stale_runtime,
+        stale_prior,
+        launcher,
+        run_id="external-stale-evidence",
+        evidence_index=stale_evidence,
+    )
+    if stale_result.returncode == 0:
+        raise AssertionError("stale external evidence unexpectedly passed")
+    if load_status(stale_runtime, "external-stale-evidence").get("terminal_reason") != "stale_evidence":
+        raise AssertionError("stale evidence did not use stable reason")
+
+    scope_workspace, scope_runtime, scope_prior = create_retained_resume_workspace(
+        tmp,
+        "external-retained-wrong-scope",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(),
+    )
+    wrong_scope = external_evidence_payload(scope_workspace, card=RETAINED_CARD, run_id="another-run")
+    scope_evidence = write_external_evidence(scope_workspace, payload=wrong_scope)
+    scope_result = run_retained_resume(
+        scope_workspace,
+        scope_runtime,
+        scope_prior,
+        launcher,
+        run_id="external-wrong-scope",
+        evidence_index=scope_evidence,
+    )
+    if scope_result.returncode == 0:
+        raise AssertionError("wrong-scope external evidence unexpectedly passed")
+    if load_status(scope_runtime, "external-wrong-scope").get("terminal_reason") != "evidence_scope_mismatch":
+        raise AssertionError("wrong-scope evidence did not use stable reason")
+
+    drift_workspace, drift_runtime, drift_prior = create_retained_resume_workspace(
+        tmp,
+        "external-retained-payload-drift",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(),
+    )
+    drift_evidence = write_external_evidence(
+        drift_workspace,
+        payload=external_evidence_payload(drift_workspace, card=RETAINED_CARD, run_id="retained-prior"),
+    )
+    with (drift_workspace / RETAINED_PAYLOAD).open("a", encoding="utf-8") as handle:
+        handle.write("echo drift\n")
+    drift_result = run_retained_resume(
+        drift_workspace,
+        drift_runtime,
+        drift_prior,
+        launcher,
+        run_id="external-payload-drift",
+        evidence_index=drift_evidence,
+    )
+    if drift_result.returncode == 0:
+        raise AssertionError("payload drift external resume unexpectedly passed")
+    if load_status(drift_runtime, "external-payload-drift").get("terminal_reason") != "payload_drift":
+        raise AssertionError("payload drift did not use stable reason")
+
+    target_workspace, target_runtime, target_prior = create_retained_resume_workspace(
+        tmp,
+        "external-retained-target-mismatch",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(),
+        execution_target=TARGET,
+    )
+    target_evidence = write_external_evidence(
+        target_workspace,
+        payload=external_evidence_payload(
+            target_workspace,
+            card=RETAINED_CARD,
+            run_id="retained-prior",
+            execution_target=ALT_TARGET,
+        ),
+    )
+    target_result = run_retained_resume(
+        target_workspace,
+        target_runtime,
+        target_prior,
+        launcher,
+        run_id="external-target-mismatch",
+        evidence_index=target_evidence,
+    )
+    if target_result.returncode == 0:
+        raise AssertionError("target mismatch external resume unexpectedly passed")
+    if load_status(target_runtime, "external-target-mismatch").get("terminal_reason") != "target_identity_mismatch":
+        raise AssertionError("target mismatch did not use stable reason")
+
+    extra_target_workspace, extra_target_runtime, extra_target_prior = create_retained_resume_workspace(
+        tmp,
+        "external-retained-extra-target-mismatch",
+        terminal_reason="recoverable_external_blocker",
+        external_blocker=external_blocker_fixture(),
+        execution_target=TARGET,
+    )
+    extra_target_payload = external_evidence_payload(
+        extra_target_workspace,
+        card=RETAINED_CARD,
+        run_id="retained-prior",
+        execution_target=TARGET,
+    )
+    extra_target_entry = dict(extra_target_payload["entries"][0])
+    extra_target_entry["id"] = "external-side-check"
+    extra_target_entry["path"] = ".runtime/changerail/evidence/external-resume/outputs/external-side-check.txt"
+    extra_target_entry["raw_output_path"] = extra_target_entry["path"]
+    extra_target_entry["execution_target"] = ALT_TARGET
+    extra_target_payload["entries"].append(extra_target_entry)
+    extra_target_evidence = write_external_evidence(extra_target_workspace, payload=extra_target_payload)
+    extra_target_result = run_retained_resume(
+        extra_target_workspace,
+        extra_target_runtime,
+        extra_target_prior,
+        launcher,
+        run_id="external-extra-target-mismatch",
+        evidence_index=extra_target_evidence,
+    )
+    if extra_target_result.returncode == 0:
+        raise AssertionError("extra target-bearing external evidence unexpectedly passed")
+    if load_status(extra_target_runtime, "external-extra-target-mismatch").get("terminal_reason") != "target_identity_mismatch":
+        raise AssertionError("extra target-bearing evidence mismatch did not use stable reason")
 
 
 def check_one_command_delivery_stale_verdict_blocks(tmp: Path) -> None:
@@ -2433,11 +2835,16 @@ def check_performance_summary_run(tmp: Path) -> None:
     )
     require_ok(result, "runner performance")
     status = load_status(runtime, "performance")
+    if status.get("episode", {}).get("id") != "performance" or status.get("attempt", {}).get("kind") != "delivery":
+        raise AssertionError(f"delivery lineage missing from status: {status}")
     performance = status.get("performance")
     if not isinstance(performance, dict):
         raise AssertionError(f"performance summary missing from status: {status}")
     if performance.get("command_execution_count") != 2:
         raise AssertionError(f"command count was not captured: {performance}")
+    command_samples = performance.get("command_samples")
+    if command_samples != {"observed_count": 2, "retained_count": 2, "limit": 50, "truncated": False}:
+        raise AssertionError(f"command sample metadata missing: {performance}")
     commands = performance.get("commands")
     if not isinstance(commands, list) or len(commands) != 2:
         raise AssertionError(f"command summaries missing: {performance}")
@@ -2468,8 +2875,205 @@ def check_performance_summary_run(tmp: Path) -> None:
     timeline = performance.get("timeline")
     if not isinstance(timeline, list) or not any(event.get("terminal_outcome") == "DELIVERED" for event in timeline):
         raise AssertionError(f"terminal outcome timing missing from timeline: {timeline}")
+    timeline_samples = performance.get("timeline_samples")
+    if not isinstance(timeline_samples, dict) or timeline_samples.get("observed_count", 0) < len(timeline):
+        raise AssertionError(f"timeline sample metadata missing: {performance}")
     if status["usage"].get("cached_input_tokens") != 1 or status["usage"].get("reasoning_tokens") != 1:
         raise AssertionError(f"usage breakdown was not parsed: {status['usage']}")
+    refreshed = run(
+        [
+            str(RUNNER),
+            "refresh-episode",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--episode-id",
+            "performance",
+            "--json",
+        ]
+    )
+    require_ok(refreshed, "refresh episode")
+    episode = json.loads(refreshed.stdout)
+    if episode.get("schema") != "changerail.delivery-episode.v1" or episode.get("final_outcome") != "unknown":
+        raise AssertionError(f"episode refresh did not write a valid derived index: {episode}")
+    if not any(attempt.get("id") == "performance" for attempt in episode.get("attempts", [])):
+        raise AssertionError(f"episode refresh did not include delivery attempt: {episode}")
+    other = json.loads(json.dumps(status))
+    other["run_id"] = "performance-other"
+    other["episode"]["id"] = "performance-other"
+    other["attempt"]["id"] = "performance-other"
+    write_json(runtime / "performance-other" / "status.json", other)
+    ambiguous = run([str(RUNNER), "refresh-episode", CARD, "--workspace", str(workspace), "--runtime-root", str(runtime), "--json"])
+    if ambiguous.returncode == 0 or "ambiguous or missing episode lineage for card" not in ambiguous.stdout:
+        raise AssertionError(f"ambiguous refresh episode did not fail closed: stdout={ambiguous.stdout} stderr={ambiguous.stderr}")
+
+
+def check_progress_events_and_status_view(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "progress-workspace")
+    launcher = tmp / "fake-codex-progress"
+    runtime = tmp / "progress-runtime"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("progress"),
+    )
+    require_ok(result, "runner progress events")
+    status = load_status(runtime, "progress")
+    progress = status.get("progress")
+    health = status.get("progress_health")
+    if not isinstance(progress, dict) or progress.get("schema") != "changerail.delivery-progress.v1":
+        raise AssertionError(f"progress object missing from status: {status}")
+    if progress.get("phase") != "terminal" or progress.get("stage") != "complete":
+        raise AssertionError(f"terminal progress was not recorded: {progress}")
+    if progress.get("event_counter", 0) < 2:
+        raise AssertionError(f"progress events were not counted monotonically: {progress}")
+    if not isinstance(health, dict) or health.get("state") != "terminated" or health.get("process_alive") is not False:
+        raise AssertionError(f"terminated progress health missing: {health}")
+    progress_perf = status.get("performance", {})
+    if not all(key in progress_perf for key in ("active_seconds", "wait_seconds", "operator_wait_seconds")):
+        raise AssertionError(f"progress duration totals missing: {status}")
+    status_text = json.dumps(status, ensure_ascii=False, sort_keys=True)
+    if "SYNTHETIC_PRIVATE_VALUE_SHOULD_NOT_APPEAR" in status_text or "raw_log_excerpt" in status_text:
+        raise AssertionError(f"forged content-bearing progress leaked into status: {status_text}")
+    stdout = Path(status["logs"]["stdout"]).read_text(encoding="utf-8")
+    first = json.loads(stdout.splitlines()[0])
+    if first.get("CHANGERAIL_ACTIVE_CARD_ID") != Path(CARD).name.removesuffix(".md"):
+        raise AssertionError(f"active card id was not passed to child: {first}")
+    if not first.get("CHANGERAIL_PROGRESS_EVENT_PATH", "").endswith("progress-events.jsonl"):
+        raise AssertionError(f"progress event path was not passed to child: {first}")
+    view = run([str(RUNNER), "status", str(runtime / "progress" / "status.json")])
+    require_ok(view, "single-card progress status view")
+    if "progress: terminal/complete" not in view.stdout or "health: terminated" not in view.stdout:
+        raise AssertionError(f"status view did not render progress: {view.stdout}")
+
+
+def check_progress_stale_heartbeat_is_non_terminal(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "progress-stale-workspace")
+    launcher = tmp / "fake-codex-progress-stale"
+    runtime = tmp / "progress-stale-runtime"
+    write_fake_launcher(launcher)
+    env = runner_env("progress-stall")
+    env["CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS"] = "0.02"
+    env["CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS"] = "0.05"
+    env["CHANGERAIL_PROGRESS_POLL_INTERVAL_SECONDS"] = "0.01"
+    env["CHANGERAIL_FAKE_STALL_SECONDS"] = "2.0"
+    release_path = tmp / "progress-stale-release"
+    env["CHANGERAIL_FAKE_STALL_RELEASE"] = str(release_path)
+    process = subprocess.Popen(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress-stale",
+            "--launcher",
+            str(launcher),
+        ],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    status_path = runtime / "progress-stale" / "status.json"
+    observed_running_stale: dict[str, Any] | None = None
+    deadline = time.monotonic() + 3.0
+    try:
+        while time.monotonic() < deadline:
+            if status_path.is_file():
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+                health = status.get("progress_health")
+                if isinstance(health, dict) and health.get("state") == "stale":
+                    observed_running_stale = status
+                    break
+            if process.poll() is not None:
+                break
+            time.sleep(0.01)
+        if observed_running_stale is None:
+            raise AssertionError("live child never produced stale progress health before exit")
+        if observed_running_stale.get("result") != "RUNNING" or observed_running_stale.get("terminal_outcome"):
+            raise AssertionError(f"stale heartbeat reclassified live child: {observed_running_stale}")
+        health = observed_running_stale["progress_health"]
+        if health.get("process_alive") is not True or health.get("heartbeat_age_seconds", 0) <= 0:
+            raise AssertionError(f"stale health did not include bounded process/age fields: {health}")
+        release_path.write_text("release\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=5)
+        if process.returncode != 0:
+            raise AssertionError(f"progress stale run failed: stdout={stdout} stderr={stderr}")
+        final_status = load_status(runtime, "progress-stale")
+        if final_status.get("progress_health", {}).get("state") != "terminated":
+            raise AssertionError(f"terminal progress health missing after child exit: {final_status}")
+    finally:
+        if process.poll() is None:
+            release_path.write_text("release\n", encoding="utf-8")
+            process.kill()
+            process.communicate()
+
+
+def check_progress_resume_after_remote_preflight(tmp: Path) -> None:
+    workspace, launcher, runtime = remote_preflight_workspace(tmp, "progress-resume")
+    prior = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress-resume-prior",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "dns"),
+    )
+    if prior.returncode == 0:
+        raise AssertionError("prior progress resume preflight unexpectedly passed")
+    env = fake_git_env(tmp, "success")
+    env["CHANGERAIL_FAKE_MODE"] = "progress"
+    resumed = run(
+        [
+            str(RUNNER),
+            "resume",
+            "--status-path",
+            str(runtime / "progress-resume-prior" / "status.json"),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "progress-resume",
+            "--launcher",
+            str(launcher),
+        ],
+        env=env,
+    )
+    require_ok(resumed, "progress resume")
+    status = load_status(runtime, "progress-resume")
+    if status.get("progress", {}).get("phase") != "terminal":
+        raise AssertionError(f"resume did not retain progress status: {status}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    if checks["resume prior status"]["status"] != "pass":
+        raise AssertionError(f"resume prior check did not pass: {checks['resume prior status']}")
 
 
 def check_oversized_output_summary_run(tmp: Path) -> None:
@@ -2503,6 +3107,9 @@ def check_oversized_output_summary_run(tmp: Path) -> None:
         raise AssertionError(f"oversized command output summary missing: {performance}")
     if command_output.get("oversized_command_count") != 1:
         raise AssertionError(f"oversized command count missing: {command_output}")
+    command_samples = performance.get("command_samples")
+    if not isinstance(command_samples, dict) or command_samples.get("observed_count") != 1:
+        raise AssertionError(f"oversized command sample metadata missing: {performance}")
     if command_output.get("largest_command_bytes", 0) <= command_output.get("threshold_bytes", 0):
         raise AssertionError(f"largest command did not exceed threshold: {command_output}")
     top = command_output.get("top_oversized_commands")
@@ -2782,6 +3389,62 @@ def check_external_blocker_handoff_run(tmp: Path) -> None:
         raise AssertionError(f"external blocker reason was not preserved: {status}")
 
 
+def check_structured_external_blocker_capture_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "structured-external-blocker-workspace")
+    launcher = tmp / "fake-codex-structured-external-blocker"
+    runtime = tmp / "runtime-structured-external"
+    write_fake_launcher(launcher)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "structured-external-blocker",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("structured-external-blocker"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("structured external blocker unexpectedly returned success")
+    status = load_status(runtime, "structured-external-blocker")
+    if status.get("terminal_reason") != "recoverable_external_blocker":
+        raise AssertionError(f"structured external blocker reason was not preserved: {status}")
+    if status.get("external_blocker", {}).get("class") != "external_service":
+        raise AssertionError(f"structured external blocker metadata was not retained: {status}")
+    if status.get("retained_payload", {}).get("card", {}).get("id") != Path(CARD).name.removesuffix(".md"):
+        raise AssertionError(f"structured external blocker did not capture retained payload identity: {status}")
+
+    invalid = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "unknown-external-blocker",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("unknown-external-blocker"),
+    )
+    if invalid.returncode == 0:
+        raise AssertionError("unknown external blocker unexpectedly returned success")
+    invalid_status = load_status(runtime, "unknown-external-blocker")
+    if invalid_status.get("terminal_reason") != "invalid_external_blocker":
+        raise AssertionError(f"invalid external blocker was not rejected: {invalid_status}")
+    if "external_blocker" in invalid_status or "retained_payload" in invalid_status:
+        raise AssertionError(f"invalid external blocker retained resume authority: {invalid_status}")
+
+
 def check_malformed_terminal_reason_run(tmp: Path) -> None:
     workspace = create_workspace(tmp, "malformed-terminal-reason-workspace")
     launcher = tmp / "fake-codex-malformed-terminal-reason"
@@ -3032,6 +3695,117 @@ def check_preflight(tmp: Path) -> None:
             raise AssertionError("preflight status was not written")
     finally:
         server.shutdown()
+
+
+def check_execution_target_preflight(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "execution-target-preflight", publish_ready=False)
+    commit_execution_target(workspace)
+    launcher = tmp / "fake-codex-target-preflight"
+    write_fake_launcher(launcher)
+    runtime = tmp / "target-preflight-runtime"
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "target-preflight",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+            "--write-status",
+        ]
+    )
+    require_ok(result, "execution target preflight")
+    payload = json.loads(result.stdout)
+    if payload.get("execution_target") != TARGET:
+        raise AssertionError(f"preflight status did not capture execution target: {payload}")
+    checks = {check["name"]: check for check in payload["preflight"]["checks"]}
+    if checks.get("execution target", {}).get("status") != "pass":
+        raise AssertionError(f"execution target check did not pass: {checks}")
+
+    rebind = create_workspace(tmp, "execution-target-clean-rebind", publish_ready=False)
+    commit_execution_target(rebind, ALT_TARGET)
+    rebind_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(rebind),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "target-clean-rebind",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+        ]
+    )
+    require_ok(rebind_result, "clean execution target rebind preflight")
+    rebind_payload = json.loads(rebind_result.stdout)
+    if rebind_payload.get("execution_target") != ALT_TARGET:
+        raise AssertionError(f"clean rebind did not capture new execution target: {rebind_payload}")
+
+    drift = create_workspace(tmp, "execution-target-run-drift", publish_ready=False)
+    commit_execution_target(drift)
+    drift_result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(drift),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "target-run-drift",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+        ],
+        env=runner_env("target-drift"),
+    )
+    if drift_result.returncode == 0:
+        raise AssertionError("single-card run with execution target drift unexpectedly passed")
+    drift_status = load_status(runtime, "target-run-drift")
+    if drift_status.get("terminal_outcome") != "BLOCKED" or drift_status.get("terminal_reason") != "target_identity_mismatch":
+        raise AssertionError(f"execution target drift did not block with stable reason: {drift_status}")
+
+    unsafe = create_workspace(tmp, "unsafe-execution-target-preflight", publish_ready=False)
+    outside = tmp / "outside-execution-target.json"
+    outside.write_text("{}", encoding="utf-8")
+    (unsafe / ".changerail").mkdir(exist_ok=True)
+    os.symlink(outside, unsafe / ".changerail" / "execution-target.json")
+    unsafe_result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(unsafe),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "unsafe-target-preflight",
+            "--launcher",
+            str(launcher),
+            "--deliver-arg=--no-push",
+            "--json",
+        ]
+    )
+    if unsafe_result.returncode == 0:
+        raise AssertionError("unsafe execution target preflight unexpectedly passed")
+    unsafe_payload = json.loads(unsafe_result.stdout)
+    unsafe_checks = {check["name"]: check for check in unsafe_payload["preflight"]["checks"]}
+    if "must be a regular file, not a symlink" not in unsafe_checks.get("execution target", {}).get("message", ""):
+        raise AssertionError(f"unsafe execution target check did not fail closed: {unsafe_checks}")
 
 
 def check_preflight_rejects_insufficient_automation_authority(tmp: Path) -> None:
@@ -3883,6 +4657,35 @@ def check_queue_launcher_docs() -> None:
         raise AssertionError(f"queue launcher docs expectations missing: {missing}")
 
 
+def check_active_run_reviewer_contract() -> None:
+    expected = {
+        "skills/changerail-review/SKILL.md": (
+            "CHANGERAIL_ACTIVE_RUN_DIR",
+            "Do not read, search, tail, cite or summarize",
+        ),
+        "skills/changerail-deliver/SKILL.md": (
+            "CHANGERAIL_ACTIVE_RUN_DIR",
+            "parent-owned active runtime evidence",
+        ),
+        "skills/changerail-review/references/changerail-review-verdict.md": (
+            "CHANGERAIL_ACTIVE_RUN_DIR",
+            "active parent delivery run",
+        ),
+        "openspec/specs/changerail-skill-surface/spec.md": (
+            "Reviewer protects parent-owned active runner evidence",
+            "raw runtime logs",
+        ),
+    }
+    missing: list[str] = []
+    for relative_path, phrases in expected.items():
+        content = " ".join((ROOT / relative_path).read_text(encoding="utf-8").split())
+        for phrase in phrases:
+            if phrase not in content:
+                missing.append(f"{relative_path}: {phrase}")
+    if missing:
+        raise AssertionError(f"active-run reviewer contract expectations missing: {missing}")
+
+
 def check_queue_preflight_failures(tmp: Path) -> None:
     cases: list[tuple[str, Any]] = [
         (
@@ -4218,6 +5021,125 @@ def check_queue_run_plan(tmp: Path) -> None:
         raise AssertionError(f"child status references missing: {status['cards']}")
 
 
+def check_queue_progress_mirror(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-progress-consumer")
+    runner = tmp / "fake-queue-progress-runner"
+    runtime = tmp / "queue-progress-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "progress-stall"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-progress",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue progress mirror")
+    status = load_status(runtime, "queue-progress")
+    first = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    progress = first.get("progress")
+    if not isinstance(progress, dict) or progress.get("phase") != "publish" or progress.get("stage") != "complete":
+        raise AssertionError(f"aggregate did not mirror child progress: {first}")
+    if first.get("progress_health", {}).get("state") != "terminated":
+        raise AssertionError(f"aggregate did not mirror child progress health: {first}")
+    status_result = run([str(RUNNER), "status-plan", str(runtime / "queue-progress" / "status.json")])
+    require_ok(status_result, "queue progress status-plan")
+    if "service-a-card: publish/complete" not in status_result.stdout:
+        raise AssertionError(f"status-plan did not render aggregate progress: {status_result.stdout}")
+
+
+def check_queue_progress_mirror_with_aliased_card_id(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-progress-alias-consumer")
+    runner = tmp / "fake-queue-progress-alias-runner"
+    runtime = tmp / "queue-progress-alias-runtime"
+    plan = consumer / "delivery-plan.json"
+    plan_payload = queue_plan_fixture()
+    plan_payload["cards"][0]["id"] = "service-a-alias"
+    plan_payload["cards"][1]["depends_on"] = ["service-a-alias"]
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, plan_payload)
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "progress-stall"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-progress-alias",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue progress alias mirror")
+    status = load_status(runtime, "queue-progress-alias")
+    first = next(card for card in status["cards"] if card["id"] == "service-a-alias")
+    progress = first.get("progress")
+    if not isinstance(progress, dict) or progress.get("phase") != "publish" or progress.get("stage") != "complete":
+        raise AssertionError(f"aggregate did not mirror aliased child progress: {first}")
+    if first.get("progress_diagnostic"):
+        raise AssertionError(f"aggregate reported alias as invalid child identity: {first}")
+    if not first.get("run_id", "").endswith("-service-a-alias"):
+        raise AssertionError(f"aggregate alias run id missing: {first}")
+
+
+def check_queue_rejects_mismatched_progress_identity(tmp: Path) -> None:
+    consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-progress-mismatch-consumer")
+    runner = tmp / "fake-queue-progress-mismatch-runner"
+    runtime = tmp / "queue-progress-mismatch-runtime"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "progress-mismatch"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-progress-mismatch",
+            "--launcher",
+            str(runner),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue mismatched progress identity")
+    status = load_status(runtime, "queue-progress-mismatch")
+    first = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    if "progress" in first or "progress_health" in first:
+        raise AssertionError(f"aggregate trusted mismatched child progress: {first}")
+    if first.get("progress_diagnostic") != "invalid_child_identity":
+        raise AssertionError(f"aggregate did not record bounded progress diagnostic: {first}")
+
+
 def check_queue_fail_fast_and_locks(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-fail-fast-consumer")
     runner = tmp / "fake-queue-runner-fail"
@@ -4406,6 +5328,13 @@ def retained_recovery_fixture(status_path: str = "service-a/.runtime/changerail/
     }
 
 
+def external_retained_recovery_fixture(status_path: str = "service-a/.runtime/changerail/delivery-runs/prior/status.json") -> dict[str, Any]:
+    retained = retained_recovery_fixture(status_path)
+    retained["source_terminal_reason"] = "recoverable_external_blocker"
+    retained["external_blocker"] = external_blocker_fixture()
+    return retained
+
+
 def check_queue_investigation_required_capture_and_original_resume(tmp: Path) -> None:
     consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-retained-original-consumer")
     runner = tmp / "fake-queue-retained-original"
@@ -4535,6 +5464,117 @@ def check_queue_investigation_required_original_resume_fail_closed(tmp: Path) ->
         run_cards = [call.get("card") for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] == "run"]
         if "openspec/board/2.todo/service-b-card.md" in run_cards:
             raise AssertionError(f"{mode} launched downstream after retained resume failure: {calls}")
+
+
+def check_queue_external_blocker_original_resume(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-external-original-consumer")
+    runner = tmp / "fake-queue-external-original"
+    runtime = tmp / "queue-external-original-runtime"
+    plan = consumer / "delivery-plan.json"
+    call_log = tmp / "queue-external-original-calls.jsonl"
+    original = queue_plan_fixture()
+    previous_path = runtime / "previous" / "status.json"
+    evidence_path = service_a / ".runtime" / "changerail" / "evidence" / "external-resume" / "index.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, original)
+    write_json(
+        previous_path,
+        recovery_previous_status(
+            original,
+            source_state="blocked",
+            source_result="BLOCKED",
+            terminal_reason="recoverable_external_blocker",
+            retained_recovery=external_retained_recovery_fixture(),
+        ),
+    )
+    (service_a / "DIRTY.txt").write_text("retained dirty payload\n", encoding="utf-8")
+    write_json(evidence_path, external_evidence_payload(service_a, card="openspec/board/3.inprogress/service-a-card.md", run_id="prior-service-a-card"))
+    (evidence_path.parent / "outputs").mkdir(parents=True, exist_ok=True)
+    (evidence_path.parent / "outputs" / "external-gate-ready.txt").write_text("external gate ready\n", encoding="utf-8")
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    resumed = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-external-original",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--evidence-index",
+            str(evidence_path),
+            "--no-push",
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(resumed, "queue external original resume")
+    calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+    resume_calls = [call for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] == "resume"]
+    if not resume_calls:
+        raise AssertionError(f"queue external retained recovery did not launch child resume: {calls}")
+    if "--evidence-index" not in resume_calls[0]["argv"]:
+        raise AssertionError(f"child external resume did not receive evidence index: {resume_calls[0]}")
+    run_cards = [call.get("card") for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] == "run"]
+    if "openspec/board/2.todo/service-b-card.md" not in run_cards:
+        raise AssertionError(f"downstream did not launch after original external resume success: {calls}")
+
+    missing_consumer, missing_service_a, _missing_service_b = create_queue_consumer(tmp, "queue-external-missing-consumer")
+    missing_runner = tmp / "fake-queue-external-missing"
+    missing_runtime = tmp / "queue-external-missing-runtime"
+    missing_plan = missing_consumer / "delivery-plan.json"
+    missing_calls = tmp / "queue-external-missing-calls.jsonl"
+    missing_previous = missing_runtime / "previous" / "status.json"
+    write_fake_queue_runner(missing_runner)
+    write_queue_plan(missing_plan, original)
+    write_json(
+        missing_previous,
+        recovery_previous_status(
+            original,
+            source_state="blocked",
+            source_result="BLOCKED",
+            terminal_reason="recoverable_external_blocker",
+            retained_recovery=external_retained_recovery_fixture(),
+        ),
+    )
+    (missing_service_a / "DIRTY.txt").write_text("retained dirty payload\n", encoding="utf-8")
+    missing_env = runner_env()
+    missing_env["CHANGERAIL_FAKE_CALL_LOG"] = str(missing_calls)
+    missing_result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(missing_plan),
+            "--consumer-root",
+            str(missing_consumer),
+            "--runtime-root",
+            str(missing_runtime),
+            "--run-id",
+            "queue-external-missing",
+            "--launcher",
+            str(missing_runner),
+            "--status-path",
+            str(missing_previous),
+            "--no-push",
+            "--json",
+        ],
+        env=missing_env,
+    )
+    if missing_result.returncode == 0:
+        raise AssertionError("queue external resume without evidence unexpectedly passed")
+    missing_status = load_status(missing_runtime, "queue-external-missing")
+    first = missing_status["cards"][0]
+    if first.get("terminal_reason") != "missing_evidence":
+        raise AssertionError(f"queue missing evidence did not use stable reason: {missing_status}")
+    if missing_calls.exists() and queue_run_calls(missing_calls):
+        raise AssertionError("queue missing external evidence launched a child")
 
 
 def check_queue_recovery_resume(tmp: Path) -> None:
@@ -5071,6 +6111,7 @@ def check_queue_no_push_requires_ahead(tmp: Path) -> None:
 
 
 def main() -> int:
+    check_active_run_reviewer_contract()
     with tempfile.TemporaryDirectory(prefix="changerail-delivery-runner-") as tmp:
         workspace = Path(tmp)
         check_single_card_status_reader(workspace)
@@ -5086,6 +6127,9 @@ def main() -> int:
         check_default_codex_home_isolates_persisted_trust(workspace)
         check_default_codex_home_rejects_directory_symlink(workspace)
         check_performance_summary_run(workspace)
+        check_progress_events_and_status_view(workspace)
+        check_progress_stale_heartbeat_is_non_terminal(workspace)
+        check_progress_resume_after_remote_preflight(workspace)
         check_oversized_output_summary_run(workspace)
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
@@ -5094,6 +6138,7 @@ def main() -> int:
         check_supervisor_stops_after_fallback_no_go(workspace)
         check_fix_budget_handoff_run(workspace)
         check_external_blocker_handoff_run(workspace)
+        check_structured_external_blocker_capture_run(workspace)
         check_malformed_terminal_reason_run(workspace)
         check_unstructured_unpublished_success_run(workspace)
         check_marker_like_prose_is_not_authoritative(workspace)
@@ -5102,6 +6147,7 @@ def main() -> int:
         check_nonzero_without_outcome_run(workspace)
         check_awaiting_review_run(workspace)
         check_preflight(workspace)
+        check_execution_target_preflight(workspace)
         check_preflight_rejects_insufficient_automation_authority(workspace)
         check_custom_launcher_without_path_codex(workspace)
         check_default_launcher_requires_path_codex(workspace)
@@ -5111,6 +6157,7 @@ def main() -> int:
         check_remote_preflight_resume_success(workspace)
         check_retained_payload_status_schema_and_single_card_resume(workspace)
         check_retained_payload_resume_fail_closed(workspace)
+        check_external_blocker_resume_evidence_success_and_fail_closed(workspace)
         check_preflight_connectivity_failure_redaction(workspace)
         check_explicit_codex_home_preflight(workspace)
         check_run_preflight_failure(workspace)
@@ -5124,6 +6171,9 @@ def main() -> int:
         check_queue_launcher_docs()
         check_queue_preflight_failures(workspace)
         check_queue_run_plan(workspace)
+        check_queue_progress_mirror(workspace)
+        check_queue_progress_mirror_with_aliased_card_id(workspace)
+        check_queue_rejects_mismatched_progress_identity(workspace)
         check_queue_dispatch_revalidates_publish_target_before_lock(workspace)
         check_queue_fail_fast_and_locks(workspace)
         check_queue_terminal_reason_and_missing_status(workspace)
@@ -5132,6 +6182,7 @@ def main() -> int:
         check_queue_resume_rejects_published_card_with_incomplete_proof(workspace)
         check_queue_investigation_required_capture_and_original_resume(workspace)
         check_queue_investigation_required_original_resume_fail_closed(workspace)
+        check_queue_external_blocker_original_resume(workspace)
         check_queue_recovery_resume(workspace)
         check_queue_recovery_fail_closed(workspace)
         check_queue_recovery_rejects_external_and_unrelated_drift(workspace)

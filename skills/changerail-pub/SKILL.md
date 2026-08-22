@@ -57,6 +57,11 @@ Accept legacy prompt forms such as `/changerail:pub <card>`, `changerail:pub <ca
 - Commit only files tied to the named card, archived changes, synced specs,
   docs, tests and board state.
 - Stop if unrelated dirty files cannot be separated confidently.
+- When `CHANGERAIL_PROGRESS_EVENT_PATH` is set, emit value-free publish progress
+  with `bin/changerail-delivery-runner progress-event publish finalizing` before
+  final verification/staging and `publish complete` after successful push or
+  explicit `--no-push` publish metadata. Do not include prose, commands, paths,
+  environment values or output excerpts in progress.
 
 ## Review Gate
 
@@ -83,6 +88,11 @@ For ordinary or critical risk, if the verdict is absent, stale, invalid or not `
 staging. A verdict whose reviewed `workspace.tree_sha` is missing or differs
 from the current publish tree is stale for review-gated publish and requires a
 fresh review. Never stage the verdict file.
+
+If the project declares `.changerail/execution-target.json`, deterministic
+preflight must also prove current declaration, manifest and retained evidence
+have one exact matching target identity. Missing, multiple or mismatched target
+identity blocks publish; do not stage or propose provider substitution.
 
 ## Workflow
 
@@ -244,6 +254,7 @@ Stop when:
 
 - the risk-appropriate machine receipt or semantic review verdict is absent,
   stale, invalid or negative;
+- declared execution target evidence is missing, mismatched or substituted;
 - planned card-owned changes are not archived and `--allow-unarchived` is not
   present;
 - final verification fails;

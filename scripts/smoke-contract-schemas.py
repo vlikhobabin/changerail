@@ -30,12 +30,28 @@ from changerail_repository_knowledge import (  # noqa: E402
     validate_scan_report,
 )
 from changerail_review_verdict import _validate_verdict  # noqa: E402
+from changerail_verification_coverage import (  # noqa: E402
+    fingerprint_coverage_map,
+    validate_coverage_ledger,
+    validate_coverage_map,
+    validate_coverage_plan,
+)
 
 
 Validator = Callable[[Any], list[str]]
 SHA = "sha256:" + ("0" * 64)
 TREE = "0" * 40
 DATE = "2026-07-12T00:00:00Z"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
+
+
+def execution_target() -> dict[str, Any]:
+    return dict(TARGET)
 
 
 def review_verdict() -> dict[str, Any]:
@@ -83,7 +99,9 @@ def delivery_manifest() -> dict[str, Any]:
     return {
         "schema": "changerail.delivery-manifest.v1",
         "updated_at": DATE,
+        "episode": {"schema": "changerail.delivery-episode-lineage.v1", "id": "episode-example"},
         "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
+        "execution_target": dict(TARGET),
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "changes": [{"slug": "example-change", "state": "active", "order": 1}],
         "committable_paths": [],
@@ -115,6 +133,23 @@ def delivery_manifest() -> dict[str, Any]:
                 }
             ],
         },
+        "coverage_summary": {
+            "configured": True,
+            "status": "complete",
+            "applicable": 1,
+            "covered": 1,
+            "missing": 0,
+            "invalid": 0,
+            "not_applicable": 0,
+            "ledgers": [
+                {
+                    "change": "example-change",
+                    "path": ".runtime/changerail/coverage/example-change-ledger.json",
+                    "fingerprint": SHA,
+                }
+            ],
+        },
+        "extension_surfaces": [{"kind": "domain.managed-form", "path": "src/Form.xml", "operation": "modify"}],
         "review_summary": {
             "result": "go",
             "summary": "fresh independent schema smoke review passed",
@@ -131,11 +166,72 @@ def delivery_manifest() -> dict[str, Any]:
             "status": "pushed",
             "payload_commit": "payload123",
             "published_commit": "published456",
+            "attempt": {"schema": "changerail.delivery-attempt.v1", "id": "publish-published456", "kind": "publish"},
             "remote": "origin",
             "branch": "main",
             "pushed_at": DATE,
             "mode": "review-gated",
         },
+    }
+
+
+def delivery_episode() -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-episode.v1",
+        "episode_id": "episode-example",
+        "updated_at": DATE,
+        "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "attempts": [
+            {
+                "id": "example-run",
+                "kind": "delivery",
+                "started_at": DATE,
+                "ended_at": DATE,
+                "terminal_state": "delivered",
+                "usage": {"available": True, "input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+                "performance": {
+                    "wall_time_seconds": 12.5,
+                    "command_execution_count": 2,
+                    "tool_call_count": 0,
+                    "command_samples": {"observed_count": 2, "retained_count": 1, "limit": 50, "truncated": True},
+                    "timeline_samples": {"observed_count": 101, "retained_count": 100, "limit": 100, "truncated": True},
+                },
+                "owner_artifact": {
+                    "kind": "delivery-run",
+                    "path": ".runtime/changerail/delivery-runs/example-run/status.json",
+                },
+            },
+            {
+                "id": "review-1",
+                "kind": "review",
+                "parent_attempt_id": "example-run",
+                "terminal_state": "delivered",
+                "owner_artifact": {
+                    "kind": "review-history",
+                    "path": ".runtime/changerail/reviews/example-card.history.json",
+                },
+            },
+            {
+                "id": "publish-published456",
+                "kind": "publish",
+                "parent_attempt_id": "review-1",
+                "terminal_state": "delivered",
+                "owner_artifact": {
+                    "kind": "delivery-manifest",
+                    "path": ".runtime/changerail/delivery-manifests/example-card.json",
+                },
+            },
+        ],
+        "final_outcome": "delivered",
+        "sampling": {
+            "commands": {"observed_count": 2, "retained_count": 1, "limit": 50, "truncated": True}
+        },
+        "owner_artifacts": [
+            {"kind": "delivery-run", "path": ".runtime/changerail/delivery-runs/example-run/status.json"},
+            {"kind": "review-history", "path": ".runtime/changerail/reviews/example-card.history.json"},
+            {"kind": "delivery-manifest", "path": ".runtime/changerail/delivery-manifests/example-card.json"},
+        ],
     }
 
 
@@ -174,7 +270,10 @@ def delivery_run_minimal() -> dict[str, Any]:
         "schema": "changerail.delivery-run.v1",
         "run_id": "example-run",
         "updated_at": DATE,
+        "episode": {"schema": "changerail.delivery-episode-lineage.v1", "id": "episode-example"},
+        "attempt": {"schema": "changerail.delivery-attempt.v1", "id": "example-run", "kind": "delivery"},
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
+        "execution_target": dict(TARGET),
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "phase": "terminal",
         "result": "DELIVERED",
@@ -185,8 +284,58 @@ def delivery_run_minimal() -> dict[str, Any]:
     }
 
 
+def retained_payload_identity() -> dict[str, Any]:
+    return {
+        "schema": "changerail.retained-payload-identity.v1",
+        "source_run_id": "example-run",
+        "source_status_path": ".runtime/changerail/delivery-runs/example-run/status.json",
+        "captured_at": DATE,
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "workspace": {"root": "/opt/changerail"},
+        "head_commit": "abc123",
+        "tree_sha": TREE,
+        "diff_fingerprint": SHA,
+        "review_target": {"kind": "working-tree"},
+        "execution_target": dict(TARGET),
+    }
+
+
+def external_blocker() -> dict[str, Any]:
+    return {
+        "schema": "changerail.external-blocker.v1",
+        "blocker_id": "external-gate-ready",
+        "class": "external_service",
+        "observed_at": DATE,
+        "retryable": True,
+        "evidence_policy": {
+            "required_ids": ["external-gate-ready"],
+            "max_age_seconds": 3600,
+        },
+    }
+
+
+def delivery_progress(phase: str = "do", stage: str = "implementation", counter: int = 3) -> dict[str, Any]:
+    return {
+        "schema": "changerail.delivery-progress.v1",
+        "phase": phase,
+        "stage": stage,
+        "heartbeat_at": DATE,
+        "event_counter": counter,
+    }
+
+
+def progress_health(state: str = "active", age: float = 0.0, process_alive: bool = True) -> dict[str, Any]:
+    return {
+        "state": state,
+        "heartbeat_age_seconds": age,
+        "process_alive": process_alive,
+    }
+
+
 def delivery_run() -> dict[str, Any]:
     payload = delivery_run_minimal()
+    payload["progress"] = delivery_progress()
+    payload["progress_health"] = progress_health()
     payload["usage"] = {
         "available": True,
         "input_tokens": 10,
@@ -223,6 +372,8 @@ def delivery_run() -> dict[str, Any]:
         "event_counts": {"exec_command": 2, "agent_message": 1},
         "agent_message_count": 1,
         "command_execution_count": 2,
+        "command_duration_seconds": 0.2,
+        "command_samples": {"observed_count": 2, "retained_count": 1, "limit": 50, "truncated": True},
         "file_change_count": 3,
         "commands": [
             {
@@ -287,6 +438,7 @@ def delivery_run() -> dict[str, Any]:
                 "duration_seconds": 0.2,
             }
         ],
+        "timeline_samples": {"observed_count": 101, "retained_count": 1, "limit": 100, "truncated": True},
         "review": {
             "cycle_count": 1,
             "first_review_latency_seconds": 10.0,
@@ -353,7 +505,13 @@ def delivery_plan_status() -> dict[str, Any]:
         "max_parallel": 2,
         "per_workspace_parallelism": 1,
         "workspaces": [
-            {"alias": "service-a", "path": "service-a", "state": "delivered", "head_commit": "abc123"},
+            {
+                "alias": "service-a",
+                "path": "service-a",
+                "state": "delivered",
+                "head_commit": "abc123",
+                "execution_target": dict(TARGET),
+            },
             {"alias": "service-b", "path": "service-b", "state": "delivered", "head_commit": "def456"},
         ],
         "cards": [
@@ -365,8 +523,11 @@ def delivery_plan_status() -> dict[str, Any]:
                 "state": "delivered",
                 "wave": 1,
                 "run_id": "child-a",
+                "episode_id": "episode-child-a",
                 "run_status_path": ".runtime/changerail/delivery-runs/child-a/status.json",
                 "result": "DELIVERED",
+                "progress": delivery_progress("publish", "complete", 5),
+                "progress_health": progress_health("terminated", 0.0, False),
             },
             {
                 "id": "service-b-card",
@@ -377,6 +538,7 @@ def delivery_plan_status() -> dict[str, Any]:
                 "wave": 2,
                 "depends_on": ["service-a-card"],
                 "run_id": "child-b",
+                "episode_id": "episode-child-b",
                 "run_status_path": ".runtime/changerail/delivery-runs/child-b/status.json",
                 "result": "DELIVERED",
             },
@@ -385,10 +547,29 @@ def delivery_plan_status() -> dict[str, Any]:
     }
 
 
+def retained_external_recovery() -> dict[str, Any]:
+    return {
+        "kind": "original-retained-payload",
+        "source_run_id": "child-a",
+        "source_run_status_path": ".runtime/changerail/delivery-runs/child-a/status.json",
+        "source_terminal_reason": "recoverable_external_blocker",
+        "card": {"id": "service-a-card", "path": "openspec/board/3.inprogress/service-a-card.md"},
+        "fingerprint": {
+            "head_commit": "abc123",
+            "tree_sha": TREE,
+            "diff_fingerprint": SHA,
+        },
+        "review_target_kind": "working-tree",
+        "execution_target": dict(TARGET),
+        "external_blocker": external_blocker(),
+    }
+
+
 def review_cycle_history() -> dict[str, Any]:
     return {
         "schema": "changerail.review-cycle-history.v1",
         "updated_at": DATE,
+        "episode": {"schema": "changerail.delivery-episode-lineage.v1", "id": "episode-example"},
         "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
         "workspace": {"root": "/opt/changerail", "head_commit": "abc123"},
         "rescue_budget": {"limit": 2, "used": 0, "remaining": 2, "exhausted": False},
@@ -402,6 +583,7 @@ def review_cycle_history() -> dict[str, Any]:
             {
                 "review_cycle": 1,
                 "same_card_rescue_attempt": 0,
+                "attempt": {"schema": "changerail.delivery-attempt.v1", "id": "review-1", "kind": "review"},
                 "result": "go",
                 "reviewed_at": DATE,
                 "verdict_path": ".runtime/changerail/reviews/example-card.json",
@@ -416,11 +598,20 @@ def review_cycle_history() -> dict[str, Any]:
 def source_classification() -> dict[str, Any]:
     return {
         "schema": "changerail.source-classification.v1",
+        "profile_provenance": [
+            {
+                "id": "python",
+                "version": "1.0.0",
+                "checksum": SHA,
+                "source_kind": "built-in",
+                "declared_override_paths": ["source_kinds.python.production_roots"],
+            }
+        ],
         "source_kinds": [
             {
-                "id": "bsl",
-                "suffixes": [".bsl"],
-                "production_roots": ["src/production"],
+                "id": "python",
+                "suffixes": [".py"],
+                "production_roots": ["src"],
                 "measure": "lines",
             },
             {
@@ -431,6 +622,178 @@ def source_classification() -> dict[str, Any]:
             },
         ],
         "non_production_roots": ["src/examples"],
+    }
+
+
+def source_classification_profile() -> dict[str, Any]:
+    return {
+        "schema": "changerail.source-classification-profile.v1",
+        "id": "python",
+        "version": "1.0.0",
+        "description": "Generic Python source profile",
+        "classification": {
+            "source_kinds": [
+                {
+                    "id": "python",
+                    "suffixes": [".py"],
+                    "production_roots": ["src"],
+                    "measure": "lines",
+                }
+            ],
+            "non_production_roots": ["tests", "fixtures"],
+        },
+        "detection": {
+            "signals": [
+                {"id": "src-python", "path_glob": "src/**/*.py", "weight": 80},
+                {"id": "pyproject", "path_glob": "pyproject.toml", "weight": 20},
+            ]
+        },
+    }
+
+
+def source_classification_check() -> dict[str, Any]:
+    return {
+        "schema": "changerail.source-classification-check.v1",
+        "checked_at": DATE,
+        "target": {"path": ".changerail/source-classification.yaml", "snapshot": TREE},
+        "classification": {"present": True, "valid": True, "provenance": "available"},
+        "profiles": [
+            {
+                "id": "python",
+                "version": "1.0.0",
+                "checksum": SHA,
+                "source_kind": "built-in",
+                "state": "matched",
+            }
+        ],
+        "effective_rules": {
+            "source_kind_count": 1,
+            "non_production_root_count": 2,
+            "covered_path_count": 3,
+            "excluded_path_count": 1,
+            "source_kinds": [
+                {"id": "python", "suffixes": [".py"], "production_roots": ["src"], "measure": "lines"}
+            ],
+            "non_production_roots": ["tests", "fixtures"],
+            "declared_override_paths": ["source_kinds.python.production_roots"],
+        },
+        "uncovered_candidates": [
+            {
+                "id": "structured-xml",
+                "version": "1.0.0",
+                "confidence": "high",
+                "score": 100,
+                "matched_signal_count": 1,
+                "example_paths": ["src/designer/form.xml"],
+            }
+        ],
+        "diagnostics": [
+            {"severity": "advisory", "code": "local-profile-unavailable", "message": "local profile baseline not supplied"}
+        ],
+        "summary": {"status": "pass", "blocking": 0, "advisory": 2},
+    }
+
+
+def verification_coverage_map() -> dict[str, Any]:
+    return {
+        "schema": "changerail.verification-coverage.v1",
+        "entries": [
+            {
+                "id": "python-runtime-route",
+                "applies_to": {
+                    "path_globs": ["src/**/*.py"],
+                    "operation_kinds": ["add", "modify"],
+                    "surface_kinds": ["python.runtime"],
+                },
+                "invariant": "positive runtime route remains observable",
+                "oracle": {"kind": "command", "ref": "pytest-positive-route"},
+                "required_evidence": [
+                    {"kind": "command", "oracle_ref": "pytest-positive-route"},
+                    {"kind": "runtime", "oracle_ref": "pytest-positive-route"},
+                ],
+            },
+            {
+                "id": "python-lint-policy",
+                "applies_to": {"path_globs": ["src/**/*.py"]},
+                "invariant": "project-owned lint policy remains clean when configured",
+                "oracle": {"kind": "lint", "ref": "ruff-check"},
+                "required_evidence": [{"kind": "command", "oracle_ref": "ruff-check"}],
+            },
+            {
+                "id": "python-type-policy",
+                "applies_to": {"path_globs": ["src/**/*.py"]},
+                "invariant": "project-owned type policy remains clean when configured",
+                "oracle": {"kind": "typecheck", "ref": "mypy-explicit-policy"},
+                "required_evidence": [{"kind": "typecheck", "oracle_ref": "mypy-explicit-policy"}],
+            },
+        ],
+    }
+
+
+def verification_coverage_plan() -> dict[str, Any]:
+    map_payload = verification_coverage_map()
+    return {
+        "schema": "changerail.verification-coverage-plan.v1",
+        "generated_at": DATE,
+        "map": {
+            "path": ".changerail/verification-coverage.yaml",
+            "fingerprint": fingerprint_coverage_map(map_payload),
+        },
+        "card": {
+            "id": "example-card",
+            "path": "openspec/board/3.inprogress/example-card.md",
+            "acceptance_hashes": [
+                {"id": "a1", "hash": SHA},
+                {"id": "a2", "hash": "sha256:" + ("1" * 64)},
+            ],
+        },
+        "change": {
+            "slug": "example-change",
+            "path": "openspec/changes/example-change",
+        },
+        "selected_coverage": [
+            {"id": "python-runtime-route", "reason": "changed src/example.py"},
+            {"id": "python-lint-policy", "reason": "project policy declares ruff"},
+        ],
+    }
+
+
+def verification_coverage_ledger() -> dict[str, Any]:
+    return {
+        "schema": "changerail.verification-coverage-ledger.v1",
+        "updated_at": DATE,
+        "workspace": {"root": "/opt/changerail", "head_commit": "abc123", "tree_sha": TREE},
+        "card": {"id": "example-card", "path": "openspec/board/3.inprogress/example-card.md"},
+        "change": {"slug": "example-change"},
+        "map": {"path": ".changerail/verification-coverage.yaml", "fingerprint": SHA},
+        "plan": {
+            "path": "openspec/changes/example-change/verification-coverage.json",
+            "fingerprint": "sha256:" + ("1" * 64),
+        },
+        "manifest": {
+            "path": ".runtime/changerail/delivery-manifests/example-card.json",
+            "fingerprint": "sha256:" + ("2" * 64),
+        },
+        "reviewed_tree": {"tree_sha": TREE, "diff_fingerprint": SHA},
+        "entries": [
+            {
+                "coverage_id": "python-runtime-route",
+                "applicability": "applicable",
+                "state": "covered",
+                "oracle_ref": "pytest-positive-route",
+                "evidence_refs": [
+                    {
+                        "id": "pytest-positive-route",
+                        "index_path": ".runtime/changerail/evidence/example-card/index.json",
+                        "kind": "command",
+                        "oracle_ref": "pytest-positive-route",
+                        "raw_output_path": ".runtime/changerail/evidence/example-card/outputs/pytest.txt",
+                        "classification": "mandatory",
+                    }
+                ],
+            }
+        ],
+        "diagnostics": [],
     }
 
 
@@ -456,6 +819,13 @@ def review_preflight_result() -> dict[str, Any]:
             "valid": True,
             "normalized": False,
             "scope_ok": True,
+        },
+        "execution_target": {
+            "present": True,
+            "path": ".changerail/execution-target.json",
+            "identity": dict(TARGET),
+            "manifest_identity": dict(TARGET),
+            "evidence_identity_count": 1,
         },
         "risk": {
             "tier": "ordinary",
@@ -525,6 +895,7 @@ def evidence_index() -> dict[str, Any]:
         "updated_at": DATE,
         "workspace": {"root": "/opt/changerail", "repository": "ssh://github.com/vlikhobabin/changerail.git"},
         "scope": {"card_id": "example-card", "changes": ["example-change"]},
+        "execution_target": dict(TARGET),
         "entries": [
             {
                 "id": "schema-smoke",
@@ -549,6 +920,7 @@ def evidence_index() -> dict[str, Any]:
                 "raw_output_path": ".runtime/changerail/evidence/schema-smoke/outputs/schema-smoke.txt",
                 "redacted": False,
                 "timed_out": False,
+                "execution_target": dict(TARGET),
             }
         ],
     }
@@ -945,12 +1317,20 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
         consumer_lock,
         schema_validator("changerail-consumer-lock.schema.json"),
     ),
+    "changerail-execution-target.schema.json": (
+        execution_target,
+        schema_validator("changerail-execution-target.schema.json"),
+    ),
     "changerail-review-verdict.schema.json": (review_verdict, _validate_verdict),
     "changerail-review-preflight-result.schema.json": (
         review_preflight_result,
         schema_validator("changerail-review-preflight-result.schema.json"),
     ),
     "changerail-delivery-manifest.schema.json": (delivery_manifest, validate_manifest),
+    "changerail-delivery-episode.schema.json": (
+        delivery_episode,
+        schema_validator("changerail-delivery-episode.schema.json"),
+    ),
     "changerail-delivery-run.schema.json": (delivery_run, schema_validator("changerail-delivery-run.schema.json")),
     "changerail-delivery-plan.schema.json": (delivery_plan, validate_delivery_plan),
     "changerail-delivery-plan-status.schema.json": (delivery_plan_status, validate_delivery_plan_status),
@@ -961,6 +1341,26 @@ FIXTURES: dict[str, tuple[Callable[[], dict[str, Any]], Validator]] = {
     "changerail-source-classification.schema.json": (
         source_classification,
         schema_validator("changerail-source-classification.schema.json"),
+    ),
+    "changerail-source-classification-profile.schema.json": (
+        source_classification_profile,
+        schema_validator("changerail-source-classification-profile.schema.json"),
+    ),
+    "changerail-source-classification-check.schema.json": (
+        source_classification_check,
+        schema_validator("changerail-source-classification-check.schema.json"),
+    ),
+    "changerail-verification-coverage.schema.json": (
+        verification_coverage_map,
+        validate_coverage_map,
+    ),
+    "changerail-verification-coverage-plan.schema.json": (
+        verification_coverage_plan,
+        validate_coverage_plan,
+    ),
+    "changerail-verification-coverage-ledger.schema.json": (
+        verification_coverage_ledger,
+        validate_coverage_ledger,
     ),
     "changerail-evidence-index.schema.json": (evidence_index, schema_validator("changerail-evidence-index.schema.json")),
     "changerail-repository-knowledge.schema.json": (
@@ -1061,6 +1461,12 @@ def main() -> int:
             minimal_errors = validator(delivery_run_minimal())
             if minimal_errors:
                 failures.append(f"{name}: minimal fixture without performance failed: {minimal_errors}")
+            legacy_lineage = delivery_run_minimal()
+            legacy_lineage.pop("episode")
+            legacy_lineage.pop("attempt")
+            legacy_errors = validator(legacy_lineage)
+            if legacy_errors:
+                failures.append(f"{name}: legacy fixture without lineage failed: {legacy_errors}")
             reason_fixture = delivery_run_minimal()
             reason_fixture["result"] = "BLOCKED"
             reason_fixture["terminal_outcome"] = "BLOCKED"
@@ -1068,6 +1474,27 @@ def main() -> int:
             reason_errors = validator(reason_fixture)
             if reason_errors:
                 failures.append(f"{name}: terminal reason fixture failed: {reason_errors}")
+            external_fixture = delivery_run_minimal()
+            external_fixture["result"] = "BLOCKED"
+            external_fixture["terminal_outcome"] = "BLOCKED"
+            external_fixture["terminal_reason"] = "recoverable_external_blocker"
+            external_fixture["retained_payload"] = retained_payload_identity()
+            external_fixture["external_blocker"] = external_blocker()
+            external_errors = validator(external_fixture)
+            if external_errors:
+                failures.append(f"{name}: external blocker fixture failed: {external_errors}")
+            unknown_external = copy.deepcopy(external_fixture)
+            unknown_external["external_blocker"]["class"] = "project_specific_outage"
+            if not validator(unknown_external):
+                failures.append(f"{name}: unknown external blocker class unexpectedly passed")
+            content_external = copy.deepcopy(external_fixture)
+            content_external["external_blocker"]["response_body"] = "RESPONSE_BODY_SHOULD_NOT_PASS"
+            if not validator(content_external):
+                failures.append(f"{name}: content-bearing external blocker unexpectedly passed")
+            missing_retained_external = copy.deepcopy(external_fixture)
+            missing_retained_external.pop("retained_payload")
+            if not validator(missing_retained_external):
+                failures.append(f"{name}: external blocker without retained identity unexpectedly passed")
             invalid_reason = copy.deepcopy(reason_fixture)
             invalid_reason["terminal_reason"] = "free form reason"
             if not validator(invalid_reason):
@@ -1080,6 +1507,21 @@ def main() -> int:
             invalid_output["performance"]["commands"][0]["output"]["raw_stdout"] = "raw payload must not be accepted"
             if not validator(invalid_output):
                 failures.append(f"{name}: raw command output payload unexpectedly passed")
+            running_stale = delivery_run_minimal()
+            running_stale["phase"] = "delivery"
+            running_stale["result"] = "RUNNING"
+            running_stale["progress"] = delivery_progress("do", "verification", 7)
+            running_stale["progress_health"] = progress_health("stale", 12.5, True)
+            if validator(running_stale):
+                failures.append(f"{name}: running stale progress fixture failed")
+            invalid_progress_enum = delivery_run()
+            invalid_progress_enum["progress"]["phase"] = "raw-child-output"
+            if not validator(invalid_progress_enum):
+                failures.append(f"{name}: unknown progress phase unexpectedly passed")
+            invalid_progress_content = delivery_run()
+            invalid_progress_content["progress"]["raw_log_excerpt"] = "synthetic raw child output"
+            if not validator(invalid_progress_content):
+                failures.append(f"{name}: content-bearing progress unexpectedly passed")
         if name == "changerail-consumer-lock.schema.json":
             unsafe_source = consumer_lock()
             unsafe_source["changerail"]["source"] = "https://user:secret@example.invalid/changerail.git"
@@ -1106,6 +1548,56 @@ def main() -> int:
             traversal_root = source_classification()
             traversal_root["non_production_roots"] = ["src/../fixtures"]
             expect_invalid(failures, f"{name} traversal non-production root", validator, traversal_root, "non_production_roots")
+            invalid_override = source_classification()
+            invalid_override["profile_provenance"][0]["declared_override_paths"] = ["source_kinds.python"]
+            expect_invalid(failures, f"{name} invalid override path", validator, invalid_override, "declared_override_paths")
+        if name == "changerail-source-classification-profile.schema.json":
+            command_profile = source_classification_profile()
+            command_profile["detection"]["signals"][0]["command"] = "python inspect.py"
+            expect_invalid(failures, f"{name} command field", validator, command_profile, "Additional properties")
+            url_profile = source_classification_profile()
+            url_profile["detection"]["signals"][0]["path_glob"] = "https://example.invalid/profile"
+            expect_invalid(failures, f"{name} URL signal", validator, url_profile, "path_glob")
+        if name == "changerail-source-classification-check.schema.json":
+            invalid_status = source_classification_check()
+            invalid_status["summary"]["status"] = "maybe"
+            expect_invalid(failures, f"{name} invalid status", validator, invalid_status, "status")
+            invalid_override = source_classification_check()
+            invalid_override["effective_rules"]["declared_override_paths"] = ["source_kinds.python"]
+            expect_invalid(failures, f"{name} invalid override path", validator, invalid_override, "declared_override_paths")
+        if name == "changerail-verification-coverage.schema.json":
+            duplicate_ids = verification_coverage_map()
+            duplicate_ids["entries"][1]["id"] = duplicate_ids["entries"][0]["id"]
+            expect_invalid(failures, f"{name} duplicate ids", validator, duplicate_ids, "duplicate coverage id")
+            unsafe_glob = verification_coverage_map()
+            unsafe_glob["entries"][0]["applies_to"]["path_globs"] = ["/absolute/**/*.py"]
+            expect_invalid(failures, f"{name} unsafe glob", validator, unsafe_glob, "path_globs")
+            missing_selectors = verification_coverage_map()
+            missing_selectors["entries"][0]["applies_to"] = {}
+            expect_invalid(failures, f"{name} missing selectors", validator, missing_selectors, "applies_to")
+            unknown_oracle = verification_coverage_map()
+            unknown_oracle["entries"][0]["oracle"]["kind"] = "telepathy"
+            expect_invalid(failures, f"{name} unknown oracle kind", validator, unknown_oracle, "oracle")
+            unbound_evidence = verification_coverage_map()
+            unbound_evidence["entries"][0]["required_evidence"][0]["oracle_ref"] = "other-oracle"
+            expect_invalid(failures, f"{name} unbound evidence", validator, unbound_evidence, "oracle_ref")
+            policy_field = verification_coverage_map()
+            policy_field["entries"][0]["severity"] = "critical"
+            expect_invalid(failures, f"{name} undeclared policy field", validator, policy_field, "Additional properties")
+        if name == "changerail-verification-coverage-plan.schema.json":
+            copied_invariant = verification_coverage_plan()
+            copied_invariant["selected_coverage"][0]["invariant"] = "must not copy map content"
+            expect_invalid(failures, f"{name} copied invariant", validator, copied_invariant, "Additional properties")
+            copied_criterion = verification_coverage_plan()
+            copied_criterion["card"]["acceptance_hashes"][0]["criterion"] = "must not copy acceptance text"
+            expect_invalid(failures, f"{name} copied acceptance", validator, copied_criterion, "Additional properties")
+        if name == "changerail-verification-coverage-ledger.schema.json":
+            final_verdict = verification_coverage_ledger()
+            final_verdict["final_verdict"] = "go"
+            expect_invalid(failures, f"{name} final verdict authority", validator, final_verdict, "Additional properties")
+            raw_output = verification_coverage_ledger()
+            raw_output["entries"][0]["raw_output"] = "raw command output must stay in runtime evidence"
+            expect_invalid(failures, f"{name} raw evidence", validator, raw_output, "Additional properties")
         if name == "changerail-maintenance-report.schema.json":
             missing_detectors = copy.deepcopy(positive)
             missing_detectors.pop("detectors")
@@ -1192,6 +1684,28 @@ def main() -> int:
     recovery_status["summary"]["recovered"] = 1
     if validate_delivery_plan_status(recovery_status):
         failures.append("changerail-delivery-plan-status.schema.json: recovery status fixture failed")
+
+    external_recovery_status = delivery_plan_status()
+    external_recovery_status["result"] = "BLOCKED"
+    external_recovery_status["terminal_outcome"] = "BLOCKED"
+    external_recovery_status["cards"][0]["state"] = "blocked"
+    external_recovery_status["cards"][0]["result"] = "BLOCKED"
+    external_recovery_status["cards"][0]["terminal_reason"] = "recoverable_external_blocker"
+    external_recovery_status["cards"][0]["retained_recovery"] = retained_external_recovery()
+    external_recovery_status["summary"]["delivered"] = 1
+    external_recovery_status["summary"]["blocked"] = 1
+    if validate_delivery_plan_status(external_recovery_status):
+        failures.append("changerail-delivery-plan-status.schema.json: external retained recovery fixture failed")
+
+    invalid_external_recovery = copy.deepcopy(external_recovery_status)
+    invalid_external_recovery["cards"][0]["retained_recovery"]["external_blocker"]["entered_credential"] = "secret"
+    if not validate_delivery_plan_status(invalid_external_recovery):
+        failures.append("changerail-delivery-plan-status.schema.json: content-bearing external retained recovery unexpectedly passed")
+
+    invalid_plan_progress = delivery_plan_status()
+    invalid_plan_progress["cards"][0]["progress"]["stage"] = "free-form-child-prose"
+    if not validate_delivery_plan_status(invalid_plan_progress):
+        failures.append("changerail-delivery-plan-status.schema.json: unknown progress stage unexpectedly passed")
 
     remote_failure_status = delivery_plan_status()
     remote_failure_status["result"] = "BLOCKED"

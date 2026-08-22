@@ -27,3 +27,10 @@ package runner.
   audit серии `020` и ignored Windows lab readiness.
 - `040-native-windows-implementation.json` - карточки `040-01`..`040-05` после
   exit audit серии `030` и полного refresh native Windows implementation cards.
+- `050-field-validation-authorizations.json` - шесть exact bounded authorization
+  sources после опубликованного field-validation investigation; prerequisite
+  target invariant и основной implementation batch запускаются только после
+  успешного завершения этого плана.
+- `060-field-validation-implementation.json` - пять исходных field-validation
+  карточек после опубликованных authorization sources и завершенного
+  execution-target prerequisite; выполняются последовательно в одном workspace.

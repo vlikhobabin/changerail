@@ -10,11 +10,19 @@
 - `changerail.review-preflight-result.v1`
 - `changerail.delivery-manifest.v1`
 - `changerail.evidence-index.v1`
+- `changerail.external-blocker.v1`
 - `changerail.delivery-run.v1`
+- `changerail.delivery-episode.v1`
 - `changerail.delivery-plan.v1`
 - `changerail.delivery-plan-status.v1`
+- `changerail.execution-target.v1`
 - `changerail.review-cycle-history.v1`
 - `changerail.source-classification.v1`
+- `changerail.source-classification-profile.v1`
+- `changerail.source-classification-check.v1`
+- `changerail.verification-coverage.v1`
+- `changerail.verification-coverage-plan.v1`
+- `changerail.verification-coverage-ledger.v1`
 - `changerail.consumer-lock.v1`
 - `changerail.repository-knowledge.v1`
 - `changerail.maintenance-policy.v1`
@@ -36,10 +44,17 @@ schemas/changerail-review-preflight-result.schema.json
 schemas/changerail-delivery-manifest.schema.json
 schemas/changerail-evidence-index.schema.json
 schemas/changerail-delivery-run.schema.json
+schemas/changerail-delivery-episode.schema.json
 schemas/changerail-delivery-plan.schema.json
 schemas/changerail-delivery-plan-status.schema.json
+schemas/changerail-execution-target.schema.json
 schemas/changerail-review-cycle-history.schema.json
 schemas/changerail-source-classification.schema.json
+schemas/changerail-source-classification-profile.schema.json
+schemas/changerail-source-classification-check.schema.json
+schemas/changerail-verification-coverage.schema.json
+schemas/changerail-verification-coverage-plan.schema.json
+schemas/changerail-verification-coverage-ledger.schema.json
 schemas/changerail-consumer-lock.schema.json
 schemas/changerail-repository-knowledge.schema.json
 schemas/changerail-maintenance-policy.schema.json
@@ -116,12 +131,46 @@ source_kinds:
     measure: xml-structure
 ```
 
+Версионируемый profile использует schema id
+`changerail.source-classification-profile.v1`. Built-in generic profiles и
+explicit local integration profiles валидируются одной схемой. Profile содержит
+только data: stable `id`, semantic `version`, classification payload и bounded
+path-only detection signals. Checksum считается как `sha256:<hex>` от
+canonical JSON полного validated profile; same `id@version` с другим checksum
+считается immutable-version conflict.
+
+Операторский helper:
+
+```bash
+bin/changerail-source-classification detect --json
+bin/changerail-source-classification materialize --profile python@1.0.0 --json
+bin/changerail-source-classification materialize --profile python@1.0.0 --write --json
+bin/changerail-source-classification check --json
+```
+
+`detect` по умолчанию читает tracked `HEAD`, а не dirty working tree, и ничего
+не пишет. `materialize` требует explicit `--profile id@version`; без `--write`
+он показывает preview, с `--write` атомарно создает
+`.changerail/source-classification.yaml` только если file отсутствует или уже
+семантически совпадает. Отличающийся existing file дает
+`migration-required` без overwrite или reformat. `check` выдает
+`changerail.source-classification-check.v1`: profile provenance, effective
+source-kind roots, non-production roots, declared override paths, blocking
+confirmed drift и advisory unaccepted candidates без source contents и
+machine-absolute paths.
+
 Paths в файле являются repository-relative POSIX prefixes, не shell glob-ами.
 Absolute paths, traversal, duplicate source-kind ids, unsafe roots или
 schema-invalid values блокируют preflight до LLM review. Если файл отсутствует,
 preflight использует прежний built-in classifier: common source suffixes и
 executable helpers считаются production, а domain-specific `.bsl`/`.xml` не
 становятся production по одному suffix.
+
+Preflight и `bin/verify-project` fail closed для invalid classification,
+immutable checksum conflict, measurement conflict или confirmed undeclared
+profile drift. Detection-only candidates остаются diagnostic/advisory и не
+меняют `added_production_loc`, risk route или investigation decision, пока
+проект не принял tracked schema-valid `.changerail/source-classification.yaml`.
 
 `complexity_guard.source_breakdown` содержит bounded детализацию по kind:
 `source_kind`, `measure_strategy`, counted `path_count`, `raw_added_lines`,
@@ -165,6 +214,68 @@ card/id, ceiling `301..500` и protocol allowance. Preflight также пров
 остаётся `investigation-required`.
 Relation принимает только exact bare id, `<id>.md` или canonical
 `openspec/board/<lane>/<id>.md`; foreign stem и non-board path не совпадают.
+
+## Verification Coverage
+
+Optional tracked project policy can declare a verification coverage map:
+
+```yaml
+schema: changerail.verification-coverage.v1
+entries:
+  - id: python-runtime-route
+    applies_to:
+      path_globs: ["src/**/*.py"]
+      operation_kinds: [add, modify]
+      surface_kinds: [python.runtime]
+    invariant: "positive runtime route remains observable"
+    oracle:
+      kind: command
+      ref: pytest-positive-route
+    required_evidence:
+      - kind: command
+        oracle_ref: pytest-positive-route
+      - kind: runtime
+        oracle_ref: pytest-positive-route
+```
+
+`openspec/config.yaml` references the map through
+`verification.coverage_map`. The generated consumer template keeps the value
+`null`, so projects without a map keep the existing verification floor. When a
+map is configured, `bin/verify-project` loads it with `yaml.safe_load`,
+validates `changerail.verification-coverage.v1` and fails closed for duplicate
+ids, unsafe globs, missing selectors, unknown oracle kinds, unbound evidence
+refs or undeclared policy fields.
+
+Coverage entries are deliberately limited to five fields: `id`, `applies_to`,
+`invariant`, `oracle` and `required_evidence`. Path globs are normalized
+repository-relative POSIX selectors; operation kinds use generic ChangeRail
+scope operations; `surface_kinds` are opaque namespaced ids such as
+`python.runtime` or an extension-owned `onec.managed-form`. ChangeRail core
+matches ids as data and does not embed domain tools or rules.
+
+Fast-forward planning may write a tracked
+`changerail.verification-coverage-plan.v1` artifact per change. It stores map
+fingerprint, selected coverage ids and SHA-256 hashes of exact card acceptance
+criteria. It must not copy invariant, oracle, command, criterion text, final
+verdict authority or raw evidence.
+
+Delivery/review handoff may write ignored
+`changerail.verification-coverage-ledger.v1` runtime state. The ledger binds
+map, plan, manifest and reviewed-tree fingerprints, then records coverage ids,
+applicability, oracle observation state and evidence-index refs. Each evidence
+ref carries the required `kind` and `oracle_ref`; preflight schema-validates the
+referenced evidence index and requires a matching passed entry. It is diagnostic
+evidence for deterministic reconciliation, not an acceptance verdict.
+
+Review preflight validates configured coverage before model launch. Missing or
+stale plan, missing ledger, manifest scope drift, stale fingerprints, incomplete
+applicable ids or evidence refs that do not resolve to passed evidence-index
+entries become process blockers and do not consume semantic review budget.
+If a project/domain extension reports schema-valid `extension_surfaces` in the
+delivery manifest, preflight includes those namespaced surface kinds in
+coverage applicability matching.
+Projects with `verification.coverage_map: null` keep the current verification
+floor and do not require generated coverage artifacts.
 
 ## Review Verdict
 
@@ -287,6 +398,12 @@ path bytes. Untracked directories разворачиваются до точны
 paths; directory-wide untracked path отклоняется до попадания в staging
 proposal.
 
+Если project содержит tracked `.changerail/execution-target.json`, manifest
+получает optional `execution_target` projection с `schema`, `id`,
+`fingerprint` и `target_substitution_policy: forbid`. Helper не хранит endpoint,
+credentials, provider id или target contents и fail-closed на symlink, path
+escape, unknown/content-bearing fields, untracked declaration или schema error.
+
 `scope-check` сверяет заявленный manifest scope с фактическим Git scope
 отдельно для working tree и staged index. Helper использует NUL-delimited Git
 data и operation-aware сравнение для `add`, `modify`, `delete` и `rename`;
@@ -316,6 +433,10 @@ Manifest может хранить concise handoff summary без raw logs:
 
 - `verification_summary`: итог проверки, короткое резюме и command/evidence
   references;
+- `coverage_summary`: configured/applicable/covered/missing/invalid counts plus
+  ignored per-change ledger path/fingerprint references;
+- `extension_surfaces`: optional extension-owned namespaced surface kinds used
+  only for generic coverage applicability matching;
 - `review_summary`: latest review result, cycle, finding counts и verdict path;
 - `final_card_state`: итоговый board path/status и stable result summary.
 
@@ -377,6 +498,11 @@ Helper отказывается запускать command с очевидным
 редактирует obvious token-like output before retention. Это safety screen, а
 не доказательство отсутствия секретов; команды с credentials не должны
 передаваться в retained capture.
+
+Если tracked execution target declaration присутствует, evidence index и новые
+entries автоматически получают тот же `execution_target`. Existing index с
+другой identity или evidence без matching identity fail-closed; CLI не принимает
+target override.
 
 Пример:
 
@@ -778,6 +904,20 @@ preflight checks, log paths и token usage, когда provider output позв�
 прочитать. Если usage недоступен, record обязан явно писать
 `usage.available: false`.
 
+Для live runs record может содержать optional `progress` object с schema
+`changerail.delivery-progress.v1`: bounded `phase` (`preflight`, `ff`, `do`,
+`review`, `publish`, `terminal`), bounded `stage`, `heartbeat_at` и
+monotonic `event_counter`. Runner пишет `progress_health` separately as bounded
+diagnostic (`active`, `stale`, `terminated`, heartbeat age и process-alive
+observation). Health не имеет terminal authority: stale heartbeat не меняет
+`result` и не завершает live child.
+
+Single-card и plan runner records могут содержать `execution_target`; это та же
+non-sensitive projection из tracked declaration. Runner проверяет ее до child
+launch, при queue resume и retained dirty resume. Drift, rebind или отсутствие
+ранее captured declaration блокирует reuse старого status/evidence/verdict и
+требует новый clean attempt.
+
 Обязательный минимум status record остается стабильным: `schema`, `run_id`,
 `updated_at`, `workspace`, `card`, `phase`, `result`, `timestamps`, `command` и
 `usage`. Поле `performance` optional и best-effort: runner пишет его только для
@@ -785,19 +925,30 @@ preflight checks, log paths и token usage, когда provider output позв�
 git status или publish metadata. Отсутствующее optional timing значение означает
 `unknown`, а не `0`.
 
+Новые status records также могут содержать optional `episode` и `attempt`.
+Новый single-card delivery начинает episode с `episode.id == run_id` и
+`attempt.kind == delivery`; supported resume наследует source episode и пишет
+`attempt.kind == recovery` с `previous_attempt_id` и `source_status_path`.
+Legacy records без этих fields остаются valid и отображаются как isolated
+legacy rows.
+
 `performance` может содержать:
 
 - `wall_time_seconds`;
+- `active_seconds`, `wait_seconds` и `operator_wait_seconds`, derived только
+  из accepted value-free progress events;
 - `event_counts` и `agent_message_count`;
 - `command_execution_count`, `commands` и `slowest_commands` с
   runner-observed `started_at`, `ended_at`, `duration_seconds` и optional
   bounded `output` metadata: stdout/stderr bytes, total bytes, threshold,
   threshold-exceeded flag, truncation flag и classification;
+- `command_duration_seconds` и `command_samples` с observed/retained count,
+  limit и truncation flag;
 - `command_output` aggregate summary с documented threshold, observed/oversized
   command counts, largest observed command bytes и bounded top oversized
   command labels;
 - `file_change_count`;
-- `timeline` с bounded runner-observed событиями;
+- `timeline` с bounded runner-observed событиями и `timeline_samples`;
 - `review.cycle_count`, `review.first_review_latency_seconds`,
   `review.time_to_final_go_seconds`, optional `review.rescue_budget` и
   per-cycle timing;
@@ -838,9 +989,10 @@ Single-card `status` является read-only reader-ом для existing
 `<workspace>/.runtime/changerail/delivery-runs/`. Одновременные selectors,
 missing/corrupt/schema-invalid или unsupported status records fail-closed и не
 fallback-ят на другой run. Human output показывает compact attention fields:
-card, run id, phase, result, `updated_at`, optional `terminal_reason`,
-selected status path и canonical related runtime paths для manifest, review
-verdict, review history и evidence index. Existing linked artifacts
+card, run id, phase, result, `updated_at`, optional progress phase/stage,
+heartbeat, health, `terminal_reason`, selected status path и canonical related
+runtime paths для manifest, review verdict, review history и evidence index.
+Existing linked artifacts
 валидируются по tracked schemas before trust; invalid manifest/verdict/history
 или evidence index дает non-zero diagnostic вместо guessed guidance. Если
 valid manifest содержит `runtime_pause_reasons`, reader печатает только stored
@@ -854,8 +1006,22 @@ policy через prompt и environment: начинать с scoped paths, `rg -
 top-level file lists или bounded excerpts, считать truncated output и exit `130`
 inconclusive evidence, а raw stdout/stderr оставлять ignored runtime evidence.
 Default per-command output threshold - 65536 bytes, с override через
-`CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES`. Для ChangeRail source checkout default launcher -
-tracked `/opt/changerail/bin/codex`; consumer repository не обязан иметь
+`CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES`. Для progress runner additionally
+sets `CHANGERAIL_ACTIVE_RUN_ID`, `CHANGERAIL_ACTIVE_CARD_ID`,
+`CHANGERAIL_ACTIVE_RUN_DIR` и private `CHANGERAIL_PROGRESS_EVENT_PATH`.
+Lifecycle code emits value-free events through:
+
+```bash
+bin/changerail-delivery-runner progress-event ff planning
+bin/changerail-delivery-runner progress-event do implementation
+```
+
+Event file stays ignored runtime state. Runner accepts only matching run/card
+identity, known phase/stage, date-time timestamp and increasing sequence, then
+atomically updates `status.json`; prose, shell commands and stdout/stderr values
+are not parsed as lifecycle progress.
+Для ChangeRail source checkout default launcher - tracked `/opt/changerail/bin/codex`;
+consumer repository не обязан иметь
 tracked `bin/codex`, если оператор запускает ChangeRail runner извне или
 передает supported launcher через `--launcher`. Если `--workspace` не указан, workspace
 резолвится в git-root invocation cwd, а вне git - в текущий cwd. Если
@@ -921,6 +1087,26 @@ operator diagnostics. Единственное более сильное evidenc
 malformed marker на conservative `NO-GO`, но не разрешает commit/push. Отсутствующий,
 invalid, stale или positive verdict не заменяет malformed marker и не открывает
 publish path.
+
+Recoverable external blocker имеет отдельный bounded contract. Только
+structured JSONL terminal event с `terminal_reason:
+recoverable_external_blocker` и объектом `external_blocker` может сделать
+blocked retained payload resumable. Объект использует schema
+`changerail.external-blocker.v1`, run-local `blocker_id`, known `class`
+(`credential`, `network`, `license`, `external_service`, `platform_access`,
+`required_software`), `observed_at`, `retryable: true` и
+`evidence_policy.required_ids`/`max_age_seconds`. Contract intentionally
+value-free: prompts, entered values, response bodies, screenshots, raw output,
+credentials и project-specific reason strings запрещены schema/runner
+validation. Legacy marker-line `terminal_reason: external_blocker` сохраняет
+diagnostic reason, но не создает retained dirty-resume authority.
+
+Когда valid recoverable external blocker завершает child, status also stores
+exact `retained_payload` identity: source run/status path, card/workspace,
+`HEAD`, reviewed tree SHA, diff fingerprint, review target и optional declared
+execution target identity. Runner не сообщает delivery success и не ослабляет
+последующий review/publish gate. Если structured blocker invalid или retained
+identity cannot be captured, attempt stays `BLOCKED` and non-resumable.
 Если preflight возвращает `CODEX auth: fail` или `CODEX_HOME symlinks: fail`,
 оператор должен использовать remediation из
 `docs/consumer-adoption-runbook.md#codex-auth-for-delivery-runner`: ignored
@@ -933,6 +1119,26 @@ preflight как proof. Runner повторяет полный fresh preflight �
 и запускает `$changerail-deliver` только если publish target доказан заново.
 Если prior status отсутствует, невалиден, относится к другой card/workspace или
 fresh proof снова не проходит, resume пишет `BLOCKED` и не запускает delivery.
+
+Dirty retained resume поддерживается только для exact payload branches:
+existing `investigation_required` branch требует fresh deterministic published
+authorization, а `recoverable_external_blocker` branch требует explicit
+`--evidence-index` under ignored `.runtime/changerail/evidence/`. Evidence index
+must be schema-valid `changerail.evidence-index.v1`, scoped to source
+run/card, contain each required id exactly once with `status: passed`, runtime
+storage, non-redacted state and completion time newer than blocker observation
+and within `max_age_seconds`. Evidence proves only retry eligibility: resumed
+child still reruns mandatory verification, external gate and independent
+review/publish gates. Missing/stale/wrong-scope/non-passing evidence, payload
+drift, workspace/card mismatch, unknown blocker class or target mismatch fail
+closed before Codex launch with stable terminal reasons.
+
+If project declares `.changerail/execution-target.json`, retained identity,
+current declaration, evidence-index target metadata and every recovery evidence
+entry must match exactly by logical id/fingerprint/policy. External recovery
+never authorizes provision, rebind, restore, clone or target substitution;
+explicit target rebind starts a new clean delivery attempt and cannot reuse
+dirty retained evidence.
 
 ## Delivery Plan
 
@@ -1026,6 +1232,13 @@ uses the existing single-card runner and keeps its own
 `.runtime/changerail/delivery-runs/<run-id>/status.json`. Queue status stores
 references such as child run ids and status paths; raw stdout/stderr logs stay
 ignored runtime evidence and are not embedded in aggregate status.
+Для running card aggregate status may mirror child `progress` and
+`progress_health` only after the child status validates against
+`changerail.delivery-run.v1` and its `run_id`/`card.id` match the active plan
+entry. Mismatch does not copy progress and records bounded
+`progress_diagnostic: invalid_child_identity`; schema-invalid child progress
+uses `progress_diagnostic: invalid_child_status`.
+
 Queue admission uses the configured single-card runner `preflight
 --write-status` command as a child-equivalent publish-target receipt before
 workspace locks or delivery children. `run-plan` and `resume-plan` rerun that
@@ -1045,6 +1258,9 @@ bin/changerail-delivery-runner preflight-plan delivery-plan.json --consumer-root
 bin/changerail-delivery-runner run-plan delivery-plan.json --consumer-root /opt/example-workspace
 bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /opt/example-workspace \
   --status-path /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json
+bin/changerail-delivery-runner resume-plan delivery-plan.json --consumer-root /opt/example-workspace \
+  --status-path /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json \
+  --evidence-index service-a/.runtime/changerail/evidence/external-resume/index.json
 bin/changerail-delivery-runner status-plan \
   /opt/example-workspace/.runtime/changerail/delivery-plans/<run-id>/status.json --json
 ```
@@ -1069,6 +1285,17 @@ card с `recovery_for`; external blockers не создают implementation rec
 source, быть в том же workspace/wave и наследовать dependencies. Source
 становится `recovered` и получает `recovered_by` только после успешной delivery
 recovery card; downstream dependencies запускаются после этого.
+
+Если child завершился на valid retained `recoverable_external_blocker`,
+aggregate card status сохраняет `retained_recovery` с source run/status,
+fingerprint, blocker id/class/policy и optional execution target identity.
+`resume-plan --evidence-index <path>` resumes the original child before
+downstream cards; already delivered cards remain skipped. Without evidence,
+with duplicate/mixed retained recovery, wrong workspace/card, target drift or
+failed child resume, queue remains blocked and downstream dependencies stay
+blocked. Linked `recovery_for` implementation cards are rejected for this
+external-retained branch because the only authorized dirty path is exact
+original-child resume.
 
 ## Review Cycle History
 
@@ -1129,8 +1356,12 @@ bin/changerail-delivery-metrics
 bin/changerail-delivery-metrics --csv
 ```
 
-Он читает structured run records и review-cycle history, печатает per-run и
-aggregate metrics, including `first_pass_go` and rescue budget
+Он читает structured run records и review-cycle history, печатает episode rows
+и aggregate metrics. Review history присоединяется только через matching
+`episode.id`; card-id-only и timestamp inference не используются.
+Preflight-only records отображаются отдельным count и не входят в delivery
+success или first-pass review denominator. Output включает `first_pass_go`,
+attempt/recovery counts, command sample metadata и rescue budget
 `limit`/`used`/`remaining`/`exhausted`; отсутствующие optional fields выводит
 как `unknown`.
 

@@ -22,6 +22,9 @@
       "type": "string",
       "format": "date-time"
     },
+    "episode": {
+      "$ref": "#/$defs/episodeLineage"
+    },
     "workspace": {
       "type": "object",
       "required": ["root"],
@@ -36,6 +39,9 @@
           "minLength": 1
         }
       }
+    },
+    "execution_target": {
+      "$ref": "#/$defs/executionTargetIdentity"
     },
     "card": {
       "type": "object",
@@ -103,6 +109,15 @@
     "verification_summary": {
       "$ref": "#/$defs/verificationSummary"
     },
+    "coverage_summary": {
+      "$ref": "#/$defs/coverageSummary"
+    },
+    "extension_surfaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/extensionSurface"
+      }
+    },
     "review_summary": {
       "$ref": "#/$defs/reviewSummary"
     },
@@ -120,6 +135,70 @@
     }
   },
   "$defs": {
+    "executionTargetIdentity": {
+      "type": "object",
+      "required": ["schema", "id", "fingerprint", "target_substitution_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.execution-target.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "target_substitution_policy": {
+          "const": "forbid"
+        }
+      }
+    },
+    "episodeLineage": {
+      "type": "object",
+      "required": ["schema", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-episode-lineage.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "attemptLineage": {
+      "type": "object",
+      "required": ["schema", "id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-attempt.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "publish"
+        },
+        "parent_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "previous_attempt_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "summaryCommand": {
       "type": "object",
       "required": ["command", "outcome"],
@@ -216,6 +295,60 @@
             "$ref": "#/$defs/evidenceReference"
           }
         }
+      }
+    },
+    "coverageSummary": {
+      "type": "object",
+      "required": ["configured", "status", "applicable", "covered", "missing", "invalid", "not_applicable", "ledgers"],
+      "additionalProperties": false,
+      "properties": {
+        "configured": {"type": "boolean"},
+        "status": {"enum": ["not-configured", "complete", "missing", "invalid", "stale", "blocked"]},
+        "applicable": {"type": "integer", "minimum": 0},
+        "covered": {"type": "integer", "minimum": 0},
+        "missing": {"type": "integer", "minimum": 0},
+        "invalid": {"type": "integer", "minimum": 0},
+        "not_applicable": {"type": "integer", "minimum": 0},
+        "ledgers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["change", "path", "fingerprint"],
+            "additionalProperties": false,
+            "properties": {
+              "change": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+              "path": {"type": "string", "minLength": 1},
+              "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    },
+    "extensionSurface": {
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"$ref": "#/$defs/namespacedSurfaceKind"},
+        "path": {"$ref": "#/$defs/repositoryRelativePath"},
+        "operation": {"enum": ["add", "modify", "delete", "rename", "unknown"]}
+      }
+    },
+    "namespacedSurfaceKind": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)+$"
+    },
+    "repositoryRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "anyOf": [
+          {"pattern": "^/"},
+          {"pattern": "\\\\"},
+          {"pattern": "(^|/)\\.\\.(?:/|$)"},
+          {"pattern": "(^|/)\\.(?:/|$)"},
+          {"const": "."}
+        ]
       }
     },
     "reviewSummary": {
@@ -317,6 +450,9 @@
           "description": "Legacy ambiguous commit field retained for older runtime records. New publish flows should use payload_commit and published_commit.",
           "type": "string",
           "minLength": 1
+        },
+        "attempt": {
+          "$ref": "#/$defs/attemptLineage"
         },
         "remote": {
           "type": "string",

@@ -12,6 +12,9 @@ ChangeRail review gate.
 
 Arguments: $ARGUMENTS
 
+If a runner provided `CHANGERAIL_PROGRESS_EVENT_PATH`, follow the canonical
+skill's value-free `progress-event review <stage>` transition contract.
+
 Reminders from the skill contract:
 
 - Run only from a fresh context that did not plan or implement the card.

@@ -121,6 +121,13 @@ truncated output не считается доказательством отсу
 design и affected toolchain. Generic core не навязывает formatter, typing или
 environment matrix, если они не объявлены проектом или измененным surface.
 
+Tracked `.changerail/execution-target.json` делает `id`/`fingerprint` частью
+verification floor: manifest/status/evidence/blocker/resume/review MUST match.
+Substitute target forbidden; missing/multiple/mismatch => blocker. Rebind =>
+new clean attempt with new tracked declaration.
+
+`coverage_map`: `ff` ids, `do` refs, preflight freshness, reviewer oracle.
+
 Для docs/config-only changes минимальный baseline обычно включает:
 
 ```bash
@@ -173,6 +180,7 @@ allowance. Missing, stale, mismatched или over-ceiling authorization всег
 Reviewer независимо проверяет:
 
 - diff против card/OpenSpec scope;
+- target declaration, manifest и evidence match, если target объявлен;
 - requirements и acceptance coverage;
 - обязательный verification floor и retained evidence;
 - способность измененных tests наблюдать заявленное поведение;

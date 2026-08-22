@@ -12,6 +12,9 @@ planning flow.
 
 Arguments: $ARGUMENTS
 
+If a runner provided `CHANGERAIL_PROGRESS_EVENT_PATH`, follow the canonical
+skill's value-free `progress-event ff <stage>` transition contract.
+
 Reminders from the skill contract:
 
 - Plan and create OpenSpec artifacts only.

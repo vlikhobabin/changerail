@@ -333,6 +333,22 @@ the independent review phase.
 - **AND** the orchestrator validates the resulting verdict with `--check-fresh`
   before continuing to publish
 
+### Requirement: Reviewer protects parent-owned active runner evidence
+`changerail-review` and the fresh-review launch contract MUST treat an active
+runner directory identified by `CHANGERAIL_ACTIVE_RUN_DIR` as parent-owned
+evidence until the child delivery run terminates.
+
+#### Scenario: Reviewer runs inside a live delivery child
+- **WHEN** an independent reviewer is launched while the parent delivery run is
+  still active
+- **THEN** the reviewer excludes the active runner directory from discovery
+- **AND** it does not read, search, tail, cite or summarize `status.json`, raw
+  runtime logs or other files under that directory
+- **AND** it audits the card, manifest, preflight, reviewed tree and retained
+  card-owned evidence outside the protected directory
+- **AND** a mandatory claim backed only by protected active-run output is
+  recorded as unbacked rather than justified from that output
+
 ### Requirement: Publish finalizes board metadata deterministically
 `changerail-pub` MUST define deterministic board finalization behavior for
 review-gated cards after the reviewed payload commit succeeds, while keeping
@@ -478,3 +494,36 @@ that implementation is present or absent.
 - **THEN** the delivery skill directs the agent to verify the relevant files
   directly instead of inferring full implementation coverage from the truncated
   stream
+
+### Requirement: Lifecycle skills MUST enforce target identity handoff
+Canonical `ff`, `do`, `review`, `pub` и `deliver` skills MUST требовать
+captured target identity и matching evidence при наличии project declaration и
+MUST запрещать implicit substitution.
+
+#### Scenario: Planning and delivery handoff target identity
+- **WHEN** project объявил execution target
+- **THEN** planning фиксирует identity в delivery scope
+- **AND** delivery сохраняет matching evidence или structured blocker
+
+#### Scenario: Reviewer видит mismatch
+- **WHEN** manifest, current declaration и evidence target identities не
+  совпадают
+- **THEN** deterministic preflight блокирует semantic review/publish
+- **AND** remediation не предлагает создать substitute target
+
+### Requirement: Lifecycle skill coverage responsibilities
+Canonical skills `changerail-ff`, `changerail-do` и `changerail-review` MUST
+обрабатывать project coverage map через единый plan/ledger contract и MUST NOT
+копировать raw evidence или создавать alternative acceptance verdict.
+
+#### Scenario: Fast-forward планирует configured coverage
+- **WHEN** `changerail-ff` обрабатывает card в project с valid map
+- **THEN** он пишет schema-valid per-change coverage reference после определения
+  proposal/design scope
+- **AND** selected ids/hash references соответствуют map/card sources
+
+#### Scenario: Review получает incomplete ledger
+- **WHEN** independent review видит applicable rule с missing/invalid evidence
+  или oracle, не наблюдающий claimed boundary
+- **THEN** skill записывает blocker evidence/test-adequacy finding
+- **AND** не отмечает acceptance pass только по наличию path/command

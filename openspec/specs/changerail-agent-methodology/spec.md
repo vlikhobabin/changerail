@@ -529,3 +529,38 @@ re-review cycle as separate review-gated delivery concepts.
   investigation-card policy
 - **AND** it does not publish the dirty payload or count the first review as a
   rescue attempt
+
+### Requirement: Agents SHALL preserve declared execution target
+Planning, delivery и review agents SHALL переносить exact project-declared
+target identity и SHALL NOT создавать, клонировать, восстанавливать,
+регистрировать или выбирать substitute target для обхода unavailable external
+gate.
+
+#### Scenario: Declared target недоступна
+- **WHEN** обязательная target verification не может быть выполнена на exact
+  declared identity
+- **THEN** agent записывает structured blocker
+- **AND** не получает green evidence на новой или альтернативной среде
+
+#### Scenario: Проект не объявил target
+- **WHEN** `.changerail/execution-target.json` отсутствует и acceptance не
+  требует target-bound evidence
+- **THEN** existing generic workflow остается доступным
+
+### Requirement: Verification coverage lifecycle
+Когда project настраивает verification coverage map, ChangeRail planning MUST
+объявить selected coverage, delivery MUST reconcile его с actual scope и
+observed evidence, а review MUST проверить каждый applicable invariant против
+card acceptance. Projects без map MUST сохранять existing verification floor.
+
+#### Scenario: Planned scope получает applicable path
+- **WHEN** actual delivery manifest содержит path/operation или namespaced
+  surface, делающий unplanned coverage rule applicable
+- **THEN** delivery блокируется и возвращает change в planning
+- **AND** не продолжает работу с silently incomplete ledger
+
+#### Scenario: Applicable rule имеет complete evidence
+- **WHEN** plan и actual scope совпадают, а все required evidence references
+  valid/fresh
+- **THEN** deterministic preflight может передать payload в independent review
+- **AND** reviewer по-прежнему оценивает oracle/test adequacy до acceptance pass

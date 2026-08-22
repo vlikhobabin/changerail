@@ -14,6 +14,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
 from changerail_contract_schema import validate_with_schema
+from changerail_execution_target import describe_execution_target, execution_targets_match, load_execution_target
+from changerail_source_classification import SourceClassificationError, check_report as source_classification_check_report
+from changerail_verification_coverage import coverage_preflight_check
 import changerail_delivery_manifest as dm
 
 SCHEMA_ID = "changerail.review-preflight-result.v1"
@@ -513,6 +516,116 @@ def _previous_verdict(path: Path, fingerprint: dict[str, str], validate_verdict:
     return False, "previous verdict is absent, negative, invalid or stale; it is not a process blocker"
 
 
+def _target_token(identity: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            key: identity.get(key)
+            for key in ("schema", "id", "fingerprint", "target_substitution_policy")
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+
+def _manifest_evidence_refs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    summary = manifest.get("verification_summary")
+    if not isinstance(summary, dict):
+        return refs
+    refs.extend(ref for ref in summary.get("evidence_refs", []) if isinstance(ref, dict))
+    for command in summary.get("commands", []):
+        if isinstance(command, dict) and isinstance(command.get("evidence"), dict):
+            refs.append(command["evidence"])
+    return refs
+
+
+def _evidence_target_identities(workspace: Path, manifest: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    identities: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    active_raw = os.environ.get("CHANGERAIL_ACTIVE_RUN_DIR")
+    active = Path(active_raw).resolve(strict=False) if active_raw else None
+    for ref in _manifest_evidence_refs(manifest):
+        raw_index = ref.get("index_path")
+        if not isinstance(raw_index, str) or not raw_index:
+            continue
+        index_path = workspace / raw_index
+        resolved = index_path.resolve(strict=False)
+        if not resolved.is_relative_to(workspace):
+            errors.append(f"evidence index path escapes workspace: {raw_index}")
+            continue
+        if active is not None and resolved.is_relative_to(active):
+            errors.append(f"evidence index path is under active runner evidence: {raw_index}")
+            continue
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except OSError as exc:
+            errors.append(f"evidence index cannot be read: {raw_index}: {exc}")
+            continue
+        except json.JSONDecodeError as exc:
+            errors.append(f"evidence index JSON is invalid: {raw_index}: {exc}")
+            continue
+        if not isinstance(payload, dict):
+            errors.append(f"evidence index must be an object: {raw_index}")
+            continue
+        candidates = [payload.get("execution_target")]
+        candidates.extend(
+            entry.get("execution_target")
+            for entry in payload.get("entries", [])
+            if isinstance(entry, dict)
+        )
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                identities[_target_token(candidate)] = candidate
+    return list(identities.values()), errors
+
+
+def _execution_target_state(workspace: Path, manifest: dict[str, Any] | None) -> tuple[dict[str, Any], bool, str]:
+    target = load_execution_target(workspace, require_tracked=True)
+    identity = target.get("identity")
+    state: dict[str, Any] = {
+        "present": bool(target.get("present")),
+        "path": str(target.get("path") or ".changerail/execution-target.json"),
+        "evidence_identity_count": 0,
+    }
+    errors = list(target.get("errors") or [])
+    if isinstance(identity, dict):
+        state["identity"] = identity
+    manifest_identity = manifest.get("execution_target") if isinstance(manifest, dict) else None
+    if isinstance(manifest_identity, dict):
+        state["manifest_identity"] = manifest_identity
+    if errors:
+        state["errors"] = errors
+        return state, False, "; ".join(errors)
+    if isinstance(identity, dict):
+        if not isinstance(manifest_identity, dict):
+            errors.append("delivery manifest is missing execution_target for declared project target")
+        elif not execution_targets_match(identity, manifest_identity):
+            errors.append(
+                "delivery manifest execution_target differs from current declaration: "
+                f"manifest {describe_execution_target(manifest_identity)} current {describe_execution_target(identity)}"
+            )
+        evidence_identities, evidence_errors = _evidence_target_identities(workspace, manifest or {})
+        state["evidence_identity_count"] = len(evidence_identities)
+        errors.extend(evidence_errors)
+        if len(evidence_identities) == 0:
+            errors.append("target-bound verification evidence is missing execution_target")
+        elif len(evidence_identities) > 1:
+            errors.append("target-bound verification evidence contains multiple execution targets")
+        elif not execution_targets_match(identity, evidence_identities[0]):
+            errors.append(
+                "target-bound verification evidence differs from current declaration: "
+                f"evidence {describe_execution_target(evidence_identities[0])} current {describe_execution_target(identity)}"
+            )
+    elif isinstance(manifest_identity, dict):
+        errors.append("delivery manifest retains execution_target but current declaration is absent")
+    if errors:
+        state["errors"] = errors
+        return state, False, "; ".join(errors)
+    if isinstance(identity, dict):
+        return state, True, f"execution target preserved: {describe_execution_target(identity)}"
+    return state, True, "no execution target declaration; legacy-compatible flow"
+
+
 def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | None, normalize: bool,
                   risk_override: str | None, output: Path | None, fingerprint_fn: Callable[..., dict[str, Any]],
                   validate_verdict: Callable[[Any], list[str]], diagnostics: bool = False) -> tuple[int, dict[str, Any]]:
@@ -536,6 +649,18 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         _check(checks, "source-classification", True, f"{SOURCE_CLASSIFICATION_PATH} declares {len(classification.rules)} source kinds")
     else:
         _check(checks, "source-classification", True, f"{SOURCE_CLASSIFICATION_PATH} absent; built-in classifier only")
+    try:
+        classification_report = source_classification_check_report(workspace, [], SOURCE_CLASSIFICATION_PATH)
+        blocking = classification_report["summary"]["blocking"]
+        advisory = classification_report["summary"]["advisory"]
+        _check(
+            checks,
+            "source-classification-check",
+            blocking == 0,
+            f"blocking={blocking} advisory={advisory} candidates={len(classification_report.get('uncovered_candidates', []))}",
+        )
+    except SourceClassificationError as exc:
+        _check(checks, "source-classification-check", False, str(exc))
     manifest_state = {"path": os.path.relpath(manifest_path, workspace), "valid": False, "normalized": False, "scope_ok": False}
     manifest: dict[str, Any] | None = None
     try:
@@ -571,6 +696,21 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
     else:
         _check(checks, "scope", False, "scope cannot be checked without a valid manifest")
         _check(checks, "archive", False, "archive state cannot be checked without a valid manifest")
+    execution_target, target_ok, target_detail = _execution_target_state(workspace, manifest)
+    _check(checks, "execution-target", target_ok, target_detail)
+    extension_surfaces = manifest.get("extension_surfaces", []) if isinstance(manifest, dict) else []
+    coverage_state, coverage_ok, coverage_detail = coverage_preflight_check(
+        workspace=workspace,
+        card_text=card_text,
+        card=card,
+        manifest=manifest,
+        actual=actual,
+        reviewed_tree={key: fingerprint[key] for key in ("tree_sha", "diff_fingerprint")},
+        surface_kinds={item["kind"] for item in extension_surfaces if isinstance(item, dict) and isinstance(item.get("kind"), str)},
+    )
+    coverage_payload = dict(coverage_state)
+    coverage_payload["detail"] = coverage_detail
+    _check(checks, "coverage", coverage_ok, json.dumps(coverage_payload, ensure_ascii=True, sort_keys=True))
 
     complexity = _production_complexity(workspace, actual, classification) if actual else {"added_production_loc": 0, "source_breakdown": []}
     added_loc = complexity["added_production_loc"]
@@ -641,7 +781,7 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         "schema": SCHEMA_ID, "checked_at": dm.utc_now(), "ok": not blocked and not stop, "outcome": outcome,
         "workspace": {"root": str(workspace), **{key: fingerprint[key] for key in ("head_commit", "tree_sha", "diff_fingerprint")}},
         "card": {"id": card["id"], "path": card["path"], "status": card["status"]},
-        "manifest": manifest_state, "risk": risk,
+        "manifest": manifest_state, "execution_target": execution_target, "risk": risk,
         "complexity_guard": {
             "added_production_loc": added_loc, "limit": loc_limit, "new_authority_or_wire_protocol": new_protocol,
             "repeated_defect_class": repeated, "published_investigation_authorization": authorization,

@@ -182,6 +182,16 @@ operator handoff для принятой карточки начинается �
 ошибка процесса: safety stop нужен, чтобы не смешивать scope и не публиковать
 непроверенное состояние.
 
+Если проект явно добавил tracked `.changerail/execution-target.json`, карточка
+и evidence должны сохранять тождество этой цели выполнения. ChangeRail хранит
+только логический `id`, нечувствительный `fingerprint` и policy
+`target_substitution_policy: forbid`; endpoint, credentials и содержимое среды
+остаются вне generic contract. Недоступная или несовпавшая цель дает blocker до
+следующего operator action. Агент не должен создавать, клонировать,
+восстанавливать, регистрировать или выбирать другую среду как запасной маршрут.
+Явный rebind - это новый clean delivery attempt с новым tracked declaration;
+старые retained evidence, manifest и review verdict к нему не переносятся.
+
 ## Новая сессия на карточку
 
 Практически полезно начинать **новую агентскую сессию на каждую карточку**.

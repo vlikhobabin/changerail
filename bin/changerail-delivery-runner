@@ -16,11 +16,13 @@ from __future__ import annotations
 __doc__ = "Run one ChangeRail delivery card non-interactively and write structured runtime status."
 
 import argparse
+import copy
 import hashlib
 import json
 import os
 import re
 import secrets
+import select
 import shutil
 import subprocess
 import sys
@@ -38,6 +40,8 @@ from typing import Any
 SCHEMA = "changerail.delivery-run.v1"
 PLAN_SCHEMA = "changerail.delivery-plan.v1"
 PLAN_STATUS_SCHEMA = "changerail.delivery-plan-status.v1"
+EPISODE_LINEAGE_SCHEMA = "changerail.delivery-episode-lineage.v1"
+ATTEMPT_SCHEMA = "changerail.delivery-attempt.v1"
 AUTH_ENV_VARS = ("CODEX_AUTH_TOKEN", "OPENAI_API_KEY")
 AUTH_MARKER_FILES = ("auth.json", "auth.toml")
 AUTH_REMEDIATION = (
@@ -48,6 +52,26 @@ AUTH_REMEDIATION = (
 TERMINAL_OUTCOMES = ("NO-GO", "BLOCKED", "DELIVERED")
 TERMINAL_FIELD_KEYS = {"terminal_outcome", "terminal-outcome", "outcome", "result"}
 TERMINAL_REASON_KEYS = {"terminal_reason", "terminal-reason", "reason_code", "reason-code"}
+RECOVERABLE_EXTERNAL_REASON = "recoverable_external_blocker"
+EXTERNAL_BLOCKER_SCHEMA = "changerail.external-blocker.v1"
+RETAINED_RESUME_CONTEXT_SCHEMA = "changerail.retained-resume-context.v1"
+EXTERNAL_BLOCKER_CLASSES = (
+    "credential",
+    "network",
+    "license",
+    "external_service",
+    "platform_access",
+    "required_software",
+)
+EXTERNAL_BLOCKER_REQUIRED_KEYS = {
+    "schema",
+    "blocker_id",
+    "class",
+    "observed_at",
+    "retryable",
+    "evidence_policy",
+}
+EXTERNAL_BLOCKER_POLICY_KEYS = {"required_ids", "max_age_seconds"}
 BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 MAX_TIMELINE_EVENTS = 100
 MAX_COMMANDS = 50
@@ -71,6 +95,7 @@ REMOTE_FAILURE_CLASSES = (
 TRANSIENT_REMOTE_FAILURE_CLASSES = {"dns", "timeout", "unknown_remote_failure"}
 URL_USERINFO_RE = re.compile(r"([a-z][a-z0-9+.-]*://)([^/@\s]+)@", re.IGNORECASE)
 TOKEN_VALUE_RE = re.compile(r"(?i)(token|password|passwd|secret|access_key|api_key|authorization)=([^\s&]+)")
+EVIDENCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 DEFAULT_COMMAND_OUTPUT_THRESHOLD_BYTES = 64 * 1024
 
 
@@ -85,10 +110,29 @@ def positive_int_from_env(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def positive_float_from_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 COMMAND_OUTPUT_THRESHOLD_BYTES = positive_int_from_env(
     "CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES",
     DEFAULT_COMMAND_OUTPUT_THRESHOLD_BYTES,
 )
+PROGRESS_SCHEMA = "changerail.delivery-progress.v1"
+PROGRESS_EVENT_SCHEMA = "changerail.delivery-progress-event.v1"
+PROGRESS_PHASES = ("preflight", "ff", "do", "review", "publish", "terminal")
+PROGRESS_STAGES = ("starting", "discovery", "planning", "implementation", "verification", "waiting", "finalizing", "complete")
+PROGRESS_EVENT_KEYS = {"schema", "run_id", "card_id", "sequence", "phase", "stage", "emitted_at"}
+DEFAULT_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 5.0
+DEFAULT_PROGRESS_STALE_AFTER_SECONDS = 15.0
+DEFAULT_PROGRESS_POLL_INTERVAL_SECONDS = 0.1
 
 
 @dataclass
@@ -103,6 +147,8 @@ class Check:
 class TerminalSignal:
     outcome: str | None = None
     reason: str | None = None
+    external_blocker: dict[str, Any] | None = None
+    external_blocker_error: str | None = None
 
 
 @dataclass
@@ -149,6 +195,76 @@ def schema_errors(payload: Any, schema_filename: str) -> list[str]:
     except Exception as exc:
         return [f"schema validation unavailable: {type(exc).__name__}: {exc}"]
     return validate_with_schema(payload, schema_filename)
+
+
+def execution_target_state(root: Path) -> dict[str, Any]:
+    scripts = repo_root_from_script() / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from changerail_execution_target import load_execution_target
+    except Exception as exc:
+        return {"present": False, "errors": [f"execution target helper unavailable: {type(exc).__name__}: {exc}"]}
+    return load_execution_target(root, require_tracked=True)
+
+
+def execution_target_identity(root: Path) -> tuple[dict[str, Any] | None, str | None]:
+    state = execution_target_state(root)
+    errors = state.get("errors")
+    if errors:
+        return None, "; ".join(str(error) for error in errors)
+    identity = state.get("identity")
+    return identity if isinstance(identity, dict) else None, None
+
+
+def execution_targets_match(first: Any, second: Any) -> bool:
+    if not isinstance(first, dict) or not isinstance(second, dict):
+        return False
+    keys = ("schema", "id", "fingerprint", "target_substitution_policy")
+    return all(first.get(key) == second.get(key) for key in keys)
+
+
+def execution_target_description(identity: Any) -> str:
+    if not isinstance(identity, dict):
+        return "absent"
+    return (
+        f"id={identity.get('id')} fingerprint={identity.get('fingerprint')} "
+        f"policy={identity.get('target_substitution_policy')}"
+    )
+
+
+def execution_target_preflight_check(root: Path, expected: dict[str, Any] | None = None) -> Check:
+    identity, error = execution_target_identity(root)
+    if error:
+        return Check("execution target", "fail", error, {"detail": error})
+    if expected is not None:
+        if not execution_targets_match(expected, identity):
+            detail = (
+                f"current {execution_target_description(identity)} differs from "
+                f"captured {execution_target_description(expected)}"
+            )
+            return Check("execution target", "fail", detail, {"detail": "target_identity_mismatch"})
+        return Check("execution target", "pass", "current declaration matches captured target identity")
+    if identity:
+        return Check("execution target", "pass", f"declared {execution_target_description(identity)}")
+    return Check("execution target", "pass", "no execution target declaration")
+
+
+def execution_target_drift_check(root: Path, captured: Any) -> Check:
+    current, error = execution_target_identity(root)
+    if error:
+        return Check("execution target", "fail", error, {"detail": "target_identity_unavailable"})
+    if isinstance(captured, dict) or isinstance(current, dict):
+        if not execution_targets_match(captured, current):
+            return Check(
+                "execution target",
+                "fail",
+                "current execution target differs from captured plan identity",
+                {"detail": "target_identity_mismatch"},
+            )
+    if isinstance(current, dict):
+        return Check("execution target", "pass", "current declaration matches captured target identity")
+    return Check("execution target", "pass", "no execution target declaration")
 
 
 def invocation_workspace() -> Path:
@@ -251,6 +367,74 @@ def parse_utc(value: str | None) -> datetime | None:
         return None
 
 
+def repo_relative_or_none(path: Path, root: Path) -> str | None:
+    try:
+        return path.resolve(strict=False).relative_to(root.resolve(strict=False)).as_posix()
+    except ValueError:
+        return None
+
+
+def validate_external_blocker(payload: Any) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["external_blocker must be an object"]
+    extra = sorted(set(payload) - EXTERNAL_BLOCKER_REQUIRED_KEYS)
+    if extra:
+        errors.append("external_blocker has unsupported fields: " + ", ".join(extra))
+    missing = sorted(key for key in EXTERNAL_BLOCKER_REQUIRED_KEYS if key not in payload)
+    if missing:
+        errors.append("external_blocker missing fields: " + ", ".join(missing))
+    if payload.get("schema") != EXTERNAL_BLOCKER_SCHEMA:
+        errors.append(f"external_blocker.schema must be {EXTERNAL_BLOCKER_SCHEMA}")
+    blocker_id = payload.get("blocker_id")
+    if not isinstance(blocker_id, str) or not EVIDENCE_ID_RE.fullmatch(blocker_id):
+        errors.append("external_blocker.blocker_id must be a normalized id")
+    blocker_class = payload.get("class")
+    if blocker_class not in EXTERNAL_BLOCKER_CLASSES:
+        errors.append("external_blocker.class must be known")
+    observed_at = payload.get("observed_at")
+    if not isinstance(observed_at, str) or parse_utc(observed_at) is None:
+        errors.append("external_blocker.observed_at must be date-time")
+    if payload.get("retryable") is not True:
+        errors.append("external_blocker.retryable must be true")
+    policy = payload.get("evidence_policy")
+    if not isinstance(policy, dict):
+        errors.append("external_blocker.evidence_policy must be an object")
+        return errors
+    policy_extra = sorted(set(policy) - EXTERNAL_BLOCKER_POLICY_KEYS)
+    if policy_extra:
+        errors.append("external_blocker.evidence_policy has unsupported fields: " + ", ".join(policy_extra))
+    required_ids = policy.get("required_ids")
+    if not isinstance(required_ids, list) or not required_ids:
+        errors.append("external_blocker.evidence_policy.required_ids must be a non-empty array")
+    else:
+        seen: set[str] = set()
+        for index, evidence_id in enumerate(required_ids):
+            if not isinstance(evidence_id, str) or not EVIDENCE_ID_RE.fullmatch(evidence_id):
+                errors.append(f"external_blocker.evidence_policy.required_ids[{index}] must be a normalized id")
+            elif evidence_id in seen:
+                errors.append(f"external_blocker.evidence_policy.required_ids[{index}] duplicates {evidence_id}")
+            else:
+                seen.add(evidence_id)
+    max_age = policy.get("max_age_seconds")
+    if type(max_age) is not int or max_age <= 0:
+        errors.append("external_blocker.evidence_policy.max_age_seconds must be a positive integer")
+    return errors
+
+
+def event_external_blocker(event: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    candidate = event.get("external_blocker")
+    data = event.get("data")
+    if candidate is None and isinstance(data, dict):
+        candidate = data.get("external_blocker")
+    if candidate is None:
+        return None, None
+    errors = validate_external_blocker(candidate)
+    if errors:
+        return None, "; ".join(errors)
+    return copy.deepcopy(candidate), None
+
+
 def elapsed_seconds(start: datetime | None, end: datetime | None) -> float | None:
     if start is None or end is None:
         return None
@@ -345,9 +529,16 @@ def child_environment(args: argparse.Namespace) -> dict[str, str]:
     env["CODEX_WORKDIR"] = str(root)
     env["CODEX_HOME"] = str(effective_codex_home(args))
     env["CHANGERAIL_ACTIVE_RUN_ID"] = args.run_id
+    env["CHANGERAIL_ACTIVE_CARD_ID"] = card_id(args.card)
     env["CHANGERAIL_ACTIVE_RUN_DIR"] = str((args.runtime_root / args.run_id).resolve(strict=False))
+    env["CHANGERAIL_PROGRESS_EVENT_PATH"] = str(progress_event_path(args).resolve(strict=False))
     env["CHANGERAIL_COMMAND_OUTPUT_THRESHOLD_BYTES"] = str(COMMAND_OUTPUT_THRESHOLD_BYTES)
     env["CHANGERAIL_DISCOVERY_POLICY"] = child_discovery_policy()
+    env["CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS"] = str(progress_heartbeat_interval_seconds())
+    env["CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS"] = str(progress_stale_after_seconds())
+    resume_context = getattr(args, "resume_context", None)
+    if isinstance(resume_context, dict):
+        env["CHANGERAIL_RECOVERY_CONTEXT"] = json.dumps(resume_context, ensure_ascii=True, sort_keys=True)
     return env
 
 
@@ -766,6 +957,9 @@ def retained_payload_identity(args: argparse.Namespace, root: Path) -> tuple[dic
     fingerprint, error = review_fingerprint(root)
     if fingerprint is None:
         return None, error or "review fingerprint unavailable"
+    target_identity, target_error = execution_target_identity(root)
+    if target_error:
+        return None, "execution target identity unavailable: " + target_error
     missing = [
         key
         for key in ("head_commit", "tree_sha", "diff_fingerprint")
@@ -792,6 +986,8 @@ def retained_payload_identity(args: argparse.Namespace, root: Path) -> tuple[dic
             "kind": "working-tree",
         },
     }
+    if target_identity:
+        identity["execution_target"] = target_identity
     return identity, None
 
 
@@ -803,11 +999,14 @@ def retained_recovery_summary(child_status: dict[str, Any], run_status_path: str
     review_target = retained.get("review_target")
     if not isinstance(card, dict) or not isinstance(review_target, dict):
         return None
+    source_reason = child_status.get("terminal_reason")
+    if source_reason not in {"investigation_required", RECOVERABLE_EXTERNAL_REASON}:
+        return None
     summary = {
         "kind": "original-retained-payload",
         "source_run_id": retained.get("source_run_id"),
         "source_run_status_path": run_status_path or retained.get("source_status_path"),
-        "source_terminal_reason": "investigation_required",
+        "source_terminal_reason": source_reason,
         "card": {
             "id": card.get("id"),
             "path": card.get("path"),
@@ -819,6 +1018,14 @@ def retained_recovery_summary(child_status: dict[str, Any], run_status_path: str
         },
         "review_target_kind": review_target.get("kind"),
     }
+    target_identity = retained.get("execution_target")
+    if isinstance(target_identity, dict):
+        summary["execution_target"] = target_identity
+    external_blocker = child_status.get("external_blocker")
+    if source_reason == RECOVERABLE_EXTERNAL_REASON:
+        if validate_external_blocker(external_blocker):
+            return None
+        summary["external_blocker"] = external_blocker
     if all(isinstance(value, str) and value for value in (
         summary["source_run_id"],
         summary["source_run_status_path"],
@@ -1214,6 +1421,7 @@ def check_plan_semantics(
         seen_aliases.add(alias)
         root = (consumer_root / path).resolve(strict=False)
         state = "preflighted"
+        target_identity: dict[str, Any] | None = None
         if not root.is_dir():
             state = "blocked"
             checks.append(Check("workspace exists", "fail", f"{alias}: {root}"))
@@ -1222,6 +1430,12 @@ def check_plan_semantics(
             checks.append(Check("workspace git repository", "fail", f"{alias}: {root}"))
         else:
             checks.append(Check("workspace", "pass", f"{alias}: {root}"))
+            target_check = execution_target_preflight_check(root)
+            checks.append(Check("execution target", target_check.status, f"{alias}: {target_check.message}"))
+            if target_check.status == "fail":
+                state = "blocked"
+            else:
+                target_identity, _target_error = execution_target_identity(root)
             clean, clean_reason = git_clean(root)
             dirty_allowed = alias in allow_dirty_workspaces
             checks.append(
@@ -1236,6 +1450,8 @@ def check_plan_semantics(
             if not clean and not dirty_allowed:
                 state = "blocked"
         entry = {"alias": alias, "path": path, "root": str(root), "state": state}
+        if target_identity:
+            entry["execution_target"] = target_identity
         workspace_by_alias[alias] = entry
         resolved_workspaces.append(entry)
 
@@ -1446,6 +1662,9 @@ def child_command_for_card(args: argparse.Namespace, card: dict[str, Any], works
             "--run-id",
             child_run_id(args, card),
         ]
+        evidence_index = card.get("resume_evidence_index")
+        if isinstance(evidence_index, str) and evidence_index:
+            command.extend(["--evidence-index", evidence_index])
     else:
         command = [
             str(args.launcher),
@@ -1598,6 +1817,27 @@ def print_compact_plan_failures(status: dict[str, Any]) -> None:
         print(f"- {line}")
 
 
+def print_compact_plan_progress(status: dict[str, Any]) -> None:
+    cards = status.get("cards")
+    if not isinstance(cards, list):
+        return
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        card_id = card.get("id")
+        progress = card.get("progress")
+        if isinstance(card_id, str) and isinstance(progress, dict):
+            health = card.get("progress_health") if isinstance(card.get("progress_health"), dict) else {}
+            print(
+                f"{card_id}: {progress.get('phase')}/{progress.get('stage')} "
+                f"heartbeat={progress.get('heartbeat_at')} "
+                f"health={health.get('state', 'unknown')}"
+            )
+        diagnostic = card.get("progress_diagnostic")
+        if isinstance(card_id, str) and isinstance(diagnostic, str):
+            print(f"{card_id}: progress_diagnostic={diagnostic}")
+
+
 def build_plan_view(
     args: argparse.Namespace,
     data: dict[str, Any],
@@ -1653,6 +1893,7 @@ def plan_status_record(
                 "depends_on",
                 "recovery_for",
                 "run_id",
+                "episode_id",
                 "run_status_path",
                 "result",
                 "terminal_reason",
@@ -1664,6 +1905,9 @@ def plan_status_record(
                 "started_at",
                 "ended_at",
                 "reason",
+                "progress",
+                "progress_health",
+                "progress_diagnostic",
             )
             if key in card
         }
@@ -1671,7 +1915,7 @@ def plan_status_record(
             entry["state"] = "ready"
         status_cards.append(entry)
     status_workspaces = [
-        {key: workspace[key] for key in ("alias", "path", "state", "reason") if key in workspace}
+        {key: workspace[key] for key in ("alias", "path", "state", "reason", "execution_target") if key in workspace}
         for workspace in workspaces
     ]
     record: dict[str, Any] = {
@@ -1744,6 +1988,54 @@ def load_json_object(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def sample_summary(observed_count: int, retained_count: int, limit: int) -> dict[str, Any]:
+    return {
+        "observed_count": observed_count,
+        "retained_count": retained_count,
+        "limit": limit,
+        "truncated": observed_count > retained_count,
+    }
+
+
+def prior_lineage(args: argparse.Namespace) -> tuple[str | None, str | None, str | None]:
+    status_arg = getattr(args, "status_path", None)
+    if not isinstance(status_arg, Path):
+        return None, None, None
+    prior = load_json_object(status_arg)
+    if not isinstance(prior, dict):
+        return None, None, None
+    episode = prior.get("episode")
+    episode_id = episode.get("id") if isinstance(episode, dict) and isinstance(episode.get("id"), str) else None
+    attempt = prior.get("attempt")
+    attempt_id = attempt.get("id") if isinstance(attempt, dict) and isinstance(attempt.get("id"), str) else None
+    if not episode_id and isinstance(prior.get("run_id"), str):
+        episode_id = prior["run_id"]
+    if not attempt_id and isinstance(prior.get("run_id"), str):
+        attempt_id = prior["run_id"]
+    source_status_path = repo_relative_or_none(status_arg.resolve(strict=False), args.workspace.resolve(strict=False))
+    return episode_id, attempt_id, source_status_path or str(status_arg)
+
+
+def lineage_for_record(args: argparse.Namespace, phase: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    prior_episode_id, prior_attempt_id, source_status_path = prior_lineage(args)
+    if phase == "preflight":
+        kind = "preflight"
+    elif prior_attempt_id:
+        kind = "recovery"
+    else:
+        kind = "delivery"
+    attempt: dict[str, Any] = {
+        "schema": ATTEMPT_SCHEMA,
+        "id": args.run_id,
+        "kind": kind,
+    }
+    if prior_attempt_id:
+        attempt["previous_attempt_id"] = prior_attempt_id
+    if source_status_path:
+        attempt["source_status_path"] = source_status_path
+    return {"schema": EPISODE_LINEAGE_SCHEMA, "id": prior_episode_id or args.run_id}, attempt
+
+
 def review_timing(root: Path, card: str, started_at: str) -> dict[str, Any] | None:
     history = load_json_object(review_history_path(root, card))
     cycles = history.get("cycles") if history else None
@@ -1813,6 +2105,207 @@ def publish_timing(root: Path, card: str, started_at: str) -> dict[str, Any] | N
     return summary
 
 
+def lineage_for_status(status: dict[str, Any]) -> str | None:
+    episode = status.get("episode")
+    return episode.get("id") if isinstance(episode, dict) and isinstance(episode.get("id"), str) else None
+
+
+def owner_artifact(kind: str, path: Path, root: Path) -> dict[str, str]:
+    return {"kind": kind, "path": repository_relative(path, root)}
+
+
+def delivery_attempt_summary(status: dict[str, Any], path: Path, root: Path) -> dict[str, Any] | None:
+    attempt = status.get("attempt")
+    if not isinstance(attempt, dict) or not isinstance(attempt.get("id"), str) or not isinstance(attempt.get("kind"), str):
+        return None
+    timestamps = status.get("timestamps") if isinstance(status.get("timestamps"), dict) else {}
+    usage = status.get("usage") if isinstance(status.get("usage"), dict) else {}
+    performance = status.get("performance") if isinstance(status.get("performance"), dict) else {}
+    summary: dict[str, Any] = {"id": attempt["id"], "kind": attempt["kind"], "owner_artifact": owner_artifact("delivery-run", path, root)}
+    for field in ("parent_attempt_id", "previous_attempt_id"):
+        value = attempt.get(field)
+        if isinstance(value, str) and value:
+            summary[field] = value
+    for field in ("started_at", "ended_at"):
+        value = timestamps.get(field)
+        if isinstance(value, str) and value:
+            summary[field] = value
+    summary["terminal_state"] = {"DELIVERED": "delivered", "BLOCKED": "blocked", "NO-GO": "no-go", "RUNNING": "running"}.get(status.get("result"), "unknown")
+    reason = status.get("terminal_reason")
+    if isinstance(reason, str) and reason:
+        summary["blocker_class"] = reason
+    compact_usage = {key: usage[key] for key in ("available", "input_tokens", "output_tokens", "total_tokens", "reason") if key in usage}
+    if isinstance(compact_usage.get("available"), bool):
+        summary["usage"] = compact_usage
+    compact_perf = {
+        key: performance[key]
+        for key in ("wall_time_seconds", "command_execution_count", "command_samples", "timeline_samples")
+        if key in performance
+    }
+    if compact_perf:
+        summary["performance"] = compact_perf
+    return summary
+
+
+def card_episode_statuses(root: Path, runtime_root: Path, card: str, episode_id: str | None) -> tuple[str | None, list[tuple[Path, dict[str, Any]]]]:
+    grouped: dict[str, list[tuple[Path, dict[str, Any]]]] = {}
+    for path in sorted(runtime_root.glob("*/status.json")):
+        status = load_json_object(path)
+        if not isinstance(status, dict) or status.get("schema") != SCHEMA:
+            continue
+        if schema_errors(status, "changerail-delivery-run.schema.json"):
+            continue
+        card_ref = status.get("card") if isinstance(status.get("card"), dict) else {}
+        if card_ref.get("id") != card_id(card) or card_ref.get("path") != card:
+            continue
+        current_episode = lineage_for_status(status)
+        if current_episode:
+            grouped.setdefault(current_episode, []).append((path, status))
+    if episode_id:
+        return episode_id, grouped.get(episode_id, [])
+    if len(grouped) == 1:
+        key = next(iter(grouped))
+        return key, grouped[key]
+    return None, []
+
+
+def add_attempt(attempts: list[dict[str, Any]], seen: dict[str, dict[str, Any]], attempt: dict[str, Any], diagnostics: list[str]) -> None:
+    attempt_id = attempt.get("id")
+    if not isinstance(attempt_id, str):
+        return
+    comparable = {key: value for key, value in attempt.items() if key != "owner_artifact"}
+    previous = seen.get(attempt_id)
+    if previous and previous != comparable:
+        diagnostics.append(f"conflicting duplicate attempt id: {attempt_id}")
+        return
+    if previous:
+        return
+    seen[attempt_id] = comparable
+    attempts.append(attempt)
+
+
+def review_episode_attempts(root: Path, card: str, episode_id: str, attempts: list[dict[str, Any]], seen: dict[str, dict[str, Any]], diagnostics: list[str]) -> None:
+    path = review_history_path(root, card)
+    history = load_json_object(path)
+    if not isinstance(history, dict) or history.get("schema") != "changerail.review-cycle-history.v1":
+        return
+    if schema_errors(history, "changerail-review-cycle-history.schema.json"):
+        diagnostics.append("review history failed schema validation")
+        return
+    if lineage_for_status(history) != episode_id:
+        return
+    cycles = history.get("cycles") if isinstance(history.get("cycles"), list) else []
+    for cycle in cycles:
+        if not isinstance(cycle, dict):
+            continue
+        attempt = cycle.get("attempt") if isinstance(cycle.get("attempt"), dict) else {}
+        attempt_id = attempt.get("id") if isinstance(attempt.get("id"), str) else f"review-{cycle.get('review_cycle')}"
+        summary = {
+            "id": attempt_id,
+            "kind": attempt.get("kind") if attempt.get("kind") in {"review", "rescue"} else "review",
+            "ended_at": cycle.get("reviewed_at"),
+            "terminal_state": "delivered" if cycle.get("result") == "go" else "no-go",
+            "owner_artifact": owner_artifact("review-history", path, root),
+        }
+        for field in ("parent_attempt_id", "previous_attempt_id"):
+            value = attempt.get(field)
+            if isinstance(value, str) and value:
+                summary[field] = value
+        add_attempt(attempts, seen, {key: value for key, value in summary.items() if value is not None}, diagnostics)
+
+
+def publish_episode_attempt(root: Path, card: str, episode_id: str, attempts: list[dict[str, Any]], seen: dict[str, dict[str, Any]], diagnostics: list[str]) -> None:
+    path = delivery_manifest_path(root, card)
+    manifest = load_json_object(path)
+    if not isinstance(manifest, dict) or manifest.get("schema") != "changerail.delivery-manifest.v1":
+        return
+    if schema_errors(manifest, "changerail-delivery-manifest.schema.json"):
+        diagnostics.append("delivery manifest failed schema validation")
+        return
+    if lineage_for_status(manifest) != episode_id:
+        return
+    publish = manifest.get("publish") if isinstance(manifest.get("publish"), dict) else {}
+    attempt = publish.get("attempt") if isinstance(publish.get("attempt"), dict) else {}
+    attempt_id = attempt.get("id") if isinstance(attempt.get("id"), str) else None
+    if not attempt_id:
+        commit = publish.get("published_commit") or publish.get("payload_commit")
+        attempt_id = f"publish-{str(commit)[:12]}" if commit else None
+    if not attempt_id:
+        return
+    state = "delivered" if publish.get("status") in {"pushed", "skipped"} else "blocked" if publish.get("status") == "failed" else "unknown"
+    add_attempt(
+        attempts,
+        seen,
+        {
+            "id": attempt_id,
+            "kind": "publish",
+            "ended_at": publish.get("pushed_at") or publish.get("committed_at"),
+            "terminal_state": state,
+            "owner_artifact": owner_artifact("delivery-manifest", path, root),
+        },
+        diagnostics,
+    )
+
+
+def final_episode_outcome(attempts: list[dict[str, Any]], diagnostics: list[str]) -> str:
+    if diagnostics:
+        return "invalid"
+    if not any(attempt.get("kind") in {"delivery", "recovery"} for attempt in attempts):
+        return "preflight-only"
+    if any(attempt.get("kind") == "publish" and attempt.get("terminal_state") == "delivered" for attempt in attempts):
+        return "delivered"
+    terminal_states = [attempt.get("terminal_state") for attempt in attempts if attempt.get("terminal_state")]
+    if "no-go" in terminal_states:
+        return "no-go"
+    if "blocked" in terminal_states:
+        return "blocked"
+    return "unknown"
+
+
+def command_refresh_episode(args: argparse.Namespace) -> int:
+    root = args.workspace.resolve(strict=False)
+    episode_id, statuses = card_episode_statuses(root, args.runtime_root, args.card, args.episode_id)
+    diagnostics: list[str] = []
+    attempts: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
+    if not episode_id:
+        diagnostics.append("ambiguous or missing episode lineage for card")
+    for path, status in statuses:
+        summary = delivery_attempt_summary(status, path, root)
+        if summary:
+            add_attempt(attempts, seen, summary, diagnostics)
+    if episode_id:
+        review_episode_attempts(root, args.card, episode_id, attempts, seen, diagnostics)
+        publish_episode_attempt(root, args.card, episode_id, attempts, seen, diagnostics)
+    if not attempts:
+        diagnostics.append("no schema-valid owner attempts found")
+    output_dir = root / ".runtime" / "changerail" / "delivery-episodes"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "schema": "changerail.delivery-episode.v1",
+        "episode_id": episode_id or "unknown",
+        "updated_at": utc_now(),
+        "workspace": {"root": str(root), "repository": root.name},
+        "card": {"id": card_id(args.card), "path": args.card},
+        "attempts": attempts or [{"id": "unknown", "kind": "delivery", "terminal_state": "unknown", "owner_artifact": {"kind": "derived-episode", "path": repository_relative(output_dir, root)}}],
+        "final_outcome": final_episode_outcome(attempts, diagnostics),
+    }
+    if diagnostics:
+        record["diagnostics"] = diagnostics
+    errors = schema_errors(record, "changerail-delivery-episode.schema.json")
+    if errors:
+        record["final_outcome"] = "invalid"
+        record["diagnostics"] = sorted(set(diagnostics + errors))
+    output_path = output_dir / f"{safe_generated_id(record['episode_id'])}.json"
+    atomic_write_json(output_path, record)
+    if args.json:
+        print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"episode: {record['episode_id']} outcome={record['final_outcome']} attempts={len(record['attempts'])}")
+        print(f"path: {repository_relative(output_path, root)}")
+    return 0 if record["final_outcome"] != "invalid" else 1
+
+
 class PerformanceCollector:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -1822,6 +2315,8 @@ class PerformanceCollector:
         self.command_starts: dict[str, dict[str, Any]] = {}
         self.commands: list[dict[str, Any]] = []
         self.timeline: list[dict[str, Any]] = []
+        self.timeline_observed_count = 0
+        self.command_duration_seconds = 0.0
 
     def observe_line(self, line: str) -> None:
         observed_at = utc_now()
@@ -1903,6 +2398,7 @@ class PerformanceCollector:
                 duration = round(max(0.0, observed_monotonic - float(started_monotonic)), 6)
                 summary["duration_seconds"] = duration
                 timeline_entry["duration_seconds"] = duration
+                self.command_duration_seconds += duration
             exit_code = item.get("exit_code")
             if isinstance(exit_code, int):
                 summary["exit_code"] = exit_code
@@ -1912,6 +2408,7 @@ class PerformanceCollector:
             self.commands.append(summary)
 
     def append_timeline(self, entry: dict[str, Any]) -> None:
+        self.timeline_observed_count += 1
         if len(self.timeline) >= MAX_TIMELINE_EVENTS:
             self.timeline.pop(0)
         self.timeline.append(entry)
@@ -1939,6 +2436,8 @@ class PerformanceCollector:
             data["file_change_count"] = changed
         if self.commands:
             commands = self.commands[-MAX_COMMANDS:]
+            data["command_duration_seconds"] = round(self.command_duration_seconds, 6)
+            data["command_samples"] = sample_summary(len(self.commands), len(commands), MAX_COMMANDS)
             data["commands"] = commands
             data["slowest_commands"] = sorted(
                 commands,
@@ -1948,8 +2447,11 @@ class PerformanceCollector:
             output_summary = command_output_summary(self.commands, root)
             if output_summary:
                 data["command_output"] = output_summary
+        else:
+            data["command_samples"] = sample_summary(0, 0, MAX_COMMANDS)
         if self.timeline:
             data["timeline"] = self.timeline
+            data["timeline_samples"] = sample_summary(self.timeline_observed_count, len(self.timeline), MAX_TIMELINE_EVENTS)
         review = review_timing(root, card, started_at)
         if review:
             data["review"] = review
@@ -1961,10 +2463,14 @@ class PerformanceCollector:
 
 def base_record(args: argparse.Namespace, phase: str, result: str) -> dict[str, Any]:
     root = args.workspace.resolve(strict=False)
+    identity, _identity_error = execution_target_identity(root)
+    episode, attempt = lineage_for_record(args, phase)
     record: dict[str, Any] = {
         "schema": SCHEMA,
         "run_id": args.run_id,
         "updated_at": utc_now(),
+        "episode": episode,
+        "attempt": attempt,
         "workspace": {
             "root": str(root),
             "repository": root.name,
@@ -1994,6 +2500,8 @@ def base_record(args: argparse.Namespace, phase: str, result: str) -> dict[str, 
         record["command"]["model"] = args.model
     if args.reasoning_effort:
         record["command"]["reasoning_effort"] = args.reasoning_effort
+    if identity:
+        record["execution_target"] = identity
     return record
 
 
@@ -2001,9 +2509,195 @@ def status_path(args: argparse.Namespace) -> Path:
     return args.runtime_root / args.run_id / "status.json"
 
 
+def progress_event_path(args: argparse.Namespace) -> Path:
+    return args.runtime_root / args.run_id / "progress-events.jsonl"
+
+
 def log_paths(args: argparse.Namespace) -> tuple[Path, Path]:
     run_dir = args.runtime_root / args.run_id
     return run_dir / "stdout.jsonl", run_dir / "stderr.log"
+
+
+def progress_heartbeat_interval_seconds() -> float:
+    return positive_float_from_env(
+        "CHANGERAIL_PROGRESS_HEARTBEAT_INTERVAL_SECONDS",
+        DEFAULT_PROGRESS_HEARTBEAT_INTERVAL_SECONDS,
+    )
+
+
+def progress_stale_after_seconds() -> float:
+    return positive_float_from_env(
+        "CHANGERAIL_PROGRESS_STALE_AFTER_SECONDS",
+        DEFAULT_PROGRESS_STALE_AFTER_SECONDS,
+    )
+
+
+def progress_poll_interval_seconds() -> float:
+    return positive_float_from_env(
+        "CHANGERAIL_PROGRESS_POLL_INTERVAL_SECONDS",
+        DEFAULT_PROGRESS_POLL_INTERVAL_SECONDS,
+    )
+
+
+def progress_base(phase: str, stage: str, heartbeat_at: str, counter: int) -> dict[str, Any]:
+    return {
+        "schema": PROGRESS_SCHEMA,
+        "phase": phase,
+        "stage": stage,
+        "heartbeat_at": heartbeat_at,
+        "event_counter": counter,
+    }
+
+
+def progress_health(progress: dict[str, Any], *, process_alive: bool) -> dict[str, Any]:
+    heartbeat = parse_utc(progress.get("heartbeat_at") if isinstance(progress.get("heartbeat_at"), str) else None)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    age = 0.0
+    if heartbeat is not None:
+        age = max(0.0, (now - heartbeat).total_seconds())
+    state = "terminated" if not process_alive else ("stale" if age > progress_stale_after_seconds() else "active")
+    return {
+        "state": state,
+        "heartbeat_age_seconds": round(age, 3),
+        "process_alive": process_alive,
+    }
+
+
+def valid_progress_event(event: Any, *, run_id: str, card: str, last_sequence: int) -> dict[str, Any] | None:
+    if not isinstance(event, dict):
+        return None
+    if set(event) - PROGRESS_EVENT_KEYS:
+        return None
+    if event.get("schema") != PROGRESS_EVENT_SCHEMA:
+        return None
+    if event.get("run_id") != run_id or event.get("card_id") != card_id(card):
+        return None
+    sequence = event.get("sequence")
+    if not isinstance(sequence, int) or sequence <= last_sequence:
+        return None
+    phase = event.get("phase")
+    stage = event.get("stage")
+    if phase not in PROGRESS_PHASES or stage not in PROGRESS_STAGES:
+        return None
+    emitted_at = event.get("emitted_at")
+    if not isinstance(emitted_at, str) or parse_utc(emitted_at) is None:
+        return None
+    return {
+        "phase": phase,
+        "stage": stage,
+        "heartbeat_at": emitted_at,
+        "event_counter": sequence,
+    }
+
+
+def json_object_line(line: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+class ProgressTracker:
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+        self.event_path = progress_event_path(args)
+        self.event_offset = 0
+        self.last_sequence = 0
+        self.last_write_monotonic = 0.0
+        self.last_health_state: str | None = None
+        self.heartbeat_interval = progress_heartbeat_interval_seconds()
+        self.accepted_events: list[dict[str, Any]] = []
+
+    def initialize(self, record: dict[str, Any]) -> None:
+        now = utc_now()
+        record["progress"] = progress_base("preflight", "complete", now, 0)
+        self.sync(record, process_alive=True, force=True)
+
+    def observe_activity(self, record: dict[str, Any], line: str) -> None:
+        if json_object_line(line) is None:
+            return
+        progress = record.get("progress")
+        if not isinstance(progress, dict):
+            progress = progress_base("preflight", "complete", utc_now(), self.last_sequence)
+            record["progress"] = progress
+        progress["heartbeat_at"] = utc_now()
+        self.sync(record, process_alive=True, force=False)
+
+    def consume_events(self, record: dict[str, Any]) -> None:
+        try:
+            size = self.event_path.stat().st_size
+        except OSError:
+            return
+        if size < self.event_offset:
+            self.event_offset = 0
+        try:
+            with self.event_path.open("r", encoding="utf-8") as handle:
+                handle.seek(self.event_offset)
+                lines = handle.readlines()
+                self.event_offset = handle.tell()
+        except OSError:
+            return
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            normalized = valid_progress_event(
+                event,
+                run_id=self.args.run_id,
+                card=self.args.card,
+                last_sequence=self.last_sequence,
+            )
+            if normalized is None:
+                continue
+            self.accepted_events.append(normalized)
+            self.last_sequence = int(normalized["event_counter"])
+            record["progress"] = progress_base(
+                str(normalized["phase"]),
+                str(normalized["stage"]),
+                str(normalized["heartbeat_at"]),
+                self.last_sequence,
+            )
+            self.sync(record, process_alive=True, force=True)
+
+    def sync(self, record: dict[str, Any], *, process_alive: bool, force: bool = False) -> None:
+        progress = record.get("progress")
+        if not isinstance(progress, dict):
+            return
+        health = progress_health(progress, process_alive=process_alive)
+        health_state_changed = health.get("state") != self.last_health_state
+        record["progress_health"] = health
+        now = time.monotonic()
+        if force or health_state_changed or now - self.last_write_monotonic >= self.heartbeat_interval:
+            record["updated_at"] = utc_now()
+            atomic_write_json(status_path(self.args), record)
+            self.last_write_monotonic = now
+            self.last_health_state = str(health.get("state"))
+
+    def performance_summary(self) -> dict[str, Any]:
+        totals = {"active_seconds": 0.0, "wait_seconds": 0.0, "operator_wait_seconds": 0.0}
+        parsed = [(event, parse_utc(str(event.get("heartbeat_at")))) for event in self.accepted_events]
+        parsed = [(event, at) for event, at in parsed if at is not None]
+        for (event, started), (_next_event, ended) in zip(parsed, parsed[1:]):
+            seconds = max(0.0, (ended - started).total_seconds())
+            if event.get("stage") == "waiting":
+                key = "wait_seconds" if event.get("phase") == "review" else "operator_wait_seconds"
+            else:
+                key = "active_seconds"
+            totals[key] += seconds
+        return {key: round(value, 3) for key, value in totals.items()} if parsed else {}
+
+    def mark_terminal(self, record: dict[str, Any]) -> None:
+        self.consume_events(record)
+        progress = record.get("progress")
+        counter = self.last_sequence
+        if isinstance(progress, dict) and isinstance(progress.get("event_counter"), int):
+            counter = max(counter, int(progress["event_counter"]))
+        counter += 1
+        self.last_sequence = counter
+        record["progress"] = progress_base("terminal", "complete", utc_now(), counter)
+        self.sync(record, process_alive=False, force=True)
 
 
 def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = False) -> list[Check]:
@@ -2022,6 +2716,7 @@ def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = Fals
     clean, clean_reason = git_clean(root)
     checks = [
         Check("workspace", "pass" if root.is_dir() else "fail", str(root)),
+        execution_target_preflight_check(root),
         Check(
             "workspace dirty state",
             "pass" if clean or allow_dirty_workspace else "fail",
@@ -2252,8 +2947,20 @@ def event_terminal_signal(event: Any) -> TerminalSignal:
         marker_signal = terminal_signal_from_marker_lines(marker)
         if marker_signal.outcome:
             signal = marker_signal
+    blocker, blocker_error = event_external_blocker(event)
+    if blocker_error and signal.outcome == "BLOCKED":
+        signal.reason = "invalid_external_blocker"
+        signal.external_blocker_error = blocker_error
+    elif blocker and signal.outcome == "BLOCKED":
+        if signal.reason == RECOVERABLE_EXTERNAL_REASON:
+            signal.external_blocker = blocker
+        else:
+            signal.reason = "invalid_external_blocker"
+            signal.external_blocker_error = "external_blocker requires recoverable_external_blocker terminal_reason"
     if signal.outcome is None:
         signal.reason = None
+        signal.external_blocker = None
+        signal.external_blocker_error = None
     return signal
 
 
@@ -2361,6 +3068,61 @@ def fallback_terminal_signal(args: argparse.Namespace, exit_code: int, structure
     return TerminalSignal("BLOCKED", "unpublished_card")
 
 
+def append_private_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    ensure_private_directory(path.parent)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
+
+
+def next_progress_event_sequence(path: Path) -> int:
+    sequence = 0
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 1
+    for line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        candidate = payload.get("sequence") if isinstance(payload, dict) else None
+        if isinstance(candidate, int):
+            sequence = max(sequence, candidate)
+    return sequence + 1
+
+
+def command_progress_event(args: argparse.Namespace) -> int:
+    event_path_raw = os.environ.get("CHANGERAIL_PROGRESS_EVENT_PATH")
+    run_id = os.environ.get("CHANGERAIL_ACTIVE_RUN_ID")
+    card = os.environ.get("CHANGERAIL_ACTIVE_CARD_ID")
+    if not event_path_raw or not run_id or not card:
+        print("progress-event failed: active ChangeRail run identity is unavailable", file=sys.stderr)
+        return 1
+    if args.phase not in PROGRESS_PHASES or args.stage not in PROGRESS_STAGES:
+        print("progress-event failed: unknown phase or stage", file=sys.stderr)
+        return 1
+    event_path = Path(event_path_raw).expanduser().resolve(strict=False)
+    sequence = args.sequence if args.sequence is not None else next_progress_event_sequence(event_path)
+    if sequence <= 0:
+        print("progress-event failed: sequence must be positive", file=sys.stderr)
+        return 1
+    payload = {
+        "schema": PROGRESS_EVENT_SCHEMA,
+        "run_id": run_id,
+        "card_id": card,
+        "sequence": sequence,
+        "phase": args.phase,
+        "stage": args.stage,
+        "emitted_at": utc_now(),
+    }
+    append_private_jsonl(event_path, payload)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def command_preflight(args: argparse.Namespace) -> int:
     args.started_at = utc_now()
     checks = check_preflight(args)
@@ -2386,6 +3148,8 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["command"]["argv"] = command
     record["preflight"] = {"checks": [check_payload(check) for check in checks]}
     record["logs"] = {"stdout": str(stdout_path), "stderr": str(stderr_path)}
+    progress = ProgressTracker(args)
+    progress.initialize(record)
     if any(check.status == "fail" for check in checks):
         record["phase"] = "terminal"
         record["result"] = "BLOCKED"
@@ -2394,13 +3158,13 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         if reason:
             record["terminal_reason"] = reason
         record["timestamps"]["ended_at"] = utc_now()
+        progress.mark_terminal(record)
         atomic_write_json(status_path(args), record)
         print("terminal_outcome: BLOCKED")
         if reason:
             print(f"terminal_reason: {reason}")
         print(f"status: {status_path(args)}")
         return 1
-    atomic_write_json(status_path(args), record)
     performance = PerformanceCollector(root)
     with open_private_text(stdout_path) as stdout, open_private_text(stderr_path) as stderr:
         process = subprocess.Popen(
@@ -2416,25 +3180,71 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         record["process"] = {"pid": process.pid}
         atomic_write_json(status_path(args), record)
         if process.stdout is not None:
-            for line in process.stdout:
+            poll_interval = progress_poll_interval_seconds()
+
+            def handle_stdout_line(line: str) -> None:
                 stdout.write(line)
                 stdout.flush()
                 performance.observe_line(line)
+                progress.observe_activity(record, line)
+                progress.consume_events(record)
+
+            while True:
+                ready, _write, _error = select.select([process.stdout], [], [], poll_interval)
+                if ready:
+                    line = process.stdout.readline()
+                    if line:
+                        handle_stdout_line(line)
+                    elif process.poll() is not None:
+                        break
+                else:
+                    progress.consume_events(record)
+                    progress.sync(record, process_alive=True, force=False)
+                if process.poll() is not None:
+                    while True:
+                        line = process.stdout.readline()
+                        if not line:
+                            break
+                        handle_stdout_line(line)
+                    break
         exit_code = process.wait()
+    progress.consume_events(record)
     terminal_signal = fallback_terminal_signal(args, exit_code, stdout_terminal_signal(stdout_path))
     outcome = terminal_signal.outcome or "BLOCKED"
     if exit_code != 0 and outcome == "DELIVERED":
         outcome = "BLOCKED"
         terminal_signal.reason = "nonzero_child_exit"
+    target_check = execution_target_drift_check(root, record.get("execution_target"))
+    if target_check.status == "fail":
+        outcome = "BLOCKED"
+        terminal_signal.reason = target_check.data.get("detail") if target_check.data else "target_identity_mismatch"
+        checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
+        if isinstance(checks_payload, list):
+            checks_payload.append(check_payload(target_check))
     record["phase"] = "terminal"
     record["result"] = outcome
     record["terminal_outcome"] = outcome
     if terminal_signal.reason:
         record["terminal_reason"] = terminal_signal.reason
-    if outcome == "BLOCKED" and terminal_signal.reason == "investigation_required":
+    if outcome == "BLOCKED" and terminal_signal.reason == RECOVERABLE_EXTERNAL_REASON and not terminal_signal.external_blocker:
+        checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
+        if isinstance(checks_payload, list):
+            checks_payload.append(
+                check_payload(
+                    Check(
+                        "external blocker",
+                        "fail",
+                        terminal_signal.external_blocker_error or "recoverable external blocker lacks structured metadata",
+                        {"detail": "invalid_external_blocker"},
+                    )
+                )
+            )
+    elif outcome == "BLOCKED" and terminal_signal.reason in {"investigation_required", RECOVERABLE_EXTERNAL_REASON}:
         identity, identity_error = retained_payload_identity(args, root)
         if identity:
             record["retained_payload"] = identity
+            if terminal_signal.reason == RECOVERABLE_EXTERNAL_REASON and terminal_signal.external_blocker:
+                record["external_blocker"] = terminal_signal.external_blocker
         else:
             checks_payload = record.setdefault("preflight", {}).setdefault("checks", [])
             if isinstance(checks_payload, list):
@@ -2452,9 +3262,11 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
     record["usage"] = parse_usage(stdout_path)
     performance.record_terminal(outcome, terminal_signal.reason)
     record["performance"] = performance.summary(root, args.card, args.started_at)
+    record["performance"].update(progress.performance_summary())
     record["timestamps"]["ended_at"] = utc_now()
     record["updated_at"] = utc_now()
     record_commit(record, root)
+    progress.mark_terminal(record)
     atomic_write_json(status_path(args), record)
     print(f"terminal_outcome: {outcome}")
     if terminal_signal.reason:
@@ -2561,12 +3373,12 @@ def retained_resume_review_preflight(args: argparse.Namespace) -> tuple[Check, s
     )
 
 
-def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+def retained_identity_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, dict[str, Any] | None]:
     root = args.workspace.resolve(strict=False)
     retained = prior.get("retained_payload")
     if not isinstance(retained, dict):
         checks, reason = resume_fail("retained payload identity", "prior status has no retained_payload identity", "missing_retained_identity")
-        return checks, reason, False
+        return checks, reason, None
     expected_status_path = repository_relative(args.status_path, root)
     if retained.get("source_run_id") != prior.get("run_id") or retained.get("source_status_path") != expected_status_path:
         checks, reason = resume_fail(
@@ -2574,15 +3386,15 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "retained payload source run/status does not match the resume input",
             "prior_status_mismatch",
         )
-        return checks, reason, False
+        return checks, reason, None
     retained_card = retained.get("card")
     if not isinstance(retained_card, dict) or retained_card.get("id") != card_id(args.card) or retained_card.get("path") != args.card:
         checks, reason = resume_fail("retained payload card", "retained payload belongs to another card", "card_mismatch")
-        return checks, reason, False
+        return checks, reason, None
     retained_workspace = retained.get("workspace")
     if not isinstance(retained_workspace, dict) or retained_workspace.get("root") != str(root):
         checks, reason = resume_fail("retained payload workspace", "retained payload belongs to another workspace", "workspace_mismatch")
-        return checks, reason, False
+        return checks, reason, None
     review_target = retained.get("review_target")
     if not isinstance(review_target, dict) or review_target.get("kind") != "working-tree":
         checks, reason = resume_fail(
@@ -2590,7 +3402,7 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "retained payload does not identify the working tree review target",
             "missing_retained_identity",
         )
-        return checks, reason, False
+        return checks, reason, None
     fingerprint, fingerprint_error = review_fingerprint(root)
     if fingerprint is None:
         checks, reason = resume_fail(
@@ -2598,7 +3410,7 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             fingerprint_error or "current retained payload fingerprint cannot be computed",
             "retained_payload_fingerprint_unavailable",
         )
-        return checks, reason, False
+        return checks, reason, None
     mismatched = [
         key
         for key in ("head_commit", "tree_sha", "diff_fingerprint")
@@ -2610,14 +3422,192 @@ def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> t
             "current retained payload fingerprint differs: " + ", ".join(mismatched),
             "payload_drift",
         )
+        return checks, reason, None
+    current_target, target_error = execution_target_identity(root)
+    retained_target = retained.get("execution_target")
+    if target_error:
+        checks, reason = resume_fail("retained payload target", target_error, "target_identity_unavailable")
+        return checks, reason, None
+    if isinstance(retained_target, dict) or isinstance(current_target, dict):
+        if not execution_targets_match(retained_target, current_target):
+            checks, reason = resume_fail(
+                "retained payload target",
+                "current execution target differs from retained payload identity",
+                "target_identity_mismatch",
+            )
+            return checks, reason, None
+    checks = [
+        Check("resume prior status", "pass", f"prior {prior.get('terminal_reason')} status accepted"),
+        Check("retained payload fingerprint", "pass", "current working tree matches retained identity"),
+        Check("retained payload target", "pass", "current declaration matches retained target identity"),
+    ]
+    return checks, None, retained
+
+
+def retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+    checks, reason, _retained = retained_identity_checks(args, prior)
+    if reason:
         return checks, reason, False
     preflight_check, preflight_reason = retained_resume_review_preflight(args)
-    checks = [
-        Check("resume prior status", "pass", "prior investigation_required status accepted"),
-        Check("retained payload fingerprint", "pass", "current working tree matches retained identity"),
-        preflight_check,
-    ]
+    checks.append(preflight_check)
     return checks, preflight_reason, preflight_reason is None
+
+
+def evidence_resume_failure_reason(error: str) -> str:
+    if "scope" in error or "workspace" in error:
+        return "evidence_scope_mismatch"
+    if "stale" in error or "newer than blocker" in error or "maximum age" in error:
+        return "stale_evidence"
+    if "target" in error:
+        return "target_identity_mismatch"
+    if "missing" in error:
+        return "missing_evidence"
+    if "passed" in error or "status" in error:
+        return "evidence_not_passing"
+    if "redacted" in error or "secret" in error:
+        return "secret_bearing_evidence"
+    return "invalid_evidence"
+
+
+def load_external_evidence_index(args: argparse.Namespace) -> tuple[Path | None, dict[str, Any] | None, str | None, str | None]:
+    root = args.workspace.resolve(strict=False)
+    index_arg = getattr(args, "evidence_index", None)
+    if not isinstance(index_arg, Path):
+        return None, None, "external blocker resume requires --evidence-index", "missing_evidence"
+    index_path = index_arg if index_arg.is_absolute() else root / index_arg
+    relative = repo_relative_or_none(index_path, root)
+    if not relative or not relative.startswith(".runtime/changerail/evidence/"):
+        return index_path, None, "--evidence-index must resolve under .runtime/changerail/evidence/", "evidence_scope_mismatch"
+    data = load_json_object(index_path)
+    if data is None:
+        return index_path, None, "evidence index cannot be read as JSON object", "missing_evidence"
+    errors = schema_errors(data, "changerail-evidence-index.schema.json")
+    if errors:
+        return index_path, None, "; ".join(errors), "invalid_evidence"
+    return index_path, data, None, None
+
+
+def evidence_entry_target_matches(retained_target: Any, entry_target: Any) -> bool:
+    if isinstance(retained_target, dict):
+        return execution_targets_match(retained_target, entry_target)
+    return not isinstance(entry_target, dict)
+
+
+def evidence_entry_target_error(retained_target: Any, entry: dict[str, Any], index: int) -> str | None:
+    label = entry.get("id") if isinstance(entry.get("id"), str) else f"#{index}"
+    entry_target = entry.get("execution_target")
+    if isinstance(retained_target, dict):
+        if not isinstance(entry_target, dict):
+            return f"evidence entry {label} target identity is missing"
+        if not execution_targets_match(retained_target, entry_target):
+            return f"evidence entry {label} target identity does not match retained target"
+        return None
+    if isinstance(entry_target, dict):
+        return f"evidence entry {label} target identity is present without retained target"
+    return None
+
+
+def external_evidence_semantic_error(
+    args: argparse.Namespace,
+    prior: dict[str, Any],
+    retained: dict[str, Any],
+    blocker: dict[str, Any],
+    evidence: dict[str, Any],
+) -> str | None:
+    root = args.workspace.resolve(strict=False)
+    workspace = evidence.get("workspace")
+    if not isinstance(workspace, dict) or workspace.get("root") != str(root):
+        return "evidence workspace does not match source workspace"
+    scope = evidence.get("scope")
+    if not isinstance(scope, dict):
+        return "evidence scope is missing"
+    if scope.get("run_id") != prior.get("run_id"):
+        return "evidence scope run_id does not match source run"
+    if scope.get("card_id") != card_id(args.card) or scope.get("card_path") != args.card:
+        return "evidence scope card does not match source card"
+    retained_target = retained.get("execution_target")
+    evidence_target = evidence.get("execution_target")
+    if not evidence_entry_target_matches(retained_target, evidence_target):
+        return "evidence target identity does not match retained target"
+    entries = evidence.get("entries")
+    if not isinstance(entries, list):
+        return "evidence entries are missing"
+    by_id: dict[str, list[dict[str, Any]]] = {}
+    for index, entry in enumerate(entries):
+        if isinstance(entry, dict):
+            target_error = evidence_entry_target_error(retained_target, entry, index)
+            if target_error:
+                return target_error
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+            by_id.setdefault(entry["id"], []).append(entry)
+    policy = blocker.get("evidence_policy") if isinstance(blocker.get("evidence_policy"), dict) else {}
+    required_ids = policy.get("required_ids") if isinstance(policy.get("required_ids"), list) else []
+    max_age = policy.get("max_age_seconds") if type(policy.get("max_age_seconds")) is int else 0
+    observed = parse_utc(blocker.get("observed_at") if isinstance(blocker.get("observed_at"), str) else None)
+    now = datetime.now(timezone.utc)
+    for evidence_id in required_ids:
+        matches = by_id.get(evidence_id, [])
+        if len(matches) != 1:
+            return f"missing unique required evidence id: {evidence_id}"
+        entry = matches[0]
+        if entry.get("status") != "passed":
+            return f"required evidence {evidence_id} status is not passed"
+        if entry.get("storage") != "runtime":
+            return f"required evidence {evidence_id} must use runtime storage"
+        if entry.get("redacted") is not False:
+            return f"required evidence {evidence_id} must have redacted false"
+        ended = parse_utc(entry.get("ended_at") if isinstance(entry.get("ended_at"), str) else None)
+        if ended is None or observed is None or ended <= observed:
+            return f"required evidence {evidence_id} must be newer than blocker observation"
+        if max_age <= 0 or (now - ended).total_seconds() > max_age:
+            return f"required evidence {evidence_id} exceeds maximum age"
+        if not evidence_entry_target_matches(retained_target, entry.get("execution_target")):
+            return f"required evidence {evidence_id} target identity does not match retained target"
+    return None
+
+
+def external_retained_resume_checks(args: argparse.Namespace, prior: dict[str, Any]) -> tuple[list[Check], str | None, bool]:
+    blocker = prior.get("external_blocker")
+    blocker_errors = validate_external_blocker(blocker)
+    if blocker_errors:
+        reason = "unknown_blocker_class" if any("class" in error for error in blocker_errors) else "invalid_external_blocker"
+        checks, failure_reason = resume_fail("external blocker", "; ".join(blocker_errors), reason)
+        return checks, failure_reason, False
+    checks, reason, retained = retained_identity_checks(args, prior)
+    if reason or retained is None:
+        return checks, reason, False
+    index_path, evidence, error, evidence_reason = load_external_evidence_index(args)
+    if error or evidence is None:
+        checks.append(Check("external blocker evidence", "fail", error or "evidence index unavailable", {"detail": evidence_reason or "invalid_evidence"}))
+        return checks, evidence_reason or "invalid_evidence", False
+    semantic_error = external_evidence_semantic_error(args, prior, retained, blocker, evidence)
+    if semantic_error:
+        evidence_reason = evidence_resume_failure_reason(semantic_error)
+        checks.append(Check("external blocker evidence", "fail", semantic_error, {"detail": evidence_reason}))
+        return checks, evidence_reason, False
+    root = args.workspace.resolve(strict=False)
+    relative = repo_relative_or_none(index_path, root) or str(index_path)
+    required_count = len(blocker["evidence_policy"]["required_ids"])
+    checks.append(
+        Check(
+            "external blocker evidence",
+            "pass",
+            f"{relative} satisfies {required_count} required evidence ids",
+            {"detail": relative},
+        )
+    )
+    args.resume_context = {
+        "schema": RETAINED_RESUME_CONTEXT_SCHEMA,
+        "source_run_id": retained["source_run_id"],
+        "source_status_path": retained["source_status_path"],
+        "terminal_reason": RECOVERABLE_EXTERNAL_REASON,
+        "external_blocker": {
+            "blocker_id": blocker["blocker_id"],
+            "class": blocker["class"],
+        },
+        "evidence_index": relative,
+    }
+    return checks, None, True
 
 
 def resume_prior_checks(args: argparse.Namespace) -> tuple[list[Check], str | None, bool]:
@@ -2642,6 +3632,8 @@ def resume_prior_checks(args: argparse.Namespace) -> tuple[list[Check], str | No
         return checks, reason, False
     if prior.get("terminal_reason") == "investigation_required":
         return retained_resume_checks(args, prior)
+    if prior.get("terminal_reason") == RECOVERABLE_EXTERNAL_REASON:
+        return external_retained_resume_checks(args, prior)
     failure_class = prior_status_remote_failure(prior)
     if not failure_class:
         checks, reason = resume_fail(
@@ -2767,6 +3759,9 @@ def upstream_state(root: Path) -> tuple[str, str]:
 
 def queue_success_check(workspace: dict[str, Any], card: dict[str, Any], mode: str) -> tuple[bool, str, dict[str, str]]:
     root = Path(workspace["root"])
+    target_check = execution_target_drift_check(root, workspace.get("execution_target"))
+    if target_check.status == "fail":
+        return False, target_check.message, {}
     clean, clean_reason = git_clean(root)
     if not clean:
         return False, clean_reason, {}
@@ -2793,16 +3788,21 @@ def dependency_list(card: dict[str, Any]) -> list[str]:
 
 
 def retained_recovery_is_valid(card: dict[str, Any]) -> bool:
-    if card.get("terminal_reason") != "investigation_required":
-        return False
     retained = card.get("retained_recovery")
     if not isinstance(retained, dict):
         return False
     fingerprint = retained.get("fingerprint")
     retained_card = retained.get("card")
+    source_reason = retained.get("source_terminal_reason")
+    if card.get("terminal_reason") != source_reason:
+        return False
+    if source_reason == RECOVERABLE_EXTERNAL_REASON:
+        if validate_external_blocker(retained.get("external_blocker")):
+            return False
+    elif source_reason != "investigation_required":
+        return False
     return (
         retained.get("kind") == "original-retained-payload"
-        and retained.get("source_terminal_reason") == "investigation_required"
         and isinstance(retained.get("source_run_id"), str)
         and isinstance(retained.get("source_run_status_path"), str)
         and isinstance(retained_card, dict)
@@ -2848,6 +3848,11 @@ def retained_original_resume_workspaces(previous: dict[str, Any] | None, data: d
         if isinstance(workspace, str):
             workspaces.add(workspace)
     return workspaces
+
+
+def retained_recovery_is_external(card: dict[str, Any]) -> bool:
+    retained = card.get("retained_recovery")
+    return isinstance(retained, dict) and retained.get("source_terminal_reason") == RECOVERABLE_EXTERNAL_REASON
 
 
 def recovery_by_source(cards: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -2916,6 +3921,15 @@ def valid_recovery_augmentation(
         if not recoverable_source(source_previous):
             checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: source {source_id} is not recoverable"))
             return False
+        if retained_recovery_is_external(source_previous):
+            checks.append(
+                Check(
+                    "resume recovery augmentation",
+                    "fail",
+                    f"{card_id}: external blocker recovery must resume the original child with evidence",
+                )
+            )
+            return False
         if current.get("workspace") != source_current.get("workspace") or current.get("wave") != source_current.get("wave"):
             checks.append(Check("resume recovery augmentation", "fail", f"{card_id}: recovery must share source workspace and wave"))
             return False
@@ -2941,6 +3955,47 @@ def child_terminal_signal(child_status: dict[str, Any] | None) -> TerminalSignal
         return TerminalSignal("BLOCKED", "missing_or_invalid_child_status")
     reason = child_status.get("terminal_reason")
     return TerminalSignal(result, reason if isinstance(reason, str) else None)
+
+
+def child_status_matches_plan_card(child_status: dict[str, Any], card: dict[str, Any]) -> bool:
+    if child_status.get("run_id") != card.get("run_id"):
+        return False
+    status_card = child_status.get("card")
+    if not isinstance(status_card, dict):
+        return False
+    expected_path = card.get("resolved_path") or card.get("card")
+    return isinstance(expected_path, str) and status_card.get("path") == expected_path
+
+
+def mirror_child_progress(card: dict[str, Any], child_status: dict[str, Any] | None) -> bool:
+    before = {
+        "progress": copy.deepcopy(card.get("progress")),
+        "progress_health": copy.deepcopy(card.get("progress_health")),
+        "progress_diagnostic": card.get("progress_diagnostic"),
+    }
+    for key in ("progress", "progress_health", "progress_diagnostic"):
+        card.pop(key, None)
+    if not isinstance(child_status, dict):
+        return before != {"progress": None, "progress_health": None, "progress_diagnostic": None}
+    progress = child_status.get("progress")
+    health = child_status.get("progress_health")
+    if not isinstance(progress, dict):
+        return before != {"progress": None, "progress_health": None, "progress_diagnostic": None}
+    errors = schema_errors(child_status, "changerail-delivery-run.schema.json")
+    if errors:
+        card["progress_diagnostic"] = "invalid_child_status"
+    elif not child_status_matches_plan_card(child_status, card):
+        card["progress_diagnostic"] = "invalid_child_identity"
+    else:
+        card["progress"] = copy.deepcopy(progress)
+        if isinstance(health, dict):
+            card["progress_health"] = copy.deepcopy(health)
+    after = {
+        "progress": copy.deepcopy(card.get("progress")),
+        "progress_health": copy.deepcopy(card.get("progress_health")),
+        "progress_diagnostic": card.get("progress_diagnostic"),
+    }
+    return before != after
 
 
 def ready_cards(cards: list[dict[str, Any]], completed: set[str], running_workspaces: set[str]) -> list[dict[str, Any]]:
@@ -3022,9 +4077,12 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
     for card in cards:
         card["state"] = "pending"
         card["run_id"] = child_run_id(args, card)
+        card["episode_id"] = card.get("episode_id") or card["run_id"]
         workspace = workspace_by_alias[card["workspace"]]
         card["run_status_path"] = repository_relative(child_status_path_for(args, card, workspace), args.consumer_root)
         previous_card = previous_cards.get(card["id"])
+        if resume and isinstance(previous_card, dict) and isinstance(previous_card.get("episode_id"), str):
+            card["episode_id"] = previous_card["episode_id"]
         if resume and mode == "push" and card_is_published(
             Path(workspace["root"]), card.get("resolved_path") or card["card"]
         ):
@@ -3051,8 +4109,21 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 if not isinstance(status_path, str) or not status_path:
                     status_path = retained_recovery.get("source_run_status_path") if isinstance(retained_recovery, dict) else None
                 if isinstance(status_path, str) and status_path:
-                    card["resume_status_path"] = status_path
-                    card["reason"] = "retained investigation recovery will resume original child"
+                    if retained_recovery_is_external(previous_card):
+                        evidence_index = getattr(args, "evidence_index", None)
+                        if isinstance(evidence_index, Path):
+                            card["resume_status_path"] = status_path
+                            card["resume_evidence_index"] = str(evidence_index)
+                            card["reason"] = "retained external blocker recovery will resume original child"
+                        else:
+                            card["state"] = "blocked"
+                            card["result"] = "BLOCKED"
+                            card["terminal_reason"] = "missing_evidence"
+                            card["reason"] = "retained external blocker recovery requires --evidence-index"
+                            checks.append(Check("retained external evidence", "fail", f"{card['id']}: --evidence-index is required"))
+                    else:
+                        card["resume_status_path"] = status_path
+                        card["reason"] = "retained investigation recovery will resume original child"
         if resume and isinstance(previous_card, dict) and recoverable_source(previous_card):
             recoveries = recovery_by_source(cards)
             if card["id"] in recoveries:
@@ -3066,6 +4137,9 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                     card["reason"] = previous_card["reason"]
                 if isinstance(previous_card.get("run_status_path"), str):
                     card["run_status_path"] = previous_card["run_status_path"]
+    if any(check.name == "retained external evidence" and check.status == "fail" for check in checks):
+        record = write_plan_status(args, data, workspaces, cards, checks, "terminal", "BLOCKED")
+        return record, 1
     completed = {card["id"] for card in cards if card.get("state") == "skipped"}
     cards_by_id = {card["id"]: card for card in cards if isinstance(card.get("id"), str)}
     for card in cards:
@@ -3089,6 +4163,14 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 break
             card = candidates[0]
             workspace = workspace_by_alias[card["workspace"]]
+            target_check = execution_target_drift_check(Path(workspace["root"]), workspace.get("execution_target"))
+            if target_check.status == "fail":
+                card["state"] = "blocked"
+                card["result"] = "BLOCKED"
+                card["reason"] = target_check.message
+                checks.append(Check("execution target", "fail", f"{card['workspace']}: {target_check.message}"))
+                result = "BLOCKED"
+                break
             if not run_single_card_preflight_check(
                 args,
                 card,
@@ -3135,17 +4217,21 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
         for card_id, (process, card, workspace) in list(running.items()):
             exit_code = process.poll()
             if exit_code is None:
+                child_status = load_json_object(child_status_path_for(args, card, workspace))
+                if mirror_child_progress(card, child_status):
+                    status = write_plan_status(args, data, workspaces, cards, checks, "running" if not resume else "resuming", result, locks)
                 continue
             running.pop(card_id)
             locks.append(release_workspace_lock(args, workspace))
             card["ended_at"] = utc_now()
             child_status = load_json_object(child_status_path_for(args, card, workspace))
+            mirror_child_progress(card, child_status)
             child_signal = child_terminal_signal(child_status)
             child_result = child_signal.outcome or "BLOCKED"
             card["result"] = child_result
             if child_signal.reason:
                 card["terminal_reason"] = child_signal.reason
-            if child_signal.reason == "investigation_required" and isinstance(child_status, dict):
+            if child_signal.reason in {"investigation_required", RECOVERABLE_EXTERNAL_REASON} and isinstance(child_status, dict):
                 retained = retained_recovery_summary(child_status, card.get("run_status_path"))
                 if retained:
                     card["retained_recovery"] = retained
@@ -3441,6 +4527,7 @@ def command_status_plan(args: argparse.Namespace) -> int:
         print(f"result: {data.get('result')}")
         print(f"plan: {plan.get('id', 'unknown')}")
         print(f"cards: {len(data.get('cards', [])) if isinstance(data.get('cards'), list) else 0}")
+        print_compact_plan_progress(data)
         print_compact_plan_failures(data)
     return 0 if data.get("result") != "BLOCKED" else 1
 
@@ -3576,6 +4663,22 @@ def command_status(args: argparse.Namespace) -> int:
     print(f"phase: {record.get('phase')}")
     print(f"result: {record.get('result')}")
     print(f"updated_at: {record.get('updated_at')}")
+    progress = record.get("progress")
+    if isinstance(progress, dict):
+        print(
+            "progress: "
+            f"{progress.get('phase')}/{progress.get('stage')} "
+            f"heartbeat={progress.get('heartbeat_at')} "
+            f"event_counter={progress.get('event_counter')}"
+        )
+    health = record.get("progress_health")
+    if isinstance(health, dict):
+        print(
+            "health: "
+            f"{health.get('state')} "
+            f"heartbeat_age_seconds={health.get('heartbeat_age_seconds')} "
+            f"process_alive={health.get('process_alive')}"
+        )
     if record.get("terminal_reason"):
         print(f"terminal_reason: {record.get('terminal_reason')}")
     print(f"status: {repository_relative(selected, root)}")
@@ -3665,6 +4768,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     resume = subparsers.add_parser("resume", help="resume a blocked single-card delivery after fresh preflight")
     resume.add_argument("card", nargs="?", help="single repository-relative board card path; defaults to prior status card")
     resume.add_argument("--status-path", type=Path, required=True, help="prior delivery-run status.json path")
+    resume.add_argument("--evidence-index", type=Path, help="ignored evidence index proving recoverable external blocker retry eligibility")
     resume.add_argument("--workspace", type=Path)
     resume.add_argument("--runtime-root", type=Path)
     resume.add_argument("--run-id", default=utc_run_id())
@@ -3688,6 +4792,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status.add_argument("--run-id")
     status.add_argument("--json", action="store_true")
     status.set_defaults(func=command_status)
+
+    refresh_episode = subparsers.add_parser("refresh-episode", help="materialize an ignored delivery episode index")
+    refresh_episode.add_argument("card", help="single repository-relative board card path")
+    refresh_episode.add_argument("--workspace", type=Path)
+    refresh_episode.add_argument("--runtime-root", type=Path)
+    refresh_episode.add_argument("--episode-id")
+    refresh_episode.add_argument("--json", action="store_true")
+    refresh_episode.set_defaults(func=command_refresh_episode)
+
+    progress_event = subparsers.add_parser("progress-event", help="append a value-free lifecycle progress event")
+    progress_event.add_argument("phase", choices=PROGRESS_PHASES)
+    progress_event.add_argument("stage", choices=PROGRESS_STAGES)
+    progress_event.add_argument("--sequence", type=int)
+    progress_event.add_argument("--json", action="store_true")
+    progress_event.set_defaults(func=command_progress_event)
 
     plan = subparsers.add_parser("plan", help="resolve a delivery plan without launching children")
     add_plan_common(plan)
@@ -3722,6 +4841,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     resume_plan = subparsers.add_parser("resume-plan", help="resume an aggregate delivery plan run")
     add_plan_common(resume_plan)
     resume_plan.add_argument("--status-path", type=Path)
+    resume_plan.add_argument("--evidence-index", type=Path, help="ignored evidence index for retained external blocker recovery")
     resume_plan.set_defaults(func=command_resume_plan)
 
     status_plan = subparsers.add_parser("status-plan", help="read aggregate delivery plan status")
@@ -3733,7 +4853,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     status_plan.set_defaults(func=command_status_plan, no_push=False, plan=Path("delivery-plan.json"))
 
     args = parser.parse_args(argv)
-    if args.command in {"run", "preflight", "resume"}:
+    if args.command in {"run", "preflight", "resume", "refresh-episode"}:
         workspace_arg = args.workspace
         if args.command == "resume":
             args.status_path = resolve_path(args.status_path)
@@ -3753,7 +4873,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             args.runtime_root = resolve_path(args.runtime_root, args.workspace)
         else:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
-        args.launcher = resolve_path(args.launcher)
+        if getattr(args, "evidence_index", None):
+            args.evidence_index = resolve_path(args.evidence_index, args.workspace)
+        if hasattr(args, "launcher"):
+            args.launcher = resolve_path(args.launcher)
     elif args.command == "status":
         args.workspace = resolve_path(args.workspace) if args.workspace else invocation_workspace()
         if args.runtime_root:
@@ -3762,10 +4885,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             args.runtime_root = args.workspace / ".runtime" / "changerail" / "delivery-runs"
         if args.status_path is not None:
             args.status_path = resolve_path(args.status_path, args.workspace)
+    elif args.command == "progress-event":
+        pass
     else:
         args.consumer_root = resolve_path(args.consumer_root) if getattr(args, "consumer_root", None) else invocation_workspace()
         if hasattr(args, "status_path") and args.status_path:
             args.status_path = resolve_path(args.status_path, args.consumer_root)
+        if hasattr(args, "evidence_index") and args.evidence_index:
+            args.evidence_index = resolve_path(args.evidence_index, args.consumer_root)
         if hasattr(args, "plan"):
             args.plan = resolve_path(args.plan, args.consumer_root)
         if getattr(args, "runtime_root", None):

@@ -249,6 +249,10 @@ def check_scope_reconciliation(root: Path) -> None:
     workspace, _ = make_workspace(root / "scope-positive")
     manifest_path = derive_manifest(workspace)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    episode = manifest.get("episode")
+    if not isinstance(episode, dict) or episode.get("schema") != "changerail.delivery-episode-lineage.v1" or not isinstance(episode.get("id"), str):
+        sys.stderr.write(f"derive manifest missing episode lineage: {episode!r}\n")
+        raise SystemExit(1)
     if (workspace / "linked-docs").is_symlink() and not any(
         entry.get("path") == "linked-docs"
         for entry in manifest.get("committable_paths", [])
@@ -789,6 +793,9 @@ def main() -> int:
             or updated["publish"].get("status") != "pushed"
         ):
             sys.stderr.write("publish metadata was not updated\n")
+            return 1
+        if updated["publish"].get("attempt", {}).get("kind") != "publish":
+            sys.stderr.write(f"publish metadata missing attempt lineage: {updated['publish']!r}\n")
             return 1
 
         finalize = run(

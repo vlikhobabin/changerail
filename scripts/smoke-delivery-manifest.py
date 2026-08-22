@@ -15,6 +15,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
 WRAPPER = ROOT / "bin" / "changerail-delivery-manifest"
+TARGET = {
+    "schema": "changerail.execution-target.v1",
+    "id": "database-primary",
+    "fingerprint": "sha256:" + ("1" * 64),
+    "target_substitution_policy": "forbid",
+}
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -33,6 +39,7 @@ def manifest_payload() -> dict[str, Any]:
         "schema": "changerail.delivery-manifest.v1",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "workspace": {"root": "/opt/changerail", "repository": "changerail"},
+        "execution_target": dict(TARGET),
         "card": {
             "id": "harden-delivery-operations",
             "path": "openspec/board/3.inprogress/harden-delivery-operations.md",
@@ -125,9 +132,48 @@ def check_repository_identity_redaction() -> None:
                 raise AssertionError(f"repository identity leaked {forbidden!r}: {actual!r}")
 
 
+def write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def git(repo: Path, *args: str) -> None:
+    require_ok(subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False), f"git {' '.join(args)}")
+
+
+def check_derive_captures_execution_target(tmp: Path) -> None:
+    repo = tmp / "target-repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "smoke@example.invalid")
+    git(repo, "config", "user.name", "Smoke Test")
+    write(repo / ".gitignore", ".runtime/\n")
+    write(repo / ".changerail" / "execution-target.json", json.dumps(TARGET, ensure_ascii=True, indent=2) + "\n")
+    write(repo / "openspec" / "board" / "3.inprogress" / "target-card.md", "# Target card\n\n## Status\n3.inprogress\n\n## Change 1: `target-change`\n")
+    write(repo / "openspec" / "changes" / "archive" / "2026-08-17-target-change" / "tasks.md", "## Tasks\n\n- [x] done\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "baseline")
+    result = run(
+        [
+            sys.executable,
+            str(HELPER),
+            "derive",
+            "openspec/board/3.inprogress/target-card.md",
+            "--workspace",
+            str(repo),
+            "--json",
+        ]
+    )
+    require_ok(result, "derive target manifest")
+    payload = json.loads(result.stdout)["data"]
+    if payload.get("execution_target") != TARGET:
+        raise AssertionError(f"derive did not capture execution target: {payload!r}")
+
+
 def main() -> int:
     check_repository_identity_redaction()
     with tempfile.TemporaryDirectory(prefix="changerail-manifest-smoke-") as tmp:
+        check_derive_captures_execution_target(Path(tmp))
         path = Path(tmp) / "manifest.json"
         path.write_text(json.dumps(manifest_payload(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

@@ -61,6 +61,45 @@ available.
   `--runtime-root` is explicitly supplied
 - **AND** the record contains the workspace `HEAD` as `commit` when available
 
+### Requirement: Structured live delivery progress
+Delivery runner MUST publish optional `changerail.delivery-progress.v1` for a
+running single-card child based on validated lifecycle events and bounded
+activity heartbeat. Runner MUST NOT derive lifecycle transition from free-form
+prose, command text or output.
+
+#### Scenario: Lifecycle transition updates running status
+- **WHEN** a matching child sends a schema-valid progress event for major
+  transition `ff`, `do`, `review` or `publish`
+- **THEN** runner atomically updates `progress.phase`, `progress.stage`,
+  `heartbeat_at` and monotonic `event_counter`
+- **AND** existing semantics `phase: delivery` and `result: RUNNING` do not
+  change
+
+#### Scenario: Untrusted content is not progress
+- **WHEN** child prose, shell command or command output contains text that looks
+  like a lifecycle phase or a synthetic private value
+- **THEN** runner does not copy that value into progress
+- **AND** phase/stage can change only through validated value-free lifecycle
+  event
+
+### Requirement: Stale heartbeat is a non-terminal diagnostic
+Delivery runner MUST evaluate heartbeat age with observed process state and
+MUST NOT terminate or classify a live child only because one heartbeat interval
+was missed.
+
+#### Scenario: Live child misses heartbeat interval
+- **WHEN** heartbeat age exceeds documented stale threshold and child process
+  remains alive
+- **THEN** status reports bounded health `stale` and heartbeat age
+- **AND** terminal outcome remains unset until existing terminal evidence
+  appears
+
+#### Scenario: Child terminates after stale heartbeat
+- **WHEN** process exits after heartbeat became stale
+- **THEN** runner determines terminal result through the existing terminal
+  protocol
+- **AND** progress health may report termination without replacing result
+
 ### Requirement: Single-card runtime status reader
 The delivery runner MUST provide a read-only single-card status command that
 inspects an existing `changerail.delivery-run.v1` record without launching,
@@ -72,7 +111,8 @@ resuming, stopping or mutating delivery state.
 - **THEN** the command validates the selected record as
   `changerail.delivery-run.v1`
 - **AND** it prints compact human-readable fields for card, phase, result,
-  `updated_at`, `terminal_reason` when present and the selected status path
+  `updated_at`, progress/health when present, `terminal_reason` when present
+  and the selected status path
 - **AND** it does not modify board files, process state, locks, manifests,
   verdicts, evidence indexes, logs or status records
 
@@ -249,6 +289,39 @@ enough fields.
 - **WHEN** child JSONL lacks sufficient fields to classify command output
 - **THEN** the runner reports the optional output classification as unknown or
   absent instead of scraping arbitrary stdout/stderr text
+
+### Requirement: Runner records episode and attempt lineage
+The delivery runner MUST write stable episode identity and typed attempt
+identity into new single-card run status records.
+
+#### Scenario: New delivery starts an episode
+- **WHEN** the runner starts a new single-card delivery without a supported
+  source status
+- **THEN** status records contain an `episode.id` and a `delivery` attempt id
+  matching the run id
+
+#### Scenario: Resume links to source attempt
+- **WHEN** the runner resumes from a schema-valid blocked status
+- **THEN** the new status keeps the source episode id
+- **AND** it records a `recovery` attempt with previous/source-status linkage
+
+### Requirement: Runner reports complete totals with bounded samples
+The delivery runner MUST keep aggregate command/timeline totals independent of
+bounded retained detail samples.
+
+#### Scenario: Command details are sampled
+- **WHEN** observed commands exceed the retained command detail limit
+- **THEN** status records include observed count, retained count, limit and
+  truncation state
+- **AND** `command_execution_count` and aggregate duration still represent all
+  observed completed commands
+
+#### Scenario: Progress events define wait intervals
+- **WHEN** accepted value-free lifecycle progress events describe active stages
+  and waiting stages
+- **THEN** status records can expose active, wait and operator-wait duration
+  totals
+- **AND** rejected content-bearing progress events do not affect those totals
 
 ### Requirement: Runner reports oversized command summary
 The delivery runner MUST print a sanitized operator-facing summary of top
@@ -1250,8 +1323,51 @@ assertion as a substitute for retained-payload fingerprint proof.
 
 #### Scenario: Ordinary launch remains clean-tree gated
 - **WHEN** the operator starts `run`, `run-plan` or a remote-preflight resume
-  without a valid prior `investigation_required` retained-payload status
+  without a valid prior `investigation_required` or
+  `recoverable_external_blocker` retained-payload status
 - **THEN** the existing clean-workspace launch requirements remain in force
+
+### Requirement: Recoverable external blocker stop
+Delivery runner MUST считать temporary external blocker recoverable только
+когда authoritative structured child event объявляет known blocker class,
+bounded resume-evidence requirements и canonical retained-payload identity.
+
+#### Scenario: Required external gate временно недоступен
+- **WHEN** delivery child сообщает `BLOCKED` со schema-valid recoverable
+  external blocker на mandatory platform, service, credential, license или
+  required-software gate
+- **THEN** runner записывает bounded blocker и exact retained identity
+- **AND** не сообщает delivery success и не обходит последующий review
+
+#### Scenario: Free-text blocker не является authoritative
+- **WHEN** child prose или stderr описывает external blocker без structured
+  contract либо называет unknown/nonrecoverable class
+- **THEN** runner оставляет attempt blocked и non-resumable
+- **AND** не разрешает dirty workspace на основании этого текста
+
+### Requirement: Evidence-bound retained external resume
+Single-card resume MUST запускать child с dirty workspace только когда prior
+status identity, blocker class, exact retained fingerprint и все declared fresh
+recovery evidence проходят валидацию. Evidence доказывает только retry
+eligibility; resumed lifecycle MUST повторить mandatory verification и
+review/publish gates.
+
+#### Scenario: External condition восстановлен
+- **WHEN** оператор передает schema-valid evidence index в scope source run/card
+  со всеми required passed entries новее blocker
+- **AND** current workspace и retained fingerprint точно совпадают с prior
+  status
+- **THEN** resume запускает original card с value-free recovery context
+- **AND** resumed child повторяет mandatory external gate до возможного delivery
+  success
+
+#### Scenario: Resume input stale или mismatched
+- **WHEN** evidence отсутствует, stale, failed, относится к другому run/card
+  либо payload/workspace identity drifted
+- **OR** target-bound recovery evidence has missing, mismatched or multiple
+  entry target identities
+- **THEN** resume завершается non-zero до Codex launch
+- **AND** status записывает stable machine-classified blocker reason
 
 ### Requirement: Queue resume after investigation-required child
 The delivery runner MUST allow `resume-plan` to represent recovery from a prior
@@ -1286,6 +1402,24 @@ matching retained-payload identity.
 - **THEN** `resume-plan` records `BLOCKED`
 - **AND** it exits non-zero before launching the source or downstream cards
 
+### Requirement: Queue parity for recoverable external blocker
+`resume-plan` MUST валидировать и возобновлять original externally blocked child
+до продолжения dependency queue, сохраняя completed cards и workspace
+serialization.
+
+#### Scenario: Original child успешно возобновляется
+- **WHEN** aggregate plan содержит одну valid retained external recovery и
+  supplied evidence проходит
+- **THEN** `resume-plan` сначала запускает эту карточку, а затем освобождает ее
+  downstream dependencies после normal delivery success
+- **AND** уже delivered prior plan карточки остаются skipped
+
+#### Scenario: Duplicate или mixed recovery отклоняется
+- **WHEN** plan state объявляет несколько recovery paths для одной source card
+  либо recovery identity принадлежит другому workspace/card
+- **THEN** queue resume fail closed до запуска child
+- **AND** downstream cards остаются explicitly blocked
+
 ### Requirement: Queue recovery keeps downstream blocked
 Queue recovery from `investigation_required` MUST NOT satisfy downstream
 dependencies until the original retained payload or its explicit replacement
@@ -1319,7 +1453,91 @@ ChangeRail MUST include focused synthetic smoke coverage for
 - **THEN** it covers successful retained recovery
 - **AND** it covers dirty state, stale authorization, wrong card, wrong
   workspace and fingerprint drift failures
+- **AND** it covers successful external blocker recovery, stale/missing
+  evidence, payload drift, mixed workspaces, nonrecoverable blockers and target
+  identity mismatches
 
+### Requirement: Runner SHALL retain exact execution target identity
+Delivery runner SHALL capture canonical declared target identity at attempt
+start и SHALL сохранять ее через single-card status, plan status, blocker и
+resume lineage без physical endpoint или credentials.
+
+#### Scenario: Identity остается стабильной
+- **WHEN** preflight, child terminal status и current declaration содержат exact
+  same id/fingerprint
+- **THEN** lifecycle может продолжиться к review/publish gates
+
+#### Scenario: Declaration drifted во время delivery
+- **WHEN** current tracked target identity отличается от captured identity
+- **THEN** runner завершает path как blocked
+- **AND** не запускает downstream card и не публикует payload
+
+### Requirement: Runner SHALL reject target substitution on resume
+Single-card и package resume SHALL запускать retained payload только при exact
+target identity match и SHALL NOT принимать evidence или CLI input как rebind
+authority.
+
+#### Scenario: Retained identity mismatch
+- **WHEN** source status, current declaration или recovery evidence имеют
+  разные target identities
+- **THEN** resume fail closed до Codex launch со stable target-mismatch reason
+
+#### Scenario: Explicit rebind выполнен
+- **WHEN** оператор публикует новую tracked declaration
+- **THEN** старый retained attempt остается non-resumable
+- **AND** новый clean delivery получает новую captured identity
+
+### Requirement: External recovery SHALL NOT substitute a declared target
+Runner MUST сохранять exact declared execution target across retained resume и
+MUST завершаться до Codex launch при target drift или попытке использовать
+recovery как authority на создание, переподключение или подмену среды.
+
+#### Scenario: Recovery evidence указывает другую цель
+- **WHEN** evidence target id/fingerprint или target-bound entry
+  id/fingerprint не совпадает с source retained identity
+- **THEN** single-card и queue resume fail closed со stable target-mismatch
+  reason
+- **AND** child не запускается и downstream queue не освобождается.
+
+#### Scenario: Оператор явно переподключил среду
+- **WHEN** tracked project target identity изменилась после blocked attempt
+- **THEN** dirty retained resume недоступен
+- **AND** оператор начинает новый clean delivery attempt с новой verification
+  lineage.
+
+### Requirement: Delivery episode and attempt lineage
+ChangeRail runner MUST назначать stable episode id одному card execution и
+unique typed attempt id каждому preflight, delivery или recovery process.
+Resume MUST наследовать source episode и ссылаться на source attempt;
+unrelated new execution той же карточки MUST начинать другой episode.
+
+#### Scenario: Blocked child возобновляется
+- **WHEN** schema-valid blocked attempt возобновляется через supported
+  single-card или plan workflow
+- **THEN** resumed status сохраняет source `episode_id`, использует новый
+  recovery attempt id и связывает previous/source attempt
+- **AND** card/workspace/episode identity проверяется до launch
+
+#### Scenario: Та же карточка начинает unrelated execution
+- **WHEN** оператор запускает new run без authorized source status
+- **THEN** runner создает новый episode id
+- **AND** prior attempts и review cycles не присоединяются только по card id
+
+### Requirement: Complete aggregate performance with bounded samples
+Runner MUST сохранять aggregate counts и durations всех observed commands,
+tools и structured phases, даже когда detailed samples bounded. Он MUST
+указывать observed count, retained count, sample limit и truncation state.
+
+#### Scenario: Long run превышает detail limits
+- **WHEN** command или timeline details превышают configured retained limits
+- **THEN** aggregate counts и durations по-прежнему включают каждый observed
+  item
+- **AND** sample metadata сообщает truncation и effective limits
+
+#### Scenario: Наблюдается structured operator wait
+- **WHEN** lifecycle записывает value-free external/operator wait transition
+- **THEN** performance totals классифицируют duration отдельно от active time
+- **AND** entered value, screen content и external response не сохраняются
 ### Requirement: Default Codex runtime home isolation
 The delivery runner MUST keep mutable Codex user state separate from tracked
 project configuration for every invocation that does not explicitly set

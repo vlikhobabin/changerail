@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://changerail.local/schemas/changerail-source-classification-check.schema.json",
+  "title": "ChangeRail source classification check",
+  "type": "object",
+  "required": ["schema", "checked_at", "target", "classification", "profiles", "effective_rules", "diagnostics", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "changerail.source-classification-check.v1"},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "target": {
+      "type": "object",
+      "required": ["path", "snapshot"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"$ref": "#/$defs/repositoryRelativePath"},
+        "snapshot": {"type": "string", "minLength": 1}
+      }
+    },
+    "classification": {
+      "type": "object",
+      "required": ["present", "valid"],
+      "additionalProperties": false,
+      "properties": {
+        "present": {"type": "boolean"},
+        "valid": {"type": "boolean"},
+        "provenance": {"type": "string", "enum": ["available", "unavailable", "invalid"]}
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "checksum", "source_kind", "state"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "version": {"type": "string"},
+          "checksum": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "source_kind": {"enum": ["built-in", "local-integration"]},
+          "state": {"enum": ["matched", "missing", "checksum-conflict", "unavailable"]}
+        }
+      }
+    },
+    "effective_rules": {
+      "type": "object",
+      "required": ["source_kind_count", "non_production_root_count", "source_kinds", "non_production_roots", "declared_override_paths"],
+      "additionalProperties": false,
+      "properties": {
+        "source_kind_count": {"type": "integer", "minimum": 0},
+        "non_production_root_count": {"type": "integer", "minimum": 0},
+        "covered_path_count": {"type": "integer", "minimum": 0},
+        "excluded_path_count": {"type": "integer", "minimum": 0},
+        "source_kinds": {"type": "array", "items": {"$ref": "#/$defs/sourceKind"}},
+        "non_production_roots": {"type": "array", "items": {"$ref": "#/$defs/repositoryRelativePath"}},
+        "declared_override_paths": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/overridePath"}}
+      }
+    },
+    "uncovered_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "confidence", "score", "matched_signal_count", "example_paths"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "version": {"type": "string"},
+          "confidence": {"enum": ["low", "medium", "high"]},
+          "score": {"type": "integer", "minimum": 0, "maximum": 100},
+          "matched_signal_count": {"type": "integer", "minimum": 0},
+          "example_paths": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/repositoryRelativePath"}
+          }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "code", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "severity": {"enum": ["blocking", "advisory"]},
+          "code": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "message": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["status", "blocking", "advisory"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {"enum": ["pass", "fail"]},
+        "blocking": {"type": "integer", "minimum": 0},
+        "advisory": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "repositoryRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "not": {
+        "anyOf": [
+          {"pattern": "^/"},
+          {"pattern": "\\\\"},
+          {"pattern": "(^|/)\\.\\.(?:/|$)"},
+          {"pattern": "(^|/)\\.(?:/|$)"},
+          {"const": "."}
+        ]
+      }
+    },
+    "overridePath": {
+      "type": "string",
+      "pattern": "^(?:non_production_roots|source_kinds\\.[a-z0-9][a-z0-9-]*\\.(?:suffixes|production_roots|measure|description))$"
+    },
+    "sourceKind": {
+      "type": "object",
+      "required": ["id", "suffixes", "production_roots", "measure"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+        "suffixes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^\\.[A-Za-z0-9][A-Za-z0-9.+_-]*$"}},
+        "production_roots": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/repositoryRelativePath"}},
+        "measure": {"enum": ["lines", "xml-structure"]},
+        "description": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

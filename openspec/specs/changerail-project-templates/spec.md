@@ -150,6 +150,23 @@ operator explicitly opts in.
 - **AND** bootstrap does not create a false production declaration on behalf of
   the project
 
+### Requirement: Explicit source classification profile lifecycle guidance
+Generated project guidance MUST document `detect -> review -> materialize ->
+check`, preview-before-write, tracked classification authority, local profile
+ownership and explicit migration without hidden stack activation.
+
+#### Scenario: Consumer adds specialized source
+- **WHEN** a project or domain integration adds a profile for specialized
+  language or structured source
+- **THEN** guidance directs maintainers to review candidate signals and preview
+  final rules before writing project policy
+- **AND** ordinary review and delivery never auto-accept a detected profile
+
+#### Scenario: Existing classification differs
+- **WHEN** materialize or check finds an existing divergent project file
+- **THEN** guidance requires a separate explicit reviewed migration decision
+- **AND** it does not propose force overwrite or automatic Git commit
+
 ### Requirement: Generated consumers receive fix-budget recovery guidance
 Project templates MUST explain the distinction between implementation fix
 cycles and independent-review rescue cycles and MUST retain the shared
@@ -416,3 +433,34 @@ public-safe generic examples.
   `/opt/example-project`
 - **AND** they contain no private consumer names, raw field-validation logs,
   credentials or machine-local runtime reports
+
+### Requirement: Templates SHALL expose optional execution target declaration
+Project templates SHALL документировать schema-valid optional
+`.changerail/execution-target.json` без platform-specific defaults, endpoint,
+credentials или generated target identity.
+
+#### Scenario: Project adopts target binding
+- **WHEN** maintainer добавляет declaration из generic template/example
+- **THEN** файл содержит только logical id, fingerprint и forbid policy
+- **AND** project-owned process отвечает за значения и oracle evidence
+
+#### Scenario: Project does not need target binding
+- **WHEN** declaration не добавлена
+- **THEN** bootstrap и verification сохраняют legacy-compatible behavior
+
+### Requirement: Optional verification coverage configuration
+Bootstrapped project guidance MUST показывать verification coverage как explicit
+optional tracked config reference и MUST описывать map как project-owned policy,
+а не ChangeRail global test catalog.
+
+#### Scenario: Новый consumer не включает coverage map
+- **WHEN** project bootstrapped без project-specific map
+- **THEN** existing strict verification profile и mandatory targeted OpenSpec
+  validation не меняются
+- **AND** placeholder coverage rule не считается mandatory
+
+#### Scenario: Consumer включает coverage map
+- **WHEN** maintainers добавляют tracked map reference и schema-valid entries
+- **THEN** guidance объясняет planning/evidence/review flow и namespaced
+  extension ownership
+- **AND** examples используют только generic project paths и synthetic data

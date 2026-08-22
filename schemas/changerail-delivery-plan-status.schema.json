@@ -166,6 +166,9 @@
           "type": "string",
           "minLength": 1
         },
+        "execution_target": {
+          "$ref": "#/$defs/executionTargetIdentity"
+        },
         "reason": {
           "type": "string"
         }
@@ -212,6 +215,10 @@
           "type": "string",
           "minLength": 1
         },
+        "episode_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "run_status_path": {
           "$ref": "#/$defs/relativePath"
         },
@@ -247,6 +254,15 @@
         },
         "reason": {
           "type": "string"
+        },
+        "progress": {
+          "$ref": "#/$defs/deliveryProgress"
+        },
+        "progress_health": {
+          "$ref": "#/$defs/progressHealth"
+        },
+        "progress_diagnostic": {
+          "enum": ["invalid_child_identity", "invalid_child_status"]
         }
       }
     },
@@ -277,8 +293,63 @@
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9_]*$"
     },
+    "deliveryProgress": {
+      "type": "object",
+      "required": ["schema", "phase", "stage", "heartbeat_at", "event_counter"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.delivery-progress.v1"
+        },
+        "phase": {
+          "enum": ["preflight", "ff", "do", "review", "publish", "terminal"]
+        },
+        "stage": {
+          "enum": ["starting", "discovery", "planning", "implementation", "verification", "waiting", "finalizing", "complete"]
+        },
+        "heartbeat_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event_counter": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "progressHealth": {
+      "type": "object",
+      "required": ["state", "heartbeat_age_seconds", "process_alive"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": ["active", "stale", "terminated"]
+        },
+        "heartbeat_age_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "process_alive": {
+          "type": "boolean"
+        }
+      }
+    },
     "retainedRecovery": {
       "type": "object",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source_terminal_reason": {
+                "const": "recoverable_external_blocker"
+              }
+            }
+          },
+          "then": {
+            "required": ["external_blocker"]
+          }
+        }
+      ],
       "required": [
         "kind",
         "source_run_id",
@@ -301,7 +372,7 @@
           "$ref": "#/$defs/relativePath"
         },
         "source_terminal_reason": {
-          "const": "investigation_required"
+          "enum": ["investigation_required", "recoverable_external_blocker"]
         },
         "card": {
           "type": "object",
@@ -338,6 +409,88 @@
         },
         "review_target_kind": {
           "const": "working-tree"
+        },
+        "execution_target": {
+          "$ref": "#/$defs/executionTargetIdentity"
+        },
+        "external_blocker": {
+          "$ref": "#/$defs/externalBlocker"
+        }
+      }
+    },
+    "externalBlocker": {
+      "type": "object",
+      "required": [
+        "schema",
+        "blocker_id",
+        "class",
+        "observed_at",
+        "retryable",
+        "evidence_policy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.external-blocker.v1"
+        },
+        "blocker_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$"
+        },
+        "class": {
+          "enum": ["credential", "network", "license", "external_service", "platform_access", "required_software"]
+        },
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retryable": {
+          "const": true
+        },
+        "evidence_policy": {
+          "type": "object",
+          "required": ["required_ids", "max_age_seconds"],
+          "additionalProperties": false,
+          "properties": {
+            "required_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._-]*$"
+              }
+            },
+            "max_age_seconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "executionTargetIdentity": {
+      "type": "object",
+      "required": ["schema", "id", "fingerprint", "target_substitution_policy"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "changerail.execution-target.v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 192,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "target_substitution_policy": {
+          "const": "forbid"
         }
       }
     },
