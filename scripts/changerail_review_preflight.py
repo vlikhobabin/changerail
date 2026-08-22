@@ -733,7 +733,7 @@ def run_preflight(*, card_path: Path, workspace: Path, manifest_path: Path | Non
         complexity_reasons.append(f"added production LOC {added_loc} exceeds {loc_limit}")
     if new_protocol and not protocol_allowed:
         complexity_reasons.append("new authority or wire protocol requires published investigation authorization")
-    if repeated:
+    if repeated and not authorized:
         complexity_reasons.append("repeated defect class requires simplification")
     if risk["tier"] == "deterministic" and added_loc:
         _check(checks, "risk-tier", False, "deterministic risk cannot add production code")

@@ -1274,13 +1274,17 @@ and the authorization source's `Depends On` reference. A relation reference
 MUST match its exact card id as bare `<id>`, `<id>.md`, or canonical
 `openspec/board/<lane>/<id>.md`; other stems, paths and ambiguous values MUST
 not match. The authorization ceiling MUST be an integer from 301 through 500,
-and the preflight result MUST retain its machine-verifiable state.
+and the preflight result MUST retain its machine-verifiable state. A valid
+authorization MUST apply only to its exact successor and SHALL satisfy that
+successor's repeated-defect investigation requirement while leaving the
+declared LOC ceiling and protocol allowance independent and fail-closed.
 
 #### Scenario: Published investigation authorizes its exact successor
 - **WHEN** an ordinary successor references a valid published authorization
-  source with ceiling 500 and protocol allowance, has at most 500 added
-  production LOC and its published investigation has the exact card links
-- **THEN** preflight permits the bounded LOC and declared protocol
+  source, declares a repeated defect, remains within the source ceiling and
+  obeys its protocol allowance, and its published investigation has the exact
+  card links
+- **THEN** preflight permits the bounded repeated, LOC and protocol decisions
 - **AND** returns `ready-for-llm-review` with the ordinary `high` route
 
 #### Scenario: Published card uses a filename reference
@@ -1289,19 +1293,23 @@ and the preflight result MUST retain its machine-verifiable state.
 - **THEN** preflight treats it as the exact successor id
 - **AND** a different stem or noncanonical path does not match
 
-#### Scenario: Authorization is missing or stale
-- **WHEN** added production LOC exceeds the default ceiling or a protocol is
-  declared but the authorization reference/source is absent, unreadable,
-  unpublished, untracked at `HEAD` or does not bind both exact card identities
-  and required links
+#### Scenario: Repeated defect has no valid authorization
+- **WHEN** a successor declares a repeated defect and its authorization is
+  absent, unreadable, stale, unpublished or does not bind the exact successor
 - **THEN** preflight returns `investigation-required`
-- **AND** it does not launch an LLM or treat the condition as a free CLI waiver
+- **AND** it does not launch an LLM or infer a waiver from prose
 
 #### Scenario: Successor exceeds the published ceiling
 - **WHEN** a valid authorization declares a ceiling of 500 but the successor
   adds more than 500 production LOC
 - **THEN** preflight returns `investigation-required`
 - **AND** its result identifies the explicit ceiling that was exceeded
+
+#### Scenario: Successor lacks protocol allowance
+- **WHEN** a valid authorization binds the exact successor but its boolean
+  protocol allowance is false and the successor declares a new protocol
+- **THEN** preflight returns `investigation-required`
+- **AND** repeated-defect authorization does not override the protocol decision
 
 ### Requirement: Published bounded review-fingerprint authorization source
 ChangeRail MUST publish the bounded review-fingerprint authorization as one

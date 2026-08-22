@@ -314,7 +314,14 @@ def configure_coverage(
     return manifest
 
 
-def card_text(risk: str, *, protocol: bool = False, authorization: str = "none", blocks: str | None = None) -> str:
+def card_text(
+    risk: str,
+    *,
+    protocol: bool = False,
+    repeated: bool = False,
+    authorization: str = "none",
+    blocks: str | None = None,
+) -> str:
     blocks_section = f"\n## Depends On\n- `{blocks}`\n" if blocks else ""
     return f"""# Example review preflight
 
@@ -332,7 +339,7 @@ archived
 - Milestone audit: `no`
 - New authority or wire protocol: `{'yes' if protocol else 'no'}`
 - Credential or mutation authority: `no`
-- Repeated defect class: `no`
+- Repeated defect class: `{'yes' if repeated else 'no'}`
 - Live admission: `no`
 - Final certification: `no`
 - Published investigation authorization: `{authorization}`
@@ -352,6 +359,7 @@ implemented
 
 
 def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: bool = False,
+              repeated: bool = False,
               executable_lines: int = 0, executable_path: str = "bin/new-helper", go_test_lines: int = 0,
               authorization: bool = False, authorization_protocol: bool = False, authorization_ceiling: int = 500,
               mismatched_blocks: bool = False, investigation_status: str = "4.done",
@@ -406,7 +414,16 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
             authorization_reference["production_loc_ceiling"] = 500
         authorization_value = json.dumps(authorization_reference, separators=(",", ":"))
         blocks = "different-investigation" if mismatched_blocks else "published-investigation"
-    write(card, card_text(risk, protocol=protocol, authorization=authorization_value, blocks=blocks))
+    write(
+        card,
+        card_text(
+            risk,
+            protocol=protocol,
+            repeated=repeated,
+            authorization=authorization_value,
+            blocks=blocks,
+        ),
+    )
     write(repo / "openspec" / "changes" / "archive" / "2026-08-17-example-change" / "tasks.md", "## Tasks\n\n- [x] done\n")
     write(repo / "docs" / "base.md", "changed\n")
     if production_lines:
@@ -1153,6 +1170,21 @@ def main() -> int:
         assert data["complexity_guard"]["added_production_loc"] == 444
         assert data["complexity_guard"]["limit"] == 500
         assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        repo, manifest = workspace(root, "ordinary", production_lines=100, repeated=True, authorization=True)
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "published investigation authorization for repeated defect")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["complexity_guard"]["repeated_defect_class"] is True
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+        assert data["complexity_guard"]["reasons"] == []
+
+        repo, manifest = workspace(root, "ordinary", production_lines=100, repeated=True)
+        result, data = preflight(repo, manifest, "--normalize")
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "not-declared"
+        assert data["complexity_guard"]["reasons"] == ["repeated defect class requires simplification"]
 
         repo, manifest = workspace(root, "ordinary", production_lines=444, authorization=True,
                                    investigation_block_reference="example-card.md")
