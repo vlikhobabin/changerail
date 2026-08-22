@@ -17,7 +17,7 @@ delivery run for a single board card without private workspace assumptions.
 - **AND** the child process runs with cwd and `CODEX_WORKDIR` set to the
   requested workspace
 - **AND** absent an explicit operator `CODEX_HOME`, the child uses
-  `<workspace>/.codex`
+  `<workspace>/.runtime/changerail/codex-home`
 - **AND** the child receives `CHANGERAIL_ACTIVE_RUN_ID` and
   `CHANGERAIL_ACTIVE_RUN_DIR` identifying parent-owned active runtime evidence
 
@@ -371,7 +371,9 @@ used in performance summaries.
 
 ### Requirement: Explicit terminal outcomes
 The runner MUST report terminal outcomes `DELIVERED`, `NO-GO` and `BLOCKED`
-without relying on free-text log interpretation.
+without relying on free-text log interpretation, MUST preserve a schema-valid
+negative review signal across mandatory post-review rescue handoff mutation,
+and MUST require current-tree freshness before accepting any positive verdict.
 
 #### Scenario: Codex exits successfully
 - **WHEN** the non-interactive delivery command exits `0`
@@ -389,6 +391,21 @@ without relying on free-text log interpretation.
 - **WHEN** Codex JSONL contains a structured event such as
   `external-review/no-go`
 - **THEN** the runner records and prints terminal outcome `NO-GO`
+
+#### Scenario: Final no-go creates a tracked rescue handoff
+- **WHEN** the latest canonical unpublished verdict is schema-valid and has
+  `result: no-go`
+- **AND** a required tracked rescue or replacement card created after review
+  makes the negative verdict fingerprint stale
+- **THEN** the runner records terminal outcome `NO-GO`
+- **AND** it does not publish the reviewed payload
+
+#### Scenario: Unpublished go verdict is stale
+- **WHEN** the latest canonical unpublished verdict has `result: go`
+- **AND** its fingerprint, head commit or reviewed tree is not fresh
+- **THEN** the runner records `BLOCKED` with
+  `terminal_reason: review_verdict_invalid`
+- **AND** it does not publish the payload
 
 #### Scenario: Structured review stop awaits external review
 - **WHEN** Codex JSONL contains a structured `awaiting-review` event
@@ -444,24 +461,51 @@ reasons.
 - **THEN** runner записывает `BLOCKED`
 
 ### Requirement: Review-gated safety-stop fallback
-The runner MUST fail closed when no authoritative terminal event exists and
-structured card or review evidence does not prove that review-gated publish
-completed.
+The runner MUST fail closed when structured child evidence does not prove that
+review-gated publish completed. A schema-valid canonical negative verdict MUST
+remain a conservative terminal signal when no authoritative terminal event
+exists or when the only conflicting child evidence is a malformed terminal
+reason. Every positive verdict MUST remain bound to the exact current tree and
+MUST NOT authorize this override.
 
-#### Scenario: Fresh no-go verdict after successful child exit
-- **WHEN** Codex exits `0` without an authoritative terminal outcome
-- **AND** the current card is not published under `openspec/board/4.done`
-- **AND** the canonical review verdict for that card validates fresh with
+#### Scenario: Schema-valid no-go overrides malformed child reason
+- **WHEN** an unpublished card has a schema-valid canonical verdict with
   `result: no-go`
+- **AND** the child emits authoritative `terminal_outcome: BLOCKED` with a
+  malformed `terminal_reason`
+- **THEN** the runner records terminal outcome `NO-GO`
+- **AND** it does not publish the payload
+
+#### Scenario: Malformed child reason without valid negative verdict
+- **WHEN** the child emits authoritative `terminal_outcome: BLOCKED` with a
+  malformed `terminal_reason`
+- **AND** no schema-valid canonical `result: no-go` verdict applies
+- **THEN** the runner records `BLOCKED` with
+  `terminal_reason: malformed_terminal_reason`
+- **AND** it does not publish the payload
+
+#### Scenario: Positive verdict cannot override malformed child reason
+- **WHEN** the child emits authoritative `terminal_outcome: BLOCKED` with a
+  malformed `terminal_reason`
+- **AND** a canonical verdict is positive, stale or invalid
+- **THEN** the runner remains fail-closed
+- **AND** no commit or push is authorized
+
+#### Scenario: Schema-valid no-go verdict after child exit
+- **WHEN** Codex exits without an authoritative terminal outcome
+- **AND** the current card is not published under `openspec/board/4.done`
+- **AND** the canonical review verdict for that card validates schema and
+  semantic consistency with `result: no-go`
 - **THEN** the runner records `NO-GO`
 - **AND** the wrapper exits non-zero
 
-#### Scenario: Invalid or stale verdict after successful child exit
-- **WHEN** Codex exits `0` without an authoritative terminal outcome
+#### Scenario: Invalid verdict or stale go after child exit
+- **WHEN** Codex exits without an authoritative terminal outcome
 - **AND** the current card is not published under `openspec/board/4.done`
-- **AND** the canonical review verdict for that card exists but fails validation
-  or freshness checks
+- **AND** the canonical review verdict is invalid, or has `result: go` and fails
+  current-tree freshness checks
 - **THEN** the runner records `BLOCKED`
+- **AND** `terminal_reason` is `review_verdict_invalid`
 - **AND** the wrapper exits non-zero
 
 #### Scenario: Unpublished card without verdict after successful child exit
@@ -513,35 +557,38 @@ from a deliver-ready board card and proves the runner-supervised
   preflight and publishes only after the local bare remote is reachable
 - **AND** the resumed terminal status is `DELIVERED` for the same card
 
-#### Scenario: One-command delivery fails closed on stale verdict
-- **WHEN** the smoke provides a stale canonical review verdict for an unpublished
-  card after a child exits successfully without authoritative delivery evidence
-- **THEN** the runner records `BLOCKED`
+#### Scenario: One-command delivery fails closed on stale go verdict
+- **WHEN** the smoke provides a canonical `result: go` review verdict whose
+  fingerprint, head commit or reviewed tree is stale for an unpublished card
+- **AND** the child exits without authoritative delivery evidence
+- **THEN** the runner records `BLOCKED` with
+  `terminal_reason: review_verdict_invalid`
 - **AND** the card remains outside `4.done`
 - **AND** no payload commit is pushed to the local bare remote
 
-#### Scenario: One-command delivery fails closed on exhausted review budget
-- **WHEN** the smoke simulates a final external review `NO-GO` after the
+#### Scenario: One-command delivery preserves exhausted-budget no-go
+- **WHEN** the smoke writes a schema-valid final `result: no-go` after the
   same-card review rescue budget is exhausted
-- **THEN** the runner records `NO-GO` or a documented review-gated blocked
-  terminal outcome
+- **AND** a tracked rescue handoff makes that negative verdict stale
+- **AND** the child exits without an authoritative terminal event
+- **THEN** the runner records `NO-GO`
 - **AND** the card remains unpublished
 - **AND** no payload commit is pushed to the local bare remote
 
 ### Requirement: Delivery runner preflight
 The runner MUST provide a preflight mode that checks the Codex launcher,
-effective `CODEX_HOME`, auth state, `CODEX_HOME` config, stale symlinks,
+effective `CODEX_HOME`, auth state, effective project policy, stale symlinks,
 executable permissions and optional connectivity URL.
 Delivery runner preflight MUST sanitize connectivity diagnostics before writing
 structured runtime status.
 
 The runner MUST fail closed before launching a delivery child unless the
-effective `CODEX_HOME/config.toml` grants unattended mutation authority with
+effective project policy grants unattended mutation authority with
 `approval_policy = "never"` and `sandbox_mode = "danger-full-access"`.
 
 #### Scenario: Effective Codex authority is insufficient
-- **WHEN** preflight reads an effective Codex config with missing or different
-  approval/sandbox values
+- **WHEN** preflight reads an effective Codex project config with missing or
+  different approval/sandbox values
 - **THEN** preflight reports a blocking `Codex automation authority` check
 - **AND** no delivery child is launched
 
@@ -551,7 +598,8 @@ effective `CODEX_HOME/config.toml` grants unattended mutation authority with
   fail in structured output
 
 #### Scenario: Auth or wiring is stale
-- **WHEN** auth markers are absent or `CODEX_HOME` contains broken symlinks
+- **WHEN** auth markers are absent or the effective runtime/project Codex layers
+  contain broken symlinks
 - **THEN** preflight records explicit diagnostics before the delivery child is
   launched
 
@@ -935,8 +983,9 @@ consumer repository surface.
 - **THEN** the docs explain that `run`, `preflight-plan`, `run-plan` and
   `resume-plan` require an effective Codex auth source before unattended
   delivery can launch
-- **AND** the docs describe default `<workspace>/.codex` `CODEX_HOME`
-  resolution and explicit `CODEX_HOME` override behavior
+- **AND** the docs describe the default ignored
+  `<workspace>/.runtime/changerail/codex-home`, tracked project config and
+  explicit `CODEX_HOME` override behavior
 
 #### Scenario: Documentation gives safe remediation examples
 - **WHEN** the docs describe missing-auth remediation
@@ -1108,6 +1157,86 @@ operator evidence.
   unresolved card
 - **AND** downstream cards remain blocked until that child satisfies normal
   push-enabled or explicit `--no-push` success criteria
+
+### Requirement: Child-equivalent delivery-plan publish-target preflight
+The delivery runner MUST use a single-card child-equivalent preflight receipt
+for delivery-plan admission before aggregate queue launch, workspace lock
+creation or delivery child launch.
+
+#### Scenario: Child publish-target failure blocks admission before locks
+- **WHEN** `preflight-plan` or initial `run-plan` validates a delivery plan in
+  remote-push mode
+- **AND** the supervisor checks pass
+- **AND** the child-equivalent single-card preflight fails its `publish target`
+  check
+- **THEN** aggregate status records `BLOCKED`
+- **AND** no workspace lock is created
+- **AND** no delivery child is launched
+- **AND** the affected card status contains `terminal_reason:
+  publish_target_preflight_failed`
+- **AND** the affected card status contains `run_status_path` pointing at the
+  child `changerail.delivery-run.v1` status
+- **AND** the affected card status preserves the sanitized remote
+  `failure_class` when the child status provides one
+
+#### Scenario: Child publish-target pass admits the queue
+- **WHEN** delivery-plan admission runs in remote-push mode
+- **AND** supervisor checks and child-equivalent single-card preflight pass
+- **THEN** the aggregate run is admitted without weakening clean-tree,
+  authority, auth, upstream or remote reachability checks
+- **AND** later delivery launch still uses the normal single-card runner command
+
+#### Scenario: Explicit no-push remains local-only
+- **WHEN** delivery-plan admission runs with explicit `--no-push`
+- **THEN** child-equivalent single-card preflight receives the explicit no-push
+  argument
+- **AND** remote publish-target failure is not silently converted into no-push
+- **AND** the aggregate status mode remains `no-push`
+
+### Requirement: Delivery-plan dispatch revalidates child publish target
+The delivery runner MUST re-run child-equivalent publish-target preflight for
+each unresolved card immediately before dispatching that card from `run-plan`
+or `resume-plan`.
+
+#### Scenario: Dispatch revalidation catches later environment drift
+- **WHEN** an aggregate run has already delivered or skipped earlier cards
+- **AND** a later ready card's child-equivalent publish-target preflight fails
+  immediately before dispatch
+- **THEN** the aggregate run records `BLOCKED`
+- **AND** no workspace lock is created for that card
+- **AND** no delivery child is launched for that card
+- **AND** the affected card status contains `terminal_reason:
+  publish_target_preflight_failed`
+- **AND** the affected card status references the fresh child preflight status
+  with `run_status_path`
+
+#### Scenario: Resume keeps delivered cards skipped and revalidates pending cards
+- **WHEN** `resume-plan` continues a prior aggregate run
+- **AND** previous cards are already delivered and still satisfy queue success
+  checks
+- **THEN** those cards remain skipped
+- **AND** pending cards remain dependency-ordered
+- **AND** each pending card receives fresh child-equivalent preflight before
+  dispatch
+
+### Requirement: Single-card publish-target preflight terminal status
+Single-card preflight status MUST expose a specific terminal reason when the
+publish-target check fails so aggregate consumers do not collapse the blocker
+to `unpublished_card`.
+
+#### Scenario: Single-card preflight records publish-target terminal reason
+- **WHEN** `bin/changerail-delivery-runner preflight --write-status` cannot
+  prove the remote-push publish target
+- **THEN** the written `changerail.delivery-run.v1` status records `BLOCKED`
+- **AND** `terminal_reason` is `publish_target_preflight_failed`
+- **AND** the failed `publish target` check retains sanitized `failure_class`,
+  retryability, attempt count and evidence fields when available
+
+#### Scenario: Non-publish-target preflight failures remain generic blockers
+- **WHEN** single-card preflight fails for a check other than `publish target`
+- **THEN** the runner records `BLOCKED`
+- **AND** it does not misclassify that failure as
+  `publish_target_preflight_failed`
 
 ### Requirement: Investigation-required retained payload identity
 The delivery runner MUST record schema-valid retained-payload identity when a
@@ -1409,3 +1538,175 @@ tools и structured phases, даже когда detailed samples bounded. Он M
 - **WHEN** lifecycle записывает value-free external/operator wait transition
 - **THEN** performance totals классифицируют duration отдельно от active time
 - **AND** entered value, screen content и external response не сохраняются
+### Requirement: Default Codex runtime home isolation
+The delivery runner MUST keep mutable Codex user state separate from tracked
+project configuration for every invocation that does not explicitly set
+`CODEX_HOME`.
+
+#### Scenario: Default runtime home is prepared
+- **WHEN** preflight runs without an explicit operator `CODEX_HOME`
+- **THEN** the runner prepares a private ignored runtime home under
+  `<workspace>/.runtime/changerail/codex-home`
+- **AND** its user config binds exact absolute trust to the selected workspace
+- **AND** unattended authority is validated from tracked
+  `<workspace>/.codex/config.toml`
+
+#### Scenario: Codex persists workspace trust
+- **WHEN** a delivery child persists an absolute workspace trust entry into its
+  user-level `CODEX_HOME/config.toml`
+- **THEN** tracked `<workspace>/.codex/config.toml` remains byte-identical
+- **AND** the persisted machine-local path remains ignored runtime state
+- **AND** the persistence cannot add an unrelated path to the review payload
+
+#### Scenario: Project auth marker is reused
+- **WHEN** a supported ignored auth marker exists under project `.codex/` and no
+  supported auth environment variable is set
+- **THEN** the generated runtime home references that marker without reading or
+  copying credential contents
+- **AND** missing or stale auth still blocks child launch
+
+#### Scenario: Explicit Codex home remains operator-owned
+- **WHEN** an operator explicitly sets `CODEX_HOME`
+- **THEN** the runner uses that home for config, authority, auth and symlink
+  checks
+- **AND** it does not generate or reconcile files in that operator-owned home
+
+#### Scenario: Project skill link is stale
+- **WHEN** the generated runtime home is valid but a symlink under project
+  `.codex/skills/` is stale
+- **THEN** preflight fails before child launch with sanitized wiring diagnostics
+
+#### Scenario: Runtime home directory aliases another location
+- **WHEN** any directory in the runner-owned default runtime-home chain is a
+  symlink
+- **THEN** preflight fails before chmod, file reconciliation or child launch
+- **AND** tracked project configuration remains byte-identical
+
+### Requirement: Child-environment publish-target preflight investigation decision
+ChangeRail MUST publish a tracked investigation decision before implementing
+delivery-runner queue admission changes for child-equivalent publish-target
+preflight. The decision MUST reproduce the supervisor/child parity gap with
+public-safe deterministic evidence, map execution boundaries, select one
+canonical preflight design, define structured terminal behavior and bind one
+exact implementation successor with its verification floor.
+
+#### Scenario: Investigation records deterministic parity reproducer
+- **WHEN** the child-environment publish-target preflight investigation is
+  completed
+- **THEN** it records a public-safe deterministic reproducer in which a
+  supervisor publish-target proof passes for a temporary repository and local
+  upstream
+- **AND** the same workspace, branch and configured remote are checked through
+  a child-equivalent Git/SSH resolution profile that fails with a sanitized
+  `ssh_config` class
+- **AND** the reproducer does not require real credentials, private remotes,
+  live provider access or machine-local runtime logs
+
+#### Scenario: Decision maps child execution boundaries
+- **WHEN** the investigation records the selected design
+- **THEN** it identifies runner process, launcher environment, Codex
+  configuration, permission profile, sandboxed command execution, Git
+  configuration and SSH configuration resolution as boundaries that can affect
+  publish-target proof
+- **AND** it states why supervisor-only `git ls-remote` proof is insufficient
+  for queue admission
+
+#### Scenario: Decision selects child-equivalent preflight receipt
+- **WHEN** the investigation binds the canonical design
+- **THEN** it requires the future implementation to produce a pre-delivery
+  child-equivalent receipt before aggregate queue admission, before workspace
+  lock creation and before delivery child launch
+- **AND** the receipt is bound to workspace, card, `HEAD`, branch, remote,
+  remote URL class, launcher, `CODEX_WORKDIR`, effective `CODEX_HOME` policy,
+  permission profile and sanitized Git/SSH profile
+- **AND** the decision sets a bounded freshness interval and requires
+  dispatch-time revalidation before each later child starts
+
+#### Scenario: Decision preserves structured failure and retry taxonomy
+- **WHEN** the future child-equivalent proof fails
+- **THEN** the selected contract records aggregate `BLOCKED` with
+  `terminal_reason: publish_target_preflight_failed`
+- **AND** the affected card status preserves sanitized `failure_class`,
+  retryability, attempt count and child status reference instead of falling
+  back to `unpublished_card`
+- **AND** retry is bounded to DNS, timeout and transient transport classes while
+  authentication, SSH policy/configuration and missing branch remain
+  non-retryable
+
+#### Scenario: Decision constrains SSH override support
+- **WHEN** the investigation evaluates SSH override support
+- **THEN** it allows only explicit consumer-scoped overrides that do not become
+  a generic default, bypass host policy or modify package-managed system SSH
+  files
+- **AND** diagnostics must remain sanitized and must not expose credentials,
+  identity paths, URL userinfo or raw SSH configuration contents
+
+#### Scenario: Decision binds exact implementation successor
+- **WHEN** the investigation names the implementation successor
+- **THEN** it binds successor id
+  `add-delivery-runner-child-equivalent-preflight`
+- **AND** it records the current successor path
+  `openspec/board/1.backlog/add-delivery-runner-child-equivalent-preflight.md`
+- **AND** it records a production LOC ceiling of 300 added production-counted
+  lines and a `no` runner/status protocol-boundary declaration
+- **AND** it states that exceeding this boundary requires a separate published
+  authorization bound to this investigation and the exact successor
+
+### Requirement: Explicit-home Codex child authority is effective
+The delivery runner MUST propagate already-validated unattended automation
+authority to the real tracked Codex launcher when the operator explicitly
+selects an operator-owned `CODEX_HOME`.
+
+The propagation MUST remain conditional on the existing exact
+`approval_policy = "never"` and `sandbox_mode = "danger-full-access"` policy
+gate and MUST NOT replace clean-tree, authentication, upstream or publish-target
+preflight.
+
+#### Scenario: Explicit trusted home receives invocation-level authority
+- **WHEN** the operator explicitly sets `CODEX_HOME`
+- **AND** its effective config passes the existing unattended automation
+  authority gate
+- **AND** the runner uses the tracked ChangeRail Codex launcher
+- **THEN** the launched Codex command includes
+  `--dangerously-bypass-approvals-and-sandbox` before `exec`
+- **AND** existing status records the exact command in `command.argv`
+- **AND** no new required status field is introduced
+
+#### Scenario: Unsupported Codex CLI blocks before child launch
+- **WHEN** the explicit-home tracked-launcher route requires invocation-level
+  authority
+- **AND** the installed Codex CLI does not advertise the required bypass mode
+- **THEN** preflight records a failed `Codex effective automation authority`
+  check
+- **AND** no delivery child is launched
+
+#### Scenario: Existing safety gates remain authoritative
+- **WHEN** explicit `CODEX_HOME` policy, authentication, workspace cleanliness,
+  upstream or publish-target verification fails
+- **THEN** the runner remains blocked before child launch
+- **AND** invocation-level authority does not convert that failure into a pass
+
+#### Scenario: Non-opted-in launch paths remain unchanged
+- **WHEN** the runner uses its generated default runtime home
+- **OR** the operator supplies a supported custom launcher
+- **THEN** the runner does not inject the Codex-specific bypass option
+- **AND** existing launch behavior remains unchanged
+
+### Requirement: Published-card resume reconciliation
+The delivery runner MUST reconcile a plan card that was published outside a
+previous failed aggregate run before dispatching another delivery child.
+
+#### Scenario: Resume skips a safely published prior blocker
+- **WHEN** `resume-plan` re-resolves a prior non-delivered card to exactly one
+  path under `openspec/board/4.done/`
+- **AND** the owning repository is clean and `HEAD == upstream`
+- **AND** the plan runs in push mode
+- **THEN** aggregate status marks the card `skipped` with result `DELIVERED`
+- **AND** no delivery child is launched for that card
+- **AND** its dependants may continue in dependency order
+
+#### Scenario: Published-card proof is incomplete
+- **WHEN** the current card path, clean-tree proof or upstream equality does not
+  satisfy normal push-mode queue success criteria
+- **THEN** resume MUST NOT infer delivered status from retained state or a
+  partial board-path signal

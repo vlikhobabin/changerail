@@ -1025,11 +1025,26 @@ consumer repository не обязан иметь
 tracked `bin/codex`, если оператор запускает ChangeRail runner извне или
 передает supported launcher через `--launcher`. Если `--workspace` не указан, workspace
 резолвится в git-root invocation cwd, а вне git - в текущий cwd. Если
-`CODEX_HOME` не задан, runner использует `<workspace>/.codex`; если
+`CODEX_HOME` не задан, runner использует ignored mutable home
+`<workspace>/.runtime/changerail/codex-home`; tracked project policy остаётся в
+`<workspace>/.codex/config.toml`. Runtime `config.toml` содержит только exact
+absolute trust binding выбранного workspace, поэтому Codex persistence не
+меняет review payload. Existing ignored project `.codex/auth.json` или
+`.codex/auth.toml` подключается в runtime home symlink-ом без чтения и
+копирования credential contents. Если
 `--runtime-root` не задан, status пишется под
 `<workspace>/.runtime/changerail/delivery-runs/`. Preflight записывает диагностику
-launcher, Codex binary, auth state, `config.toml`, stale symlink-ов в
-`CODEX_HOME`, permissions, publish target и optional connectivity URL. Remote
+launcher, Codex binary, auth state, effective project policy, stale symlink-ов
+в runtime home и project `.codex/`, permissions, publish target и optional
+connectivity URL. Explicit operator `CODEX_HOME` остаётся operator-owned:
+runner использует его config/auth state и не генерирует там файлы. Если такой
+home проходит exact trusted automation gate и используется tracked ChangeRail
+`bin/codex`, preflight дополнительно требует поддержку Codex option
+`--dangerously-bypass-approvals-and-sandbox`, а реальный child получает этот
+option перед `exec`. Это узкий explicit opt-in для externally sandboxed
+unattended runner: он делает уже выданную authority effective, но не заменяет
+config/auth/clean-tree/upstream/publish-target checks. Generated default home и
+custom launchers не получают Codex-specific bypass автоматически. Remote
 publish-target proof выполняет `git ls-remote --exit-code <remote>
 refs/heads/<branch>` и сохраняет только sanitized command/result/detail:
 remote name, branch, remote URL class, failure class, retryability, attempt
@@ -1039,6 +1054,10 @@ count и bounded detail. Failure classes: `ssh_config`, `dns`, `auth`,
 config и branch uncertainty остаются fail-closed. Connectivity diagnostics
 записывают только sanitized endpoint metadata, status или exception class; raw
 URL, query values и raw exception text не являются частью structured status.
+Если single-card preflight не может доказать remote publish target, written
+status records `terminal_reason: publish_target_preflight_failed`; failed
+`publish target` check remains the source for sanitized `failure_class`,
+retryability, attempts and evidence.
 Child stdout/stderr logs остаются raw ignored runtime evidence и не должны
 публиковаться как public artifacts. `DELIVERED`, `NO-GO` и
 `BLOCKED` являются терминальными outcome для supervisor-а и печатаются в stdout
@@ -1050,16 +1069,24 @@ signals являются preferred source of truth; если их нет, fallba
 `exit_code == 0` допустим только после проверки, что есть доказательство
 опубликованной карточки под `openspec/board/4.done`. Для текущей card runner
 сначала проверяет canonical verdict
-`.runtime/changerail/reviews/<card-id>.json`: свежий unpublished `result: no-go`
-дает terminal outcome `NO-GO`, а stale/invalid unpublished verdict блокирует
-успешный fallback как `BLOCKED`. Если verdict fallback не применим и карточка
+`.runtime/changerail/reviews/<card-id>.json`: schema-valid unpublished
+`result: no-go` дает terminal outcome `NO-GO`, даже если обязательная tracked
+rescue/replacement card после review сделала negative fingerprint stale. Такой
+negative verdict только блокирует публикацию и не требует freshness. Для
+`result: go` current-tree freshness остается обязательной; stale/invalid
+positive verdict блокирует fallback как `BLOCKED/review_verdict_invalid`. Если
+verdict fallback не применим и карточка
 не опубликована, successful child exit записывается как `BLOCKED` с
 `terminal_reason: unpublished_card`. `fix_budget_exhausted`,
 `external_blocker` и другие stable reasons сохраняются в status как
 `terminal_reason`; ignored raw logs не являются источником этих reasons.
 Malformed reason из authoritative terminal event не принимается как classifier:
 runner записывает стабильный `terminal_reason: malformed_terminal_reason` для
-operator diagnostics.
+operator diagnostics. Единственное более сильное evidence для этого
+диагностического outcome — schema-valid canonical `result: no-go`: оно заменяет
+malformed marker на conservative `NO-GO`, но не разрешает commit/push. Отсутствующий,
+invalid, stale или positive verdict не заменяет malformed marker и не открывает
+publish path.
 
 Recoverable external blocker имеет отдельный bounded contract. Только
 structured JSONL terminal event с `terminal_reason:
@@ -1211,8 +1238,14 @@ ignored runtime evidence and are not embedded in aggregate status.
 entry. Mismatch does not copy progress and records bounded
 `progress_diagnostic: invalid_child_identity`; schema-invalid child progress
 uses `progress_diagnostic: invalid_child_status`.
-Если child preflight блокируется на remote publish target, aggregate card status
-сохраняет compact reason/failure class и `run_status_path`, а не raw child logs.
+
+Queue admission uses the configured single-card runner `preflight
+--write-status` command as a child-equivalent publish-target receipt before
+workspace locks or delivery children. `run-plan` and `resume-plan` rerun that
+receipt immediately before dispatching each later unresolved card. Если child
+preflight блокируется на remote publish target, aggregate card status
+сохраняет `terminal_reason: publish_target_preflight_failed`, compact
+reason/failure class и `run_status_path`, а не raw child logs.
 For queue plans, plan runner запускает ChangeRail single-card runner, the
 single-card runner запускает Codex, and `CODEX_WORKDIR` и effective
 `CODEX_HOME` bind each child to its consumer workspace.

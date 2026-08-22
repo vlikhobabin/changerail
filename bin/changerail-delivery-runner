@@ -81,6 +81,9 @@ MAX_COMMAND_LABEL_LENGTH = 120
 REMOTE_REACHABILITY_TIMEOUT_SECONDS = float(os.environ.get("CHANGERAIL_REMOTE_REACHABILITY_TIMEOUT_SECONDS", "10.0"))
 REMOTE_PREFLIGHT_MAX_ATTEMPTS = 2
 REMOTE_PREFLIGHT_BACKOFF_SECONDS = 0.05
+PUBLISH_TARGET_PREFLIGHT_FAILED = "publish_target_preflight_failed"
+CODEX_EFFECTIVE_AUTHORITY_OPTION = "--dangerously-bypass-approvals-and-sandbox"
+CODEX_CAPABILITY_TIMEOUT_SECONDS = 10.0
 REMOTE_FAILURE_CLASSES = (
     "ssh_config",
     "dns",
@@ -170,6 +173,13 @@ def check_payload(check: Check) -> dict[str, Any]:
     if check.data:
         payload.update(check.data)
     return payload
+
+
+def preflight_terminal_reason(checks: list[Check]) -> str | None:
+    for check in checks:
+        if check.status == "fail" and check.name == "publish target":
+            return PUBLISH_TARGET_PREFLIGHT_FAILED
+    return None
 
 
 def repo_root_from_script() -> Path:
@@ -291,6 +301,26 @@ def ensure_private_directory(path: Path) -> None:
     path.chmod(0o700)
 
 
+def ensure_runner_owned_directory(path: Path, boundary: Path) -> None:
+    try:
+        relative = path.relative_to(boundary)
+    except ValueError as exc:
+        raise OSError("runner-owned directory is outside its workspace boundary") from exc
+    current = boundary
+    chain: list[Path] = []
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise OSError("runner-owned directory chain contains a symlink")
+        current.mkdir(exist_ok=True, mode=0o700)
+        if current.is_symlink() or not current.is_dir():
+            raise OSError("runner-owned directory chain is not an ordinary directory")
+        chain.append(current)
+    if any(item.is_symlink() for item in chain):
+        raise OSError("runner-owned directory chain changed during preparation")
+    path.chmod(0o700)
+
+
 def atomic_write_json(path: Path, data: dict[str, Any], *, private: bool = True) -> None:
     if private:
         ensure_private_directory(path.parent)
@@ -305,6 +335,20 @@ def atomic_write_json(path: Path, data: dict[str, Any], *, private: bool = True)
     os.replace(tmp_path, path)
     if private:
         path.chmod(0o600)
+
+
+def atomic_write_private_text(path: Path, content: str, *, prepared_parent: bool = False) -> None:
+    if prepared_parent:
+        if path.parent.is_symlink() or not path.parent.is_dir():
+            raise OSError("prepared private parent is not an ordinary directory")
+    else:
+        ensure_private_directory(path.parent)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        tmp_path = Path(handle.name)
+        os.fchmod(handle.fileno(), 0o600)
+        handle.write(content)
+    os.replace(tmp_path, path)
+    path.chmod(0o600)
 
 
 def open_private_text(path: Path):
@@ -418,7 +462,65 @@ def effective_codex_home(args: argparse.Namespace) -> Path:
     if configured:
         path = Path(configured).expanduser()
         return path if path.is_absolute() else root / path
-    return root / ".codex"
+    return root / ".runtime" / "changerail" / "codex-home"
+
+
+def explicit_codex_home() -> bool:
+    return bool(os.environ.get("CODEX_HOME"))
+
+
+def project_codex_home(args: argparse.Namespace) -> Path:
+    return args.workspace.resolve(strict=False) / ".codex"
+
+
+def effective_codex_config(args: argparse.Namespace) -> Path:
+    if explicit_codex_home():
+        return effective_codex_home(args) / "config.toml"
+    return project_codex_home(args) / "config.toml"
+
+
+def reconcile_runtime_auth_links(runtime_home: Path, project_home: Path, env: dict[str, str]) -> None:
+    use_auth_marker = not any(env.get(name) for name in AUTH_ENV_VARS)
+    selected: tuple[Path, Path] | None = None
+    if use_auth_marker:
+        for name in AUTH_MARKER_FILES:
+            source = project_home / name
+            if source.is_file():
+                selected = source, runtime_home / name
+                break
+
+    for name in AUTH_MARKER_FILES:
+        link = runtime_home / name
+        desired = selected[0] if selected and selected[1] == link else None
+        if link.is_symlink():
+            if desired is not None and link.resolve(strict=False) == desired.resolve(strict=False):
+                continue
+            link.unlink()
+        elif link.exists():
+            raise OSError(f"runner-owned runtime auth path is not a symlink: {link}")
+        if desired is not None:
+            link.symlink_to(desired.resolve(strict=False))
+
+
+def prepare_default_codex_home(args: argparse.Namespace, env: dict[str, str]) -> Check:
+    if explicit_codex_home():
+        return Check("Codex runtime home", "skip", "explicit CODEX_HOME is operator-owned")
+    root = args.workspace.resolve(strict=False)
+    runtime_home = effective_codex_home(args)
+    try:
+        ensure_runner_owned_directory(runtime_home, root)
+        workspace_key = json.dumps(str(root), ensure_ascii=False)
+        atomic_write_private_text(
+            runtime_home / "config.toml",
+            "# Generated by ChangeRail delivery runner; mutable runtime state.\n"
+            f"[projects.{workspace_key}]\n"
+            'trust_level = "trusted"\n',
+            prepared_parent=True,
+        )
+        reconcile_runtime_auth_links(runtime_home, project_codex_home(args), env)
+    except OSError as exc:
+        return Check("Codex runtime home", "fail", f"cannot prepare isolated runtime home: {exc.__class__.__name__}")
+    return Check("Codex runtime home", "pass", str(runtime_home))
 
 
 def child_environment(args: argparse.Namespace) -> dict[str, str]:
@@ -473,13 +575,64 @@ def auth_state(codex_home: Path, env: dict[str, str]) -> Check:
     return Check("CODEX auth", "fail", f"no auth marker or supported auth environment variable found; {AUTH_REMEDIATION}")
 
 
-def codex_binary_state(launcher: Path) -> Check:
+def tracked_codex_launcher_selected(launcher: Path) -> bool:
     default_launcher = (repo_root_from_script() / "bin" / "codex").resolve(strict=False)
-    selected_launcher = launcher.resolve(strict=False)
-    if selected_launcher != default_launcher:
-        return Check("codex binary", "skip", f"custom launcher selected: {selected_launcher}")
+    return launcher.resolve(strict=False) == default_launcher
+
+
+def codex_binary_state(launcher: Path) -> Check:
+    if not tracked_codex_launcher_selected(launcher):
+        return Check("codex binary", "skip", f"custom launcher selected: {launcher.resolve(strict=False)}")
     found = shutil.which("codex")
     return Check("codex binary", "pass" if found else "fail", found or "not found")
+
+
+def codex_effective_automation_authority_state(args: argparse.Namespace) -> Check:
+    if not explicit_codex_home():
+        return Check(
+            "Codex effective automation authority",
+            "skip",
+            "generated runtime home preserves config-driven child authority",
+        )
+    if not tracked_codex_launcher_selected(args.launcher):
+        return Check(
+            "Codex effective automation authority",
+            "skip",
+            "custom launcher owns effective child authority propagation",
+        )
+    found = shutil.which("codex")
+    if not found:
+        return Check(
+            "Codex effective automation authority",
+            "fail",
+            "Codex binary is unavailable for explicit-home authority capability check",
+        )
+    try:
+        result = subprocess.run(
+            [found, "exec", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=CODEX_CAPABILITY_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return Check(
+            "Codex effective automation authority",
+            "fail",
+            "Codex authority capability check could not complete",
+        )
+    advertised = CODEX_EFFECTIVE_AUTHORITY_OPTION in (result.stdout + result.stderr)
+    if result.returncode == 0 and advertised:
+        return Check(
+            "Codex effective automation authority",
+            "pass",
+            "explicit operator CODEX_HOME; tracked launcher supports invocation-level authority",
+        )
+    return Check(
+        "Codex effective automation authority",
+        "fail",
+        "installed Codex CLI does not advertise required invocation-level authority",
+    )
 
 
 def no_push_selected(args: argparse.Namespace) -> bool:
@@ -1549,6 +1702,57 @@ def apply_plan_card_overrides(data: dict[str, Any], cards: list[dict[str, Any]])
             card["reasoning_effort"] = source["reasoning_effort"]
 
 
+def run_single_card_preflight_check(
+    args: argparse.Namespace,
+    card: dict[str, Any],
+    workspace: dict[str, Any],
+    checks: list[Check],
+    mode: str,
+    *,
+    check_name: str = "single-card preflight",
+) -> bool:
+    child_preflight_run_id = child_run_id(args, card) + "-preflight"
+    child_status_path = child_runtime_root(workspace) / child_preflight_run_id / "status.json"
+    command = [
+        str(args.launcher),
+        "preflight",
+        card.get("resolved_path") or card["card"],
+        "--workspace",
+        workspace["root"],
+        "--runtime-root",
+        str(child_runtime_root(workspace)),
+        "--run-id",
+        child_preflight_run_id,
+        "--json",
+        "--write-status",
+    ]
+    if mode == "no-push":
+        command.append("--deliver-arg=--no-push")
+    result = subprocess.run(command, cwd=Path(workspace["root"]), capture_output=True, text=True, check=False)
+    if result.returncode == 0:
+        checks.append(Check(check_name, "pass", f"{card['id']}: ready"))
+        return True
+
+    card["run_id"] = child_preflight_run_id
+    card["run_status_path"] = repository_relative(child_status_path, args.consumer_root)
+    child_status = load_json_object(child_status_path)
+    failed = first_failed_child_check(child_status)
+    if failed:
+        name, reason, failure_class, terminal_reason = failed
+        compact = f"{name} fail: {reason}"
+        if failure_class:
+            card["failure_class"] = failure_class
+        if terminal_reason:
+            card["terminal_reason"] = terminal_reason
+            card["result"] = "BLOCKED"
+    else:
+        compact = f"child preflight failed: status missing or invalid; exit {result.returncode}"
+    card["state"] = "blocked"
+    card["reason"] = compact
+    checks.append(Check(check_name, "fail", f"{card['id']}: {compact}"))
+    return False
+
+
 def append_single_card_preflight_checks(
     args: argparse.Namespace,
     cards: list[dict[str, Any]],
@@ -1562,44 +1766,10 @@ def append_single_card_preflight_checks(
         workspace = workspaces.get(card["workspace"])
         if not workspace:
             continue
-        child_preflight_run_id = child_run_id(args, card) + "-preflight"
-        child_status_path = child_runtime_root(workspace) / child_preflight_run_id / "status.json"
-        command = [
-            str(args.launcher),
-            "preflight",
-            card.get("resolved_path") or card["card"],
-            "--workspace",
-            workspace["root"],
-            "--runtime-root",
-            str(child_runtime_root(workspace)),
-            "--run-id",
-            child_preflight_run_id,
-            "--json",
-            "--write-status",
-        ]
-        if mode == "no-push":
-            command.append("--deliver-arg=--no-push")
-        result = subprocess.run(command, cwd=Path(workspace["root"]), capture_output=True, text=True, check=False)
-        if result.returncode == 0:
-            checks.append(Check("single-card preflight", "pass", f"{card['id']}: ready"))
-        else:
-            card["run_id"] = child_preflight_run_id
-            card["run_status_path"] = repository_relative(child_status_path, args.consumer_root)
-            child_status = load_json_object(child_status_path)
-            failed = first_failed_child_check(child_status)
-            if failed:
-                name, reason, failure_class = failed
-                compact = f"{name} fail: {reason}"
-                if failure_class:
-                    card["failure_class"] = failure_class
-            else:
-                compact = f"child preflight failed: status missing or invalid; exit {result.returncode}"
-            card["state"] = "blocked"
-            card["reason"] = compact
-            checks.append(Check("single-card preflight", "fail", f"{card['id']}: {compact}"))
+        run_single_card_preflight_check(args, card, workspace, checks, mode)
 
 
-def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str, str | None] | None:
+def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, str, str | None, str | None] | None:
     if not isinstance(child_status, dict):
         return None
     checks = child_status.get("preflight", {}).get("checks")
@@ -1608,14 +1778,20 @@ def first_failed_child_check(child_status: dict[str, Any] | None) -> tuple[str, 
     for check in checks:
         if not isinstance(check, dict) or check.get("status") != "fail":
             continue
-        name = compact_reason(check.get("name") or "child preflight")
+        raw_name = check.get("name") if isinstance(check.get("name"), str) else "child preflight"
+        name = compact_reason(raw_name)
         message = compact_reason(check.get("message") or "failed")
         failure_class = check.get("failure_class")
         if not isinstance(failure_class, str):
             failure_class = None
         if failure_class:
             message = f"{failure_class}: {message}"
-        return name, message, failure_class
+        terminal_reason = child_status.get("terminal_reason")
+        if not isinstance(terminal_reason, str):
+            terminal_reason = None
+        if raw_name == "publish target":
+            terminal_reason = PUBLISH_TARGET_PREFLIGHT_FAILED
+        return name, message, failure_class, terminal_reason
     return None
 
 
@@ -2528,9 +2704,15 @@ def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = Fals
     root = args.workspace.resolve(strict=False)
     launcher = args.launcher
     env = child_environment(args)
+    runtime_home_state = prepare_default_codex_home(args, env)
     codex_home = effective_codex_home(args)
-    config = codex_home / "config.toml"
-    stale = stale_symlinks(codex_home)
+    config = effective_codex_config(args)
+    if explicit_codex_home():
+        stale = stale_symlinks(codex_home)
+    else:
+        stale = [f"runtime:{path}" for path in stale_symlinks(codex_home)]
+        stale.extend(f"project:{path}" for path in stale_symlinks(project_codex_home(args)))
+        stale.sort()
     clean, clean_reason = git_clean(root)
     checks = [
         Check("workspace", "pass" if root.is_dir() else "fail", str(root)),
@@ -2545,9 +2727,11 @@ def check_preflight(args: argparse.Namespace, allow_dirty_workspace: bool = Fals
         Check("CODEX_WORKDIR", "pass", env["CODEX_WORKDIR"]),
         Check("launcher exists", "pass" if launcher.is_file() else "fail", str(launcher)),
         Check("launcher executable", "pass" if os.access(launcher, os.X_OK) else "fail", str(launcher)),
+        runtime_home_state,
         Check("CODEX_HOME", "pass" if codex_home.exists() else "fail", str(codex_home)),
         Check("CODEX config", "pass" if config.is_file() else "skip", str(config)),
         codex_automation_authority_state(config),
+        codex_effective_automation_authority_state(args),
         auth_state(codex_home, env),
         Check(
             "CODEX_HOME symlinks",
@@ -2599,7 +2783,10 @@ def build_command(args: argparse.Namespace) -> list[str]:
     for value in args.deliver_arg:
         prompt += " " + value
     prompt += "\n\nChangeRail child discovery policy:\n" + child_discovery_policy()
-    command = [str(args.launcher), "exec", "--json"]
+    command = [str(args.launcher)]
+    if explicit_codex_home() and tracked_codex_launcher_selected(args.launcher):
+        command.append(CODEX_EFFECTIVE_AUTHORITY_OPTION)
+    command.extend(["exec", "--json"])
     if args.model:
         command.extend(["-m", args.model])
     if args.reasoning_effort:
@@ -2817,9 +3004,6 @@ def review_verdict_fallback_signal(args: argparse.Namespace) -> TerminalSignal:
             str(helper),
             "validate",
             str(verdict),
-            "--check-fresh",
-            "--workspace",
-            str(root),
             "--json",
         ],
         capture_output=True,
@@ -2835,14 +3019,45 @@ def review_verdict_fallback_signal(args: argparse.Namespace) -> TerminalSignal:
     if payload.get("result") == "no-go":
         return TerminalSignal("NO-GO")
     if payload.get("result") == "go":
+        fresh = subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                "validate",
+                str(verdict),
+                "--check-fresh",
+                "--workspace",
+                str(root),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if fresh.returncode != 0:
+            return TerminalSignal("BLOCKED", "review_verdict_invalid")
+        try:
+            fresh_payload = json.loads(fresh.stdout)
+        except json.JSONDecodeError:
+            return TerminalSignal("BLOCKED", "review_verdict_invalid")
+        if fresh_payload.get("result") != "go":
+            return TerminalSignal("BLOCKED", "review_verdict_invalid")
         return TerminalSignal("BLOCKED", "unpublished_go_verdict")
-    return TerminalSignal()
+    return TerminalSignal("BLOCKED", "review_verdict_invalid")
 
 
 def fallback_terminal_signal(args: argparse.Namespace, exit_code: int, structured_signal: TerminalSignal) -> TerminalSignal:
-    if structured_signal.outcome:
+    malformed_block = (
+        structured_signal.outcome == "BLOCKED"
+        and structured_signal.reason == "malformed_terminal_reason"
+    )
+    if structured_signal.outcome and not malformed_block:
         return structured_signal
     review_signal = review_verdict_fallback_signal(args)
+    if malformed_block:
+        if review_signal.outcome == "NO-GO":
+            return review_signal
+        return structured_signal
     if review_signal.outcome:
         return review_signal
     if exit_code != 0:
@@ -2913,6 +3128,9 @@ def command_preflight(args: argparse.Namespace) -> int:
     checks = check_preflight(args)
     record = base_record(args, "preflight", "DELIVERED" if all(c.status != "fail" for c in checks) else "BLOCKED")
     record["preflight"] = {"checks": [check_payload(check) for check in checks]}
+    reason = preflight_terminal_reason(checks)
+    if record["result"] == "BLOCKED" and reason:
+        record["terminal_reason"] = reason
     record["timestamps"]["ended_at"] = utc_now()
     record_commit(record, args.workspace.resolve(strict=False))
     if args.write_status:
@@ -2936,10 +3154,15 @@ def run_single_card_delivery(args: argparse.Namespace, checks: list[Check]) -> i
         record["phase"] = "terminal"
         record["result"] = "BLOCKED"
         record["terminal_outcome"] = "BLOCKED"
+        reason = preflight_terminal_reason(checks)
+        if reason:
+            record["terminal_reason"] = reason
         record["timestamps"]["ended_at"] = utc_now()
         progress.mark_terminal(record)
         atomic_write_json(status_path(args), record)
         print("terminal_outcome: BLOCKED")
+        if reason:
+            print(f"terminal_reason: {reason}")
         print(f"status: {status_path(args)}")
         return 1
     performance = PerformanceCollector(root)
@@ -3860,6 +4083,16 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
         previous_card = previous_cards.get(card["id"])
         if resume and isinstance(previous_card, dict) and isinstance(previous_card.get("episode_id"), str):
             card["episode_id"] = previous_card["episode_id"]
+        if resume and mode == "push" and card_is_published(
+            Path(workspace["root"]), card.get("resolved_path") or card["card"]
+        ):
+            ok, reason, details = queue_success_check(workspace, card, mode)
+            card.update(details)
+            if ok:
+                card["state"] = "skipped"
+                card["result"] = "DELIVERED"
+                card["reason"] = f"already published before resume; {reason}"
+                continue
         if resume and isinstance(previous_card, dict) and previous_card.get("state") == "delivered":
             ok, reason, details = queue_success_check(workspace, card, mode)
             card.update(details)
@@ -3936,6 +4169,17 @@ def run_queue(args: argparse.Namespace, resume: bool = False) -> tuple[dict[str,
                 card["result"] = "BLOCKED"
                 card["reason"] = target_check.message
                 checks.append(Check("execution target", "fail", f"{card['workspace']}: {target_check.message}"))
+                result = "BLOCKED"
+                break
+            if not run_single_card_preflight_check(
+                args,
+                card,
+                workspace,
+                checks,
+                mode,
+                check_name="dispatch preflight",
+            ):
+                card["result"] = "BLOCKED"
                 result = "BLOCKED"
                 break
             lock, lock_error = create_workspace_lock(args, workspace)

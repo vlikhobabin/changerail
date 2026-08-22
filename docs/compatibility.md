@@ -38,6 +38,11 @@ Generated consumers track `project_doc_max_bytes = 32768`. Static verifier
 measurement uses UTF-8 bytes: below 85 percent passes, 85 percent through the
 limit warns non-blocking, and over the limit fails blocking. A missing key in
 an older consumer uses the same compatibility default until migration.
+Greenfield bootstrap additionally refuses a generated `AGENTS.md` at or above
+70 percent so consumers retain at least 30 percent headroom for local rules and
+future shared upgrades. After an `AGENTS.shared.md` change, every existing
+consumer must review and refresh only its marker-bounded generated section,
+then rerun project verification.
 
 Opt-in runtime diagnostics currently support the `codex-cli 0.147.x`
 `doctor --json` schema version 1 and `debug prompt-input` JSON shape. Other

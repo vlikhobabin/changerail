@@ -429,12 +429,22 @@ tracked explicit blocker в ChangeRail compatibility notes.
 
 `verify-project` проверяет wiring и ignore policy, но unattended delivery runner
 нуждается еще и в effective Codex auth source и trusted automation authority.
-Effective `CODEX_HOME/config.toml` должен содержать
-`approval_policy = "never"` и `sandbox_mode = "danger-full-access"`; иначе
+При default запуске tracked `<workspace>/.codex/config.toml` должен содержать
+`approval_policy = "never"` и `sandbox_mode = "danger-full-access"`; при
+explicit `CODEX_HOME` эти значения проверяются в его `config.toml`. Иначе
 runner preflight останавливается до запуска child. Это относится к single-card
 команде `changerail-delivery-runner run` и к plan-oriented командам
 `preflight-plan`, `run-plan` и `resume-plan`: без auth preflight должен
 остановиться fail-closed до запуска delivery child.
+
+Explicit operator-owned `CODEX_HOME` также является opt-in к effective child
+authority для tracked ChangeRail `bin/codex`: runner проверяет, что installed
+Codex CLI рекламирует `--dangerously-bypass-approvals-and-sandbox`, и передает
+этот option до `exec`. Используйте такой home только для явно запускаемого
+unattended runner внутри внешней sandbox/container boundary. Missing option
+блокирует preflight до child launch; недостаточная policy, auth, dirty tree,
+upstream и publish-target failures по-прежнему блокируют независимо. Generated
+default runtime home и custom launcher не получают этот option автоматически.
 
 Для queue plans plan runner запускает ChangeRail single-card runner, а single-card runner запускает Codex.
 Примечание: consumer repository не обязан иметь tracked `bin/codex`. Supported path - запускать
@@ -444,18 +454,25 @@ effective `CODEX_HOME` задаются для каждого child workspace.
 
 Runner выбирает auth location так:
 
-- если оператор явно задал `CODEX_HOME`, используется этот каталог;
-- иначе effective `CODEX_HOME` равен `<workspace>/.codex`, где `workspace` -
-  consumer repository из `--workspace` или текущий git-root;
+- если оператор явно задал `CODEX_HOME`, используется этот operator-owned
+  каталог без generated reconciliation;
+- иначе effective mutable `CODEX_HOME` равен ignored
+  `<workspace>/.runtime/changerail/codex-home`, где `workspace` - consumer
+  repository из `--workspace` или текущий git-root;
+- default runtime config содержит exact absolute workspace trust, а project
+  policy и MCP settings остаются в tracked `<workspace>/.codex/config.toml`;
 - auth считается готовым, если есть supported marker вроде `auth.json` или
-  `auth.toml` внутри effective `CODEX_HOME`, либо задана supported auth
-  environment variable.
+  `auth.toml` внутри project `.codex/`, который runner подключает symlink-ом в
+  default runtime home, либо задана supported auth environment variable.
 
 Project-local marker должен оставаться ignored local state. В generated
 `.gitignore` для consumer проекта есть `.codex/auth.json` и
 `.codex/auth.toml`; не добавляйте эти файлы в tracked payload, не публикуйте их
 в docs, status или logs и не копируйте credentials автоматически во время
-adoption.
+adoption. Runner также не копирует marker contents: он создаёт только ignored
+symlink в своём runtime home. После preflight `git status --short` должен
+оставаться clean; появление `.runtime/` в payload означает неверную ignore
+policy и блокирует запуск.
 
 Безопасный локальный вариант - symlink на уже настроенный Codex auth:
 
@@ -538,6 +555,32 @@ effective Codex process state. Generated `.codex/config.toml` задает
 failure. Для legacy consumer без key временно действует тот же compatibility
 default.
 
+Greenfield bootstrap использует более строгий generation target: новый
+`AGENTS.md` должен занимать менее 70% limit. Оставшиеся 30% резервируются для
+project-specific правил и будущих shared upgrades; повышать limit вместо
+сокращения дублирующих инструкций не является default remediation.
+
+### Audit `AGENTS.md` после ChangeRail upgrade
+
+Если новая версия ChangeRail меняет `AGENTS.shared.md`, maintainer обязан
+провести review `AGENTS.md` во всех consumer-проектах, а не только проверить
+source checkout. Для каждого consumer:
+
+1. Найдите marker-блок `CHANGERAIL_SHARED_AGENTS_BEGIN/END` и замените только
+   его body текущим `/opt/changerail/AGENTS.shared.md`, сохранив project-specific
+   prefix без blind overwrite.
+2. Проверьте локальную часть на duplicated shared workflow, stale authority,
+   устаревшие verification commands, private paths и domain rules, ошибочно
+   попавшие в generic section.
+3. Выполните `wc -c AGENTS.md` и стремитесь держать итог ниже 70% от
+   `project_doc_max_bytes`; диапазон 70–85% требует явного owner review, а 85%+
+   уже дает verifier diagnostic.
+4. Запустите `/opt/changerail/bin/verify-project <project>` и локальный
+   verification baseline проекта, затем review diff перед commit.
+
+Workspace inventory с private consumer paths должен оставаться ignored. В
+публичных docs и reports фиксируйте только aggregate counts и generic examples.
+
 Runtime evidence запускается только opt-in и только с project-local
 `CODEX_HOME`:
 
@@ -569,7 +612,10 @@ unsupported/invalid, не runtime PASS. Raw doctor/prompt output остаетс�
 Если output содержит `CODEX auth: fail`, настройте project-local ignored marker,
 задайте explicit `CODEX_HOME` или используйте supported auth environment
 variable. Если output содержит `CODEX_HOME symlinks: fail`, пересоздайте stale
-symlink-и внутри effective `CODEX_HOME` перед `run-plan` или `resume-plan`.
+symlink-и в указанном runtime или project `.codex/` layer перед `run-plan` или
+`resume-plan`. Не добавляйте absolute `[projects."..."]` вручную в tracked
+project config: default runner создаёт exact trust только в ignored runtime
+home.
 
 ## Проверка
 

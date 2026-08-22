@@ -190,6 +190,10 @@ def write_fake_launcher(path: Path) -> None:
                 "            time.sleep(0.02)",
                 "    else:",
                 "        time.sleep(float(os.environ.get('CHANGERAIL_FAKE_STALL_SECONDS', '0.35')))",
+                "if mode == 'persist-project-trust':",
+                "    codex_home = os.environ['CODEX_HOME']",
+                "    with open(os.path.join(codex_home, 'config.toml'), 'a', encoding='utf-8') as handle:",
+                "        handle.write('\\n[projects.' + json.dumps(os.getcwd()) + ']\\ntrust_level = ' + json.dumps('trusted') + '\\n')",
                 "if mode == 'non-terminal-error':",
                 "    print(json.dumps({'type': 'tool/result', 'data': {'status': 'failed', 'message': 'error'}}))",
                 "if mode == 'no-go':",
@@ -243,6 +247,34 @@ def write_fake_launcher(path: Path) -> None:
                 "    print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
                 "print(json.dumps({'usage': {'input_tokens': 3, 'cached_input_tokens': 1, 'uncached_input_tokens': 2, 'output_tokens': 5, 'reasoning_tokens': 1, 'total_tokens': 8}}))",
                 "sys.exit(1 if mode == 'no-go' else (2 if mode == 'nonzero' else 0))",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def write_fake_codex_cli(path: Path, *, supports_effective_authority: bool = True) -> None:
+    bypass_option = "--dangerously-bypass-approvals-and-sandbox"
+    help_line = f"      {bypass_option}\n" if supports_effective_authority else ""
+    path.write_text(
+        "\n".join(
+            [
+                "#!/usr/bin/env python3",
+                "import json, os, sys",
+                f"bypass_option = {bypass_option!r}",
+                f"help_line = {help_line!r}",
+                "log_path = os.environ.get('CHANGERAIL_FAKE_CODEX_LOG')",
+                "if log_path:",
+                "    with open(log_path, 'a', encoding='utf-8') as handle:",
+                "        handle.write(json.dumps({'argv': sys.argv}) + '\\n')",
+                "if sys.argv[1:] == ['exec', '--help']:",
+                "    print('Run Codex non-interactively')",
+                "    print(help_line, end='')",
+                "    raise SystemExit(0)",
+                "print(json.dumps({'terminal_outcome': 'DELIVERED'}))",
+                "print(json.dumps({'usage': {'input_tokens': 1, 'output_tokens': 1, 'total_tokens': 2}}))",
             ]
         )
         + "\n",
@@ -637,7 +669,13 @@ def run_success(card_path):
 def run_review_budget_exhausted(card_path):
     verdict_path, _tree = write_verdict(card_path, "no-go", card_path)
     write_history(card_path, "no-go", verdict_path, True)
-    emit({"type": "external-review/no-go", "data": {"result": "no-go", "rescue_budget": {"exhausted": True}}})
+    rescue = WORKSPACE / "openspec" / "board" / "2.todo" / "one-command-delivery-smoke-rescue.md"
+    rescue.parent.mkdir(parents=True, exist_ok=True)
+    rescue.write_text(
+        "# Review budget rescue\n\n## Status\n2.todo\n\n"
+        "## Source\n- final schema-valid no-go\n",
+        encoding="utf-8",
+    )
 
 
 stdin = sys.stdin.read()
@@ -734,7 +772,7 @@ def write_fake_queue_runner(path: Path) -> None:
         "\n".join(
             [
                 "#!/usr/bin/env python3",
-                "import argparse, json, os, sys, time",
+                "import argparse, json, os, subprocess, sys, time",
                 "from pathlib import Path",
                 "parser = argparse.ArgumentParser()",
                 "sub = parser.add_subparsers(dest='command', required=True)",
@@ -780,6 +818,11 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    if preflight_mode == 'remote-fail' and 'service-a-card' in args.card:",
                 "        result = 'BLOCKED'",
                 "        checks = [{'name': 'publish target', 'status': 'fail', 'message': 'mode=remote-push remote=origin branch=main remote_url_class=ssh reachable=false failure_class=dns detail=ssh: Could not resolve hostname example.invalid', 'result': 'failed', 'remote': 'origin', 'branch': 'main', 'remote_url_class': 'ssh', 'failure_class': 'dns', 'retryable': True, 'attempts': 2, 'detail': 'ssh: Could not resolve hostname example.invalid', 'evidence': {'command': 'git ls-remote --exit-code <remote> refs/heads/<branch>', 'result': 'failed', 'detail': 'ssh: Could not resolve hostname example.invalid'}}]",
+                "    log_text = Path(call_log).read_text(encoding='utf-8') if call_log and Path(call_log).exists() else ''",
+                "    service_a_was_run = '\"run\"' in log_text and 'service-a-card' in log_text",
+                "    if preflight_mode == 'remote-fail-after-service-a' and 'service-b-card' in args.card and service_a_was_run:",
+                "        result = 'BLOCKED'",
+                "        checks = [{'name': 'publish target', 'status': 'fail', 'message': 'mode=remote-push remote=origin branch=main remote_url_class=ssh reachable=false failure_class=dns detail=ssh: Could not resolve hostname example.invalid', 'result': 'failed', 'remote': 'origin', 'branch': 'main', 'remote_url_class': 'ssh', 'failure_class': 'dns', 'retryable': True, 'attempts': 2, 'detail': 'ssh: Could not resolve hostname example.invalid', 'evidence': {'command': 'git ls-remote --exit-code <remote> refs/heads/<branch>', 'result': 'failed', 'detail': 'ssh: Could not resolve hostname example.invalid'}}]",
                 "    status = {",
                 "        'schema': 'changerail.delivery-run.v1',",
                 "        'run_id': args.run_id,",
@@ -793,6 +836,8 @@ def write_fake_queue_runner(path: Path) -> None:
                 "        'usage': {'available': False, 'reason': 'fake queue preflight'},",
                 "        'preflight': {'checks': checks},",
                 "    }",
+                "    if result == 'BLOCKED' and any(check.get('name') == 'publish target' for check in checks):",
+                "        status['terminal_reason'] = 'publish_target_preflight_failed'",
                 "    path = Path(args.runtime_root) / args.run_id / 'status.json'",
                 "    path.parent.mkdir(parents=True, exist_ok=True)",
                 "    path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + '\\n', encoding='utf-8')",
@@ -843,6 +888,9 @@ def write_fake_queue_runner(path: Path) -> None:
                 "if mode == 'structured-external-blocker' and 'service-a-card' in args.card and args.command == 'run':",
                 "    result = 'BLOCKED'",
                 "    terminal_reason = 'recoverable_external_blocker'",
+                "if mode == 'already-published-blocker' and '/4.done/' in args.card:",
+                "    result = 'BLOCKED'",
+                "    terminal_reason = 'already_published_card_requested_for_delivery'",
                 "if mode == 'recovery-no-go' and 'service-a-recovery' in args.card:",
                 "    result = 'NO-GO'",
                 "if args.command == 'resume' and 'service-a-card' in args.card:",
@@ -855,6 +903,16 @@ def write_fake_queue_runner(path: Path) -> None:
                 "    if mode in resume_reasons:",
                 "        result = 'BLOCKED'",
                 "        terminal_reason = resume_reasons[mode]",
+                "if mode in ('publish-success', 'already-published-blocker') and result == 'DELIVERED' and args.command == 'run':",
+                "    root = Path(args.workspace)",
+                "    source = root / args.card",
+                "    if source.exists():",
+                "        target = root / 'openspec' / 'board' / '4.done' / source.name",
+                "        target.parent.mkdir(parents=True, exist_ok=True)",
+                "        source.rename(target)",
+                "        subprocess.run(['git', '-C', str(root), 'add', 'openspec/board'], check=True)",
+                "        subprocess.run(['git', '-C', str(root), '-c', 'user.name=ChangeRail Smoke', '-c', 'user.email=changerail-smoke@example.invalid', 'commit', '-m', 'publish smoke card'], check=True, stdout=subprocess.DEVNULL)",
+                "        subprocess.run(['git', '-C', str(root), 'push'], check=True, stdout=subprocess.DEVNULL)",
                 "status = {",
                 "    'schema': 'changerail.delivery-run.v1',",
                 "    'run_id': args.run_id,",
@@ -2368,6 +2426,9 @@ def check_one_command_delivery_review_budget_no_go(tmp: Path) -> None:
     status = load_status(runtime, "one-command-review-budget")
     if status.get("result") != "NO-GO" or status.get("terminal_outcome") != "NO-GO":
         raise AssertionError(f"exhausted review budget did not report NO-GO: {status}")
+    stdout = Path(status["logs"]["stdout"]).read_text(encoding="utf-8")
+    if "external-review/no-go" in stdout or "terminal_outcome: NO-GO" in stdout:
+        raise AssertionError("review budget regression used an authoritative terminal signal instead of verdict fallback")
     if remote_head(workspace) != baseline or head_commit(workspace) != baseline:
         raise AssertionError("exhausted review budget scenario unexpectedly committed or pushed")
     if not (workspace / ONE_COMMAND_CARD).is_file() or (workspace / ONE_COMMAND_DONE_CARD).exists():
@@ -2383,13 +2444,27 @@ def check_one_command_delivery_review_budget_no_go(tmp: Path) -> None:
             str(VERDICT_HELPER),
             "validate",
             str(verdict_path),
+            "--json",
+        ]
+    )
+    require_ok(validate, "exhausted review budget verdict validate")
+    rescue_path = workspace / "openspec" / "board" / "2.todo" / "one-command-delivery-smoke-rescue.md"
+    if not rescue_path.is_file():
+        raise AssertionError("exhausted review budget did not retain tracked rescue handoff")
+    stale = run(
+        [
+            sys.executable,
+            str(VERDICT_HELPER),
+            "validate",
+            str(verdict_path),
             "--check-fresh",
             "--workspace",
             str(workspace),
             "--json",
         ]
     )
-    require_ok(validate, "exhausted review budget verdict validate")
+    if stale.returncode == 0:
+        raise AssertionError("tracked rescue handoff did not make negative verdict stale")
 
 
 def check_success_run(tmp: Path) -> None:
@@ -2444,8 +2519,9 @@ def check_success_run(tmp: Path) -> None:
         raise AssertionError(f"child cwd did not honor --workspace: {first}")
     if first.get("CODEX_WORKDIR") != str(workspace):
         raise AssertionError(f"CODEX_WORKDIR did not honor --workspace: {first}")
-    if first.get("CODEX_HOME") != str(workspace / ".codex"):
-        raise AssertionError(f"CODEX_HOME did not default to workspace .codex: {first}")
+    expected_codex_home = workspace / ".runtime" / "changerail" / "codex-home"
+    if first.get("CODEX_HOME") != str(expected_codex_home):
+        raise AssertionError(f"CODEX_HOME did not use isolated workspace runtime home: {first}")
     if first.get("CHANGERAIL_ACTIVE_RUN_ID") != "success":
         raise AssertionError(f"active runner id was not passed to the child: {first}")
     if first.get("CHANGERAIL_ACTIVE_RUN_DIR") != str(runtime / "success"):
@@ -2461,6 +2537,131 @@ def check_success_run(tmp: Path) -> None:
         raise AssertionError(f"child prompt did not include discovery policy: {argv}")
     if "terminal_outcome: DELIVERED" not in result.stdout:
         raise AssertionError(f"terminal outcome was not printed: {result.stdout}")
+
+
+def check_explicit_home_default_launcher_enforces_effective_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "explicit-home-effective-authority")
+    runtime = tmp / "explicit-home-effective-authority-runtime"
+    fake_bin = tmp / "explicit-home-effective-authority-bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    call_log = tmp / "explicit-home-effective-authority-calls.jsonl"
+    write_fake_codex_cli(fake_codex)
+    env = runner_env()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["CODEX_HOME"] = str(workspace / ".codex")
+    env["CHANGERAIL_FAKE_CODEX_LOG"] = str(call_log)
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "explicit-home-effective-authority",
+        ],
+        env=env,
+    )
+    require_ok(result, "explicit-home effective authority run")
+    status = load_status(runtime, "explicit-home-effective-authority")
+    bypass_option = "--dangerously-bypass-approvals-and-sandbox"
+    runner_argv = status["command"]["argv"]
+    if runner_argv[:3] != [str(ROOT / "bin" / "codex"), bypass_option, "exec"]:
+        raise AssertionError(f"runner did not place effective authority before exec: {runner_argv}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    effective = checks.get("Codex effective automation authority")
+    if not effective or effective["status"] != "pass":
+        raise AssertionError(f"effective authority preflight did not pass: {checks}")
+    calls = [json.loads(line)["argv"] for line in call_log.read_text(encoding="utf-8").splitlines()]
+    delivery_call = next((argv for argv in calls if "--json" in argv), None)
+    if delivery_call is None:
+        raise AssertionError(f"tracked launcher did not invoke the fake Codex child: {calls}")
+    if bypass_option not in delivery_call or delivery_call.index(bypass_option) > delivery_call.index("exec"):
+        raise AssertionError(f"launcher-observed argv lacks pre-exec effective authority: {delivery_call}")
+
+
+def check_explicit_home_blocks_unsupported_effective_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "explicit-home-unsupported-authority")
+    runtime = tmp / "explicit-home-unsupported-authority-runtime"
+    fake_bin = tmp / "explicit-home-unsupported-authority-bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    call_log = tmp / "explicit-home-unsupported-authority-calls.jsonl"
+    write_fake_codex_cli(fake_codex, supports_effective_authority=False)
+    env = runner_env()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["CODEX_HOME"] = str(workspace / ".codex")
+    env["CHANGERAIL_FAKE_CODEX_LOG"] = str(call_log)
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "explicit-home-unsupported-authority",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("unsupported Codex effective authority unexpectedly launched")
+    status = load_status(runtime, "explicit-home-unsupported-authority")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    effective = checks.get("Codex effective automation authority")
+    if not effective or effective["status"] != "fail":
+        raise AssertionError(f"unsupported authority did not fail preflight: {checks}")
+    calls = [json.loads(line)["argv"] for line in call_log.read_text(encoding="utf-8").splitlines()]
+    if any("--json" in argv for argv in calls):
+        raise AssertionError(f"delivery child launched after unsupported authority preflight: {calls}")
+
+
+def check_generated_home_default_launcher_keeps_config_driven_authority(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "generated-home-config-driven-authority")
+    runtime = tmp / "generated-home-config-driven-authority-runtime"
+    fake_bin = tmp / "generated-home-config-driven-authority-bin"
+    fake_bin.mkdir()
+    fake_codex = fake_bin / "codex"
+    call_log = tmp / "generated-home-config-driven-authority-calls.jsonl"
+    write_fake_codex_cli(fake_codex)
+    env = runner_env()
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    env["CHANGERAIL_FAKE_CODEX_LOG"] = str(call_log)
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "generated-home-config-driven-authority",
+        ],
+        env=env,
+    )
+    require_ok(result, "generated-home config-driven authority run")
+    status = load_status(runtime, "generated-home-config-driven-authority")
+    bypass_option = "--dangerously-bypass-approvals-and-sandbox"
+    if bypass_option in status["command"]["argv"]:
+        raise AssertionError(f"generated home unexpectedly received Codex bypass: {status['command']['argv']}")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    effective = checks.get("Codex effective automation authority")
+    if not effective or effective["status"] != "skip":
+        raise AssertionError(f"generated-home authority route should remain config-driven: {checks}")
+    calls = [json.loads(line)["argv"] for line in call_log.read_text(encoding="utf-8").splitlines()]
+    delivery_call = next((argv for argv in calls if "--json" in argv), None)
+    if delivery_call is None or bypass_option in delivery_call:
+        raise AssertionError(f"generated-home launcher argv changed unexpectedly: {calls}")
 
 
 def check_default_workspace_run(tmp: Path) -> None:
@@ -2492,10 +2693,123 @@ def check_default_workspace_run(tmp: Path) -> None:
         raise AssertionError(f"default child cwd did not use invocation repo: {first}")
     if first.get("CODEX_WORKDIR") != str(workspace):
         raise AssertionError(f"default CODEX_WORKDIR did not use invocation repo: {first}")
-    if first.get("CODEX_HOME") != str(workspace / ".codex"):
-        raise AssertionError(f"default CODEX_HOME did not follow workspace: {first}")
+    expected_codex_home = workspace / ".runtime" / "changerail" / "codex-home"
+    if first.get("CODEX_HOME") != str(expected_codex_home):
+        raise AssertionError(f"default CODEX_HOME did not follow isolated workspace runtime home: {first}")
     if "status: " + str(runtime / "default-workspace" / "status.json") not in result.stdout:
         raise AssertionError(f"default runtime root did not follow workspace: {result.stdout}")
+
+
+def check_default_codex_home_isolates_persisted_trust(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "isolated-codex-home", publish_ready=False)
+    launcher = tmp / "fake-codex-persist-trust"
+    runtime = tmp / "isolated-codex-home-runtime"
+    write_fake_launcher(launcher)
+    git(["add", "-f", ".codex/config.toml"], workspace)
+    git(
+        [
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=changerail-smoke@example.invalid",
+            "commit",
+            "-m",
+            "track project Codex policy",
+        ],
+        workspace,
+    )
+    configure_upstream_baseline(workspace)
+    project_config = workspace / ".codex" / "config.toml"
+    original_config = project_config.read_bytes()
+
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "isolated-codex-home",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("persist-project-trust"),
+    )
+    require_ok(result, "isolated default CODEX_HOME")
+
+    runtime_home = workspace / ".runtime" / "changerail" / "codex-home"
+    require_private_mode(runtime_home, 0o700)
+    require_private_mode(runtime_home / "config.toml", 0o600)
+    if project_config.read_bytes() != original_config:
+        raise AssertionError("Codex trust persistence mutated tracked project config")
+    auth_link = runtime_home / "auth.json"
+    if not auth_link.is_symlink() or auth_link.resolve() != (workspace / ".codex" / "auth.json").resolve():
+        raise AssertionError(f"runtime auth marker did not reference project auth: {auth_link}")
+    runtime_config = (runtime_home / "config.toml").read_text(encoding="utf-8")
+    if str(workspace) not in runtime_config or "trust_level = \"trusted\"" not in runtime_config:
+        raise AssertionError(f"runtime config lacks exact workspace trust: {runtime_config}")
+    if git(["status", "--porcelain"], workspace):
+        raise AssertionError("ignored runtime Codex state created a committable workspace diff")
+
+
+def check_default_codex_home_rejects_directory_symlink(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "symlinked-codex-home", publish_ready=False)
+    launcher = tmp / "fake-codex-symlinked-home"
+    runtime = tmp / "symlinked-codex-home-runtime"
+    call_log = tmp / "symlinked-codex-home-calls.jsonl"
+    write_fake_launcher(launcher)
+    git(["add", "-f", ".codex/config.toml"], workspace)
+    git(
+        [
+            "-c",
+            "user.name=ChangeRail Smoke",
+            "-c",
+            "user.email=changerail-smoke@example.invalid",
+            "commit",
+            "-m",
+            "track project Codex policy",
+        ],
+        workspace,
+    )
+    configure_upstream_baseline(workspace)
+    project_config = workspace / ".codex" / "config.toml"
+    original_config = project_config.read_bytes()
+    runtime_parent = workspace / ".runtime" / "changerail"
+    runtime_parent.mkdir(parents=True)
+    (runtime_parent / "codex-home").symlink_to(workspace / ".codex", target_is_directory=True)
+
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "symlinked-codex-home",
+            "--launcher",
+            str(launcher),
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("runner accepted a symlinked default Codex runtime home")
+    if project_config.read_bytes() != original_config:
+        raise AssertionError("symlinked runtime home mutated tracked project config before blocking")
+    if call_log.exists() and call_log.read_text(encoding="utf-8").strip():
+        raise AssertionError("runner launched a child after rejecting symlinked runtime home")
+    status = load_status(runtime, "symlinked-codex-home")
+    checks = {check["name"]: check for check in status["preflight"]["checks"]}
+    runtime_home = checks.get("Codex runtime home")
+    if not runtime_home or runtime_home["status"] != "fail":
+        raise AssertionError(f"symlinked runtime home was not rejected explicitly: {status}")
 
 
 def check_performance_summary_run(tmp: Path) -> None:
@@ -2900,6 +3214,74 @@ def check_review_no_go_fallback_run(tmp: Path) -> None:
         raise AssertionError(f"fixture child should exit 0: {status}")
     if "terminal_outcome: NO-GO" not in result.stdout:
         raise AssertionError(f"NO-GO fallback terminal outcome was not printed: {result.stdout}")
+
+
+def check_review_no_go_overrides_malformed_reason_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "review-no-go-malformed-reason-workspace")
+    launcher = tmp / "fake-codex-review-no-go-malformed-reason"
+    runtime = tmp / "runtime"
+    card = "openspec/board/3.inprogress/review-no-go-malformed-reason.md"
+    write_fake_launcher(launcher)
+    write_board_card(workspace, card)
+    commit_paths(workspace, "review no-go malformed reason card", card)
+    write_no_go_verdict(workspace, card)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            card,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "review-no-go-malformed-reason",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("malformed-terminal-reason"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("review no-go malformed reason unexpectedly returned success")
+    status = load_status(runtime, "review-no-go-malformed-reason")
+    if status.get("result") != "NO-GO" or status.get("terminal_outcome") != "NO-GO":
+        raise AssertionError(f"valid no-go should override malformed terminal reason: {status}")
+    if status.get("terminal_reason") is not None:
+        raise AssertionError(f"NO-GO should not retain malformed terminal reason: {status}")
+    if "terminal_outcome: NO-GO" not in result.stdout:
+        raise AssertionError(f"NO-GO malformed-reason override was not printed: {result.stdout}")
+
+
+def check_stale_go_does_not_override_malformed_reason_run(tmp: Path) -> None:
+    workspace = create_workspace(tmp, "stale-go-malformed-reason-workspace")
+    launcher = tmp / "fake-codex-stale-go-malformed-reason"
+    runtime = tmp / "runtime"
+    card = "openspec/board/3.inprogress/stale-go-malformed-reason.md"
+    write_fake_launcher(launcher)
+    write_board_card(workspace, card)
+    commit_paths(workspace, "stale go malformed reason card", card)
+    write_stale_go_verdict(workspace, card)
+    result = run(
+        [
+            str(RUNNER),
+            "run",
+            card,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "stale-go-malformed-reason",
+            "--launcher",
+            str(launcher),
+        ],
+        env=runner_env("malformed-terminal-reason"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("stale go malformed reason unexpectedly returned success")
+    status = load_status(runtime, "stale-go-malformed-reason")
+    if status.get("result") != "BLOCKED" or status.get("terminal_reason") != "malformed_terminal_reason":
+        raise AssertionError(f"stale go changed malformed fail-closed result: {status}")
 
 
 def check_supervisor_stops_after_fallback_no_go(tmp: Path) -> None:
@@ -4461,6 +4843,140 @@ def queue_run_calls(call_log: Path) -> list[dict[str, Any]]:
     return calls
 
 
+def queue_preflight_calls(call_log: Path) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for line in call_log.read_text(encoding="utf-8").splitlines():
+        call = json.loads(line)
+        argv = call.get("argv", [])
+        if len(argv) > 1 and argv[1] == "preflight":
+            calls.append(call)
+    return calls
+
+
+def assert_no_workspace_lock(runtime: Path, workspace: Path) -> None:
+    lock = queue_lock_path(runtime, workspace)
+    if lock.exists():
+        raise AssertionError(f"workspace lock was created before child preflight passed: {lock}")
+
+
+def check_single_card_publish_target_preflight_terminal_reason(tmp: Path) -> None:
+    workspace, launcher, runtime = remote_preflight_workspace(tmp, "remote-terminal-reason")
+    result = run(
+        [
+            str(RUNNER),
+            "preflight",
+            CARD,
+            "--workspace",
+            str(workspace),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-terminal-reason",
+            "--launcher",
+            str(launcher),
+            "--json",
+            "--write-status",
+        ],
+        env=fake_git_env(tmp, "ssh_config"),
+    )
+    if result.returncode == 0:
+        raise AssertionError("publish-target failure preflight unexpectedly passed")
+    status = load_status(runtime, "remote-terminal-reason")
+    if status.get("terminal_reason") != "publish_target_preflight_failed":
+        raise AssertionError(f"single-card preflight did not record publish-target terminal reason: {status}")
+    check = publish_target_check(status)
+    if check.get("failure_class") != "ssh_config" or check.get("retryable") is not False:
+        raise AssertionError(f"publish-target evidence was not preserved: {check}")
+
+
+def check_queue_child_publish_target_blocks_before_lock_and_launch(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-remote-before-lock")
+    runner = tmp / "fake-queue-before-lock-runner"
+    runtime = tmp / "queue-remote-before-lock-runtime"
+    call_log = tmp / "queue-remote-before-lock-calls.jsonl"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_PREFLIGHT_MODE"] = "remote-fail"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "remote-before-lock",
+            "--launcher",
+            str(runner),
+            "--json",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError(f"queue remote preflight unexpectedly passed: {result.stdout}")
+    status = load_status(runtime, "remote-before-lock")
+    service_a_card = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    if service_a_card.get("terminal_reason") != "publish_target_preflight_failed":
+        raise AssertionError(f"aggregate card did not retain publish-target terminal reason: {service_a_card}")
+    if service_a_card.get("failure_class") != "dns":
+        raise AssertionError(f"aggregate card did not retain child failure class: {service_a_card}")
+    if queue_run_calls(call_log):
+        raise AssertionError(f"queue launched delivery child before child preflight passed: {call_log.read_text(encoding='utf-8')}")
+    assert_no_workspace_lock(runtime, service_a)
+
+
+def check_queue_dispatch_revalidates_publish_target_before_lock(tmp: Path) -> None:
+    consumer, service_a, service_b = create_queue_consumer(tmp, "queue-dispatch-revalidate")
+    runner = tmp / "fake-queue-dispatch-revalidate-runner"
+    runtime = tmp / "queue-dispatch-revalidate-runtime"
+    call_log = tmp / "queue-dispatch-revalidate-calls.jsonl"
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, queue_plan_fixture())
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "publish-success"
+    env["CHANGERAIL_QUEUE_PREFLIGHT_MODE"] = "remote-fail-after-service-a"
+    result = run(
+        [
+            str(RUNNER),
+            "run-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "dispatch-revalidate",
+            "--launcher",
+            str(runner),
+            "--json",
+        ],
+        env=env,
+    )
+    if result.returncode == 0:
+        raise AssertionError("dispatch revalidation drift unexpectedly delivered")
+    status = load_status(runtime, "dispatch-revalidate")
+    service_a_card = next(card for card in status["cards"] if card["id"] == "service-a-card")
+    service_b_card = next(card for card in status["cards"] if card["id"] == "service-b-card")
+    if service_a_card.get("state") != "delivered":
+        raise AssertionError(f"first card should have delivered before later drift: {status['cards']}")
+    if service_b_card.get("terminal_reason") != "publish_target_preflight_failed":
+        raise AssertionError(f"dispatch preflight did not block later card specifically: {service_b_card}")
+    calls = queue_run_calls(call_log)
+    if len(calls) != 1 or "service-a-card" not in calls[0].get("card", ""):
+        raise AssertionError(f"queue should launch only first delivery child before drift: {calls}")
+    preflight_cards = [call.get("card", "") for call in queue_preflight_calls(call_log)]
+    if not any("service-b-card" in card for card in preflight_cards):
+        raise AssertionError(f"dispatch did not re-run preflight for later card: {preflight_cards}")
+    assert_no_workspace_lock(runtime, service_b)
+
+
 def check_queue_run_plan(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-run-consumer")
     runner = tmp / "fake-queue-runner"
@@ -5331,6 +5847,205 @@ def check_queue_resume_plan(tmp: Path) -> None:
         raise AssertionError(f"resume should launch only unfinished card: {calls}")
 
 
+def check_queue_resume_skips_published_card_after_blocked_handoff(tmp: Path) -> None:
+    consumer, service_a, _service_b = create_queue_consumer(tmp, "queue-resume-published-consumer")
+    runner = tmp / "fake-queue-runner-resume-published"
+    call_log = tmp / "queue-resume-published-calls.jsonl"
+    runtime = tmp / "queue-resume-published-runtime"
+    plan_payload = queue_plan_fixture()
+    plan = consumer / "delivery-plan.json"
+    write_fake_queue_runner(runner)
+    write_queue_plan(plan, plan_payload)
+
+    source = service_a / "openspec/board/3.inprogress/service-a-card.md"
+    done = service_a / "openspec/board/4.done/service-a-card.md"
+    done.parent.mkdir(parents=True, exist_ok=True)
+    source.rename(done)
+    commit_paths(service_a, "publish service-a outside prior aggregate", "openspec/board")
+    git(["push"], service_a)
+
+    previous = {
+        "schema": "changerail.delivery-plan-status.v1",
+        "run_id": "queue-resume-published-previous",
+        "updated_at": "2026-08-21T00:00:00Z",
+        "plan": {
+            "id": "queue-smoke",
+            "path": "delivery-plan.json",
+            "fingerprint": queue_plan_fingerprint(plan_payload),
+        },
+        "phase": "terminal",
+        "result": "BLOCKED",
+        "terminal_outcome": "BLOCKED",
+        "mode": "push",
+        "timestamps": {"started_at": "2026-08-21T00:00:00Z", "ended_at": "2026-08-21T00:00:01Z"},
+        "cards": [
+            {
+                "id": "service-a-card",
+                "workspace": "service-a",
+                "card": "service-a-card.md",
+                "resolved_path": "openspec/board/3.inprogress/service-a-card.md",
+                "state": "blocked",
+                "result": "BLOCKED",
+                "terminal_reason": "already_published_card_requested_for_delivery",
+                "wave": 1,
+            },
+            {
+                "id": "service-b-card",
+                "workspace": "service-b",
+                "card": "service-b-card.md",
+                "resolved_path": "openspec/board/2.todo/service-b-card.md",
+                "state": "pending",
+                "wave": 2,
+                "depends_on": ["service-a-card"],
+            },
+        ],
+    }
+    previous_path = runtime / "previous" / "status.json"
+    write_json(previous_path, previous)
+    env = runner_env()
+    env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+    env["CHANGERAIL_QUEUE_FAKE_MODE"] = "already-published-blocker"
+    result = run(
+        [
+            str(RUNNER),
+            "resume-plan",
+            str(plan),
+            "--consumer-root",
+            str(consumer),
+            "--runtime-root",
+            str(runtime),
+            "--run-id",
+            "queue-resume-published",
+            "--launcher",
+            str(runner),
+            "--status-path",
+            str(previous_path),
+            "--json",
+        ],
+        env=env,
+    )
+    require_ok(result, "queue resume-plan after external publication")
+    status = load_status(runtime, "queue-resume-published")
+    cards = {card["id"]: card for card in status["cards"]}
+    if cards["service-a-card"].get("state") != "skipped" or cards["service-a-card"].get("result") != "DELIVERED":
+        raise AssertionError(f"published source was not skipped safely: {status}")
+    if status["result"] != "DELIVERED" or status["summary"]["delivered"] != 1:
+        raise AssertionError(f"resume did not continue after published source: {status}")
+    calls = queue_run_calls(call_log)
+    if [call.get("card") for call in calls] != ["openspec/board/2.todo/service-b-card.md"]:
+        raise AssertionError(f"resume launched an already published card: {calls}")
+
+
+def check_queue_resume_rejects_published_card_with_incomplete_proof(tmp: Path) -> None:
+    for case in ("diverged", "retained-dirty"):
+        consumer, service_a, _service_b = create_queue_consumer(tmp, f"queue-resume-published-{case}-consumer")
+        runner = tmp / f"fake-queue-runner-resume-published-{case}"
+        call_log = tmp / f"queue-resume-published-{case}-calls.jsonl"
+        runtime = tmp / f"queue-resume-published-{case}-runtime"
+        plan_payload = queue_plan_fixture()
+        plan = consumer / "delivery-plan.json"
+        write_fake_queue_runner(runner)
+        write_queue_plan(plan, plan_payload)
+
+        source = service_a / "openspec/board/3.inprogress/service-a-card.md"
+        done = service_a / "openspec/board/4.done/service-a-card.md"
+        done.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(done)
+        commit_paths(service_a, "publish service-a outside prior aggregate", "openspec/board")
+        git(["push"], service_a)
+
+        if case == "diverged":
+            git(
+                [
+                    "-c",
+                    "user.name=ChangeRail Smoke",
+                    "-c",
+                    "user.email=changerail-smoke@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "local divergent commit",
+                ],
+                service_a,
+            )
+            publisher = tmp / "queue-resume-published-diverged-publisher"
+            remote = service_a.parent / f"{service_a.name}.git"
+            git(["clone", str(remote), str(publisher)], tmp)
+            git(
+                [
+                    "-c",
+                    "user.name=ChangeRail Smoke",
+                    "-c",
+                    "user.email=changerail-smoke@example.invalid",
+                    "commit",
+                    "--allow-empty",
+                    "-m",
+                    "remote divergent commit",
+                ],
+                publisher,
+            )
+            git(["push"], publisher)
+            git(["fetch", "origin"], service_a)
+            counts = git(["rev-list", "--left-right", "--count", "@{u}...HEAD"], service_a).split()
+            if counts != ["1", "1"]:
+                raise AssertionError(f"fixture did not create divergent upstream: {counts}")
+            previous = recovery_previous_status(
+                plan_payload,
+                source_state="blocked",
+                source_result="BLOCKED",
+                terminal_reason="already_published_card_requested_for_delivery",
+            )
+            expected_command = "run"
+        else:
+            (service_a / "DIRTY.txt").write_text("retained dirty payload\n", encoding="utf-8")
+            previous = recovery_previous_status(
+                plan_payload,
+                source_state="blocked",
+                source_result="BLOCKED",
+                terminal_reason="investigation_required",
+                retained_recovery=retained_recovery_fixture(),
+            )
+            expected_command = "resume"
+        previous["mode"] = "push"
+        previous_path = runtime / "previous" / "status.json"
+        write_json(previous_path, previous)
+
+        env = runner_env()
+        env["CHANGERAIL_FAKE_CALL_LOG"] = str(call_log)
+        env["CHANGERAIL_QUEUE_FAKE_MODE"] = "already-published-blocker"
+        result = run(
+            [
+                str(RUNNER),
+                "resume-plan",
+                str(plan),
+                "--consumer-root",
+                str(consumer),
+                "--runtime-root",
+                str(runtime),
+                "--run-id",
+                f"queue-resume-published-{case}",
+                "--launcher",
+                str(runner),
+                "--status-path",
+                str(previous_path),
+                "--json",
+            ],
+            env=env,
+        )
+        if result.returncode == 0:
+            raise AssertionError(f"{case} published-card proof unexpectedly received auto-success")
+        status = load_status(runtime, f"queue-resume-published-{case}")
+        first = {card["id"]: card for card in status["cards"]}["service-a-card"]
+        if first.get("state") != "blocked" or first.get("terminal_reason") != "already_published_card_requested_for_delivery":
+            raise AssertionError(f"{case} published-card proof did not remain fail-closed: {status}")
+        calls = [json.loads(line) for line in call_log.read_text(encoding="utf-8").splitlines()]
+        delivery_calls = [call for call in calls if len(call.get("argv", [])) > 1 and call["argv"][1] in {"run", "resume"}]
+        if len(delivery_calls) != 1 or delivery_calls[0]["argv"][1] != expected_command:
+            raise AssertionError(f"{case} did not reach the expected fail-closed child branch: {delivery_calls}")
+        if delivery_calls[0].get("card") != "openspec/board/4.done/service-a-card.md":
+            raise AssertionError(f"{case} child did not receive the re-resolved done card: {delivery_calls}")
+
+
 def check_queue_push_success_validation(tmp: Path) -> None:
     consumer, _service_a, _service_b = create_queue_consumer(tmp, "queue-push-validation-consumer")
     runner = tmp / "fake-queue-runner-push"
@@ -5405,7 +6120,12 @@ def main() -> int:
         check_one_command_delivery_stale_verdict_blocks(workspace)
         check_one_command_delivery_review_budget_no_go(workspace)
         check_success_run(workspace)
+        check_explicit_home_default_launcher_enforces_effective_authority(workspace)
+        check_explicit_home_blocks_unsupported_effective_authority(workspace)
+        check_generated_home_default_launcher_keeps_config_driven_authority(workspace)
         check_default_workspace_run(workspace)
+        check_default_codex_home_isolates_persisted_trust(workspace)
+        check_default_codex_home_rejects_directory_symlink(workspace)
         check_performance_summary_run(workspace)
         check_progress_events_and_status_view(workspace)
         check_progress_stale_heartbeat_is_non_terminal(workspace)
@@ -5413,6 +6133,8 @@ def main() -> int:
         check_oversized_output_summary_run(workspace)
         check_no_go_run(workspace)
         check_review_no_go_fallback_run(workspace)
+        check_review_no_go_overrides_malformed_reason_run(workspace)
+        check_stale_go_does_not_override_malformed_reason_run(workspace)
         check_supervisor_stops_after_fallback_no_go(workspace)
         check_fix_budget_handoff_run(workspace)
         check_external_blocker_handoff_run(workspace)
@@ -5431,6 +6153,7 @@ def main() -> int:
         check_default_launcher_requires_path_codex(workspace)
         check_publish_target_preflight(workspace)
         check_remote_preflight_failure_classes(workspace)
+        check_single_card_publish_target_preflight_terminal_reason(workspace)
         check_remote_preflight_resume_success(workspace)
         check_retained_payload_status_schema_and_single_card_resume(workspace)
         check_retained_payload_resume_fail_closed(workspace)
@@ -5443,6 +6166,7 @@ def main() -> int:
         check_queue_plan_preflight(workspace)
         check_queue_preflight_child_failure_compact(workspace)
         check_queue_preflight_remote_failure_class(workspace)
+        check_queue_child_publish_target_blocks_before_lock_and_launch(workspace)
         check_generated_queue_plan(workspace)
         check_queue_launcher_docs()
         check_queue_preflight_failures(workspace)
@@ -5450,9 +6174,12 @@ def main() -> int:
         check_queue_progress_mirror(workspace)
         check_queue_progress_mirror_with_aliased_card_id(workspace)
         check_queue_rejects_mismatched_progress_identity(workspace)
+        check_queue_dispatch_revalidates_publish_target_before_lock(workspace)
         check_queue_fail_fast_and_locks(workspace)
         check_queue_terminal_reason_and_missing_status(workspace)
         check_queue_resume_plan(workspace)
+        check_queue_resume_skips_published_card_after_blocked_handoff(workspace)
+        check_queue_resume_rejects_published_card_with_incomplete_proof(workspace)
         check_queue_investigation_required_capture_and_original_resume(workspace)
         check_queue_investigation_required_original_resume_fail_closed(workspace)
         check_queue_external_blocker_original_resume(workspace)

@@ -139,6 +139,9 @@ from bootstrap output.
 ## Static And Runtime Verification
 
 Generated `.codex/config.toml` tracks `project_doc_max_bytes = 32768`.
+New bootstrap rendering fails before target mutation when generated
+`AGENTS.md` reaches 70 percent, reserving at least 30 percent for future shared
+and project-specific rules.
 `bin/verify-project .` measures `AGENTS.md` as UTF-8 bytes: below 85 percent is
 PASS, 85 percent through the limit is a non-blocking warning, and over the
 limit is blocking. Existing consumers without the key use the same documented

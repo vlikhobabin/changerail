@@ -1,394 +1,244 @@
 # Общая методология ChangeRail для агентов
 
-Этот файл задает переиспользуемый workflow ChangeRail для AI-агентов и
-сопровождающих. Проектно-специфичные правила остаются в `AGENTS.md` каждого
-потребителя.
+Этот файл задает компактный переиспользуемый contract ChangeRail. Проектные
+правила, source code, verification matrix, MCP scope, secrets policy и runtime
+policy принадлежат consumer-проекту и остаются в его локальном `AGENTS.md`.
 
-## Область
+Подробные phase algorithms и CLI options принадлежат соответствующим
+`changerail-*` skills. Human workflow живет в `docs/`, wire/schema details — в
+`docs/changerail-contracts.md` и `schemas/`. Этот файл фиксирует только
+инварианты, которые должны быть доступны агенту во всех фазах.
 
-ChangeRail предоставляет общий процесс и toolchain для AI-assisted разработки:
+## Область и ownership
 
-- OpenSpec-артефакты для proposal, requirements, design и tasks;
-- файловые board-карточки для story-level планирования;
-- переиспользуемые agent skills и command wrappers;
-- независимые review gates перед публикацией;
-- verification, evidence и drift-проверки;
-- bootstrap-шаблоны для проектов-потребителей.
+ChangeRail предоставляет общий AI-assisted delivery workflow:
 
-Проекты-потребители остаются отдельными git-репозиториями. Они владеют своим
-исходным кодом, проектными правилами, локальной OpenSpec-доской, MCP scope,
-runtime policy, secrets policy и domain-specific verification.
+- OpenSpec artifacts для proposal, requirements, design и tasks;
+- файловую board-модель для story-level planning;
+- lifecycle skills и command wrappers;
+- независимый review gate перед публикацией;
+- verification, evidence, bootstrap и drift tooling.
 
-## Pipeline
+Consumer-проекты остаются самостоятельными git-репозиториями. Generic
+ChangeRail core не должен зависеть от domain-specific extensions, private
+workspaces или consumer source trees.
 
-Стандартный delivery pipeline ChangeRail:
+## Pipeline и routing
+
+Стандартный pipeline:
 
 ```text
 explore -> ff -> do -> review -> pub
 ```
 
-- `explore`: исследовать идею, bug, архитектурный вопрос или требование до
-  реализации.
-- `ff`: превратить board card или story в ordered, apply-ready OpenSpec changes.
-- `do`: реализовать каждый planned change, проверить его, синхронизировать specs
-  и подготовить результат.
-- `review`: выполнить независимый fresh-context аудит перед публикацией.
-- `pub`: проверить fresh verdict, подтвердить docs в reviewed payload, создать
-  scoped commit и опубликовать результат.
-- `deliver`: принять deliver-ready карточку и выполнить supervised full flow
-  для одной карточки или ordered batch.
+- `explore` исследует problem/scope/architecture без реализации.
+- `ff` превращает story в ordered apply-ready OpenSpec changes.
+- `do` реализует changes по одному, проверяет, sync-ит specs и архивирует их.
+- `review` выполняет независимый fresh-context аудит и пишет go/no-go verdict.
+- `pub` проверяет fresh verdict, делает scoped commit/push и финализирует card.
+- `deliver` оркестрирует полный flow для одной карточки или bounded queue.
 
-Для ежедневного ручного invocation можно использовать короткие aliases
-`$chrl-*` в Codex и `/chrl:*` в Claude Code. Canonical/reference names остаются
-`$changerail-*` и `/changerail:*`; runtime paths, schema ids и OpenSpec
-namespaces продолжают использовать `changerail`.
+Обычный operator handoff — `$chrl-deliver <card>` или canonical
+`$changerail-deliver <card>`. Phase-команды остаются repair/debug/manual-resume
+surface. Когда доступен соответствующий lifecycle skill, он является
+authoritative source для пошагового алгоритма и safety stops.
+После standalone `ff` apply-ready handoff — `$changerail-do <card-path>`.
 
-Обычный operator handoff для принятой карточки - `$chrl-deliver <card>`
-или canonical `$changerail-deliver <card>`. Phase-команды `ff`, `do`,
-`review` и `pub` остаются internal phases полного delivery, а также explicit
-repair/debug/manual-resume surface после safety stop.
+`$changerail-deliver <board-column>` упорядочивает queue по одной карточке, а
+`bin/changerail-delivery-runner run <card>` является single-card structured-
+status launcher. Для dependency plan доступны `plan`, `preflight-plan`,
+`run-plan`, `resume-plan` и `status-plan`: plan runner вызывает single-card
+runner для каждой live card, fail-fast останавливается на safety stop и
+возобновляется через aggregate status. Records, logs и locks остаются в ignored
+runtime state; supervisor читает structured status/manifest/verdict, а не
+`pgrep`. Per-run model/effort overrides не меняют repository defaults.
 
-Для non-interactive supervised запусков ChangeRail может использовать tracked runner,
-который пишет machine-readable status/run record в ignored runtime state.
-Supervisor должен наблюдать structured status, а не `pgrep` или свободный
-текст лога. Per-run model/effort overrides не должны менять repository defaults.
+## Роли и очереди
 
-## Supervised Roles
-
-ChangeRail различает операционные роли:
-
-- Оркестратор ведет карточку или bounded queue через стадии, выбирает следующую
-  карточку, следит за safety stops, читает verdict и решает, нужен ли fix,
-  re-review или publish.
-- Delivery worker реализует один card-owned change или одну карточку,
-  выполняет verification, синхронизирует specs, архивирует changes и готовит
-  evidence/manifest для review.
+- Оркестратор выбирает следующую карточку, следит за safety stops и решает,
+  нужен ли fix, re-review, publish или новый scope.
+- Delivery worker реализует один card-owned change или одну карточку и готовит
+  verification evidence/manifest.
 - Reviewer работает в fresh context, который не планировал и не реализовывал
-  reviewed payload, аудитит scope/evidence/acceptance и пишет go/no-go verdict
-  в ignored runtime state.
+  reviewed payload.
 
-Для небольших single-card работ оркестратор и delivery worker могут быть одной
-сессией. Reviewer не может быть совмещен с planning/implementation context. Если
-fresh reviewer недоступен или не может правдиво подтвердить независимость,
-pipeline останавливается на review gate до внешнего review.
+Оркестратор и worker могут быть одной сессией только для небольшой single-card
+работы; для delegated, multi-card или multi-repository delivery worker отделен
+от supervising orchestrator. Reviewer с implementation context совмещать
+нельзя. Если независимость нельзя правдиво подтвердить, pipeline
+останавливается до внешнего review.
 
-Для очередей и roadmap-серий оркестратор обрабатывает карточки по одной,
-останавливается на первом safety stop и периодически актуализирует оставшуюся
-очередь с учетом уже опубликованных карточек.
+Внутри одного repository карточки выполняются последовательно и queue
+останавливается на первом safety stop. Несколько независимых child repositories
+могут выполняться параллельно только с разными `--workspace`, git scope,
+runtime state и последующим отдельным root-level integration gate. Stale locks
+не удаляются автоматически без явного operator action.
 
-Для workspace, где верхний каталог является агрегатором, а работа живет в
-нескольких независимых дочерних git-репозиториях с собственными
-`openspec/board/`, default operational unit - дочерний репозиторий. Оркестратор
-может запускать delivery нескольких дочерних репозиториев параллельно, если
-каждый run использует свой `--workspace`, свой runtime status и свой git scope.
-Внутри одного репозитория карточки остаются последовательными. Root-level
-integration commits, submodule/gitlink updates или общий manifest публикуются
-отдельным сериализованным gate после завершения child-repo payloads.
+## Board contract
 
-Для non-interactive dependency-ordered очередей через несколько child repos
-используйте tracked queue plan runner: `plan`, `preflight-plan`, `run-plan`,
-`resume-plan` и `status-plan`. Plan принадлежит consumer-у, использует
-workspace aliases и relative paths, а каждый live card всё равно запускается
-existing single-card runner-ом и пишет отдельный `changerail.delivery-run.v1`
-record. Queue aggregate status, logs и locks остаются under ignored
-`.runtime/changerail/`; stale lock-и не удаляются автоматически без явного
-operator action.
+Board живет в `openspec/board/`:
 
-Не объединяйте `review` с `do`. Review gate нужен потому, что контекст, который
-планировал и реализовывал изменение, недостаточно независим для финального
-quality gate.
+- `1.backlog/` — идеи и проблемы до triage;
+- `2.todo/` — принятые deliver-ready stories;
+- `3.inprogress/` — apply-ready stories в implementation/review/publish;
+- `4.done/` — опубликованные stories с результатом и verification;
+- `5.canceled/` — work, закрытая без реализации или вынесенная за scope.
 
-## Жизненный цикл доски
+Одна карточка — один markdown-файл. Deliver-ready является свойством карточки
+в `2.todo`, а не отдельным status: scope принят, owner указан, acceptance
+observable, ordered `## Change N:` plan записан, dependencies указаны явно или
+как `none`, а `Next` ведет к `$chrl-deliver <card>` либо canonical command.
+OpenSpec artifacts не являются precondition: internal `ff` может создать их до
+`do`. Diagnostic для неготовой карточки должен перечислить missing criteria.
 
-Проектная доска живет в `openspec/board/`:
+Каждая `## Change N:` секция ссылается на отдельный implementation-sized
+`openspec/changes/<slug>/` и фиксирует goal, dependencies и verification.
+Review-gated `do` оставляет story в `3.inprogress`; переход в `4.done` является
+только детерминированной post-publish финализацией.
 
-- `1.backlog/`: неразобранные идеи и проблемы.
-- `2.todo/`: принятые deliver-ready stories с owner, observable acceptance,
-  ordered change plan, dependencies/gates и понятным delivery handoff.
-- `3.inprogress/`: apply-ready stories в работе.
-- `4.done/`: завершенные stories с записанным результатом и verification.
-- `5.canceled/`: work closed без реализации или вынесенный за scope.
+## OpenSpec contract
 
-Одна карточка = один markdown-файл. Карточка в `2.todo/` или `3.inprogress/`
-должна содержать ordered sections:
+Default `spec-driven` change содержит:
 
-```md
-## Change 1: `change-slug`
-## Change 2: `another-change-slug`
-```
+- `proposal.md` — зачем нужен change и какие capabilities затронуты;
+- `specs/**/spec.md` — normative requirements и observable scenarios;
+- `design.md` — implementation choices, trade-offs или migration concerns;
+- `tasks.md` — trackable implementation и verification work.
 
-Каждая секция ссылается на свой каталог
-`openspec/changes/<change-slug>/` и фиксирует, зачем нужен change, чего он
-должен достичь, зависимости и verification expectations.
+Requirements используют `MUST`/`SHALL`. Implementation details становятся
+requirements только когда это externally observable или durable contract.
+Story и changes должны оставаться достаточно малыми для bounded implementation
+и независимого review.
 
-`deliver-ready` - это не новая колонка и не второй status field. Для стандартной
-доски это проверяемое свойство карточки в `2.todo`: scope принят, owner известен,
-acceptance observable, ordered `## Change N:` sections записаны, dependencies
-или `none` указаны, а `Next` ведет к `$chrl-deliver <card>` или
-`$changerail-deliver <card>`. OpenSpec artifacts не являются precondition для
-такого handoff: `$changerail-deliver` начинает с internal `ff`, создает или
-дополняет artifacts и только затем переходит к `do`. Если карточка не
-deliver-ready, agent или diagnostic должен назвать missing criteria, а не
-возвращать только boolean.
+## Delivery, verification и evidence
 
-Для review-gated карточек `changerail-do` завершает implementation payload:
-реализует changes, выполняет verification, синхронизирует specs и архивирует
-card-owned OpenSpec changes. Сама story при этом остается в `3.inprogress`,
-пока independent review и publish не пройдут успешно. Переход в `4.done` -
-детерминированная post-publish финализация, а не часть `do`.
+Перед coding прочитайте `openspec/config.yaml`, local `AGENTS.md`, board rules,
+target card, change artifacts и затронутый toolchain. Работайте с одним change
+за раз. Discovery начинается со scoped paths/counts/excerpts; broad или
+truncated output не считается доказательством отсутствия проблемы.
 
-## Жизненный цикл OpenSpec
-
-Каждый implementation-sized change живет в `openspec/changes/<change>/`.
-Для default schema `spec-driven` используются:
-
-- `proposal.md`: зачем нужен change и какие capabilities он затрагивает;
-- `specs/**/spec.md`: normative requirements и scenarios;
-- `design.md`: когда нужно явно зафиксировать implementation choices,
-  trade-offs или migration concerns;
-- `tasks.md`: trackable implementation и verification checkboxes.
-
-Requirements используют `MUST` или `SHALL` и observable scenarios. Не
-записывайте implementation details как requirements, если это не externally
-observable behavior и не contract, который нужно сохранять в будущем.
-
-## Explore
-
-Используйте explore mode, когда problem, scope или architecture неясны. Explore
-mode может читать code, docs, OpenSpec artifacts и локальные project
-instructions, но не реализует product/runtime changes.
-
-Хороший explore output фиксирует:
-
-- что теперь понятно;
-- viable options;
-- risks и unknowns;
-- recommended next artifact или command.
-
-## Fast-Forward Planning
-
-Fast-forward planning превращает board card в apply-ready changes. Внутри
-`$changerail-deliver` это первая phase для deliver-ready карточек, у которых
-OpenSpec artifacts еще отсутствуют. Прямой `$changerail-ff <card>` полезен как
-explicit planning, repair или manual-resume surface, но не является обязательным
-pre-step перед `$changerail-deliver <card>`.
-
-Хороший результат `ff`:
-
-- сохраняет one story = one card;
-- делит implementation на небольшие ordered changes;
-- создает нужные OpenSpec artifacts для каждого change;
-- записывает dependencies и verification expectations;
-- держит domain-specific work вне generic ChangeRail core, если он явно не входит в
-  scope.
-
-## Delivery
-
-Во время `do` работайте с одним change за раз. Перед coding прочитайте
-`openspec/config.yaml`, `AGENTS.md`, board rules, target card и artifacts.
-
-Discovery: scoped paths, `rg -l`, counts и excerpts first; broad/truncated
-output или exit `130` остается inconclusive до narrow follow-up.
+Обязательный verification floor собирается из local rules, config, tasks,
+design и affected toolchain. Generic core не навязывает formatter, typing или
+environment matrix, если они не объявлены проектом или измененным surface.
 
 Tracked `.changerail/execution-target.json` делает `id`/`fingerprint` частью
 verification floor: manifest/status/evidence/blocker/resume/review MUST match.
 Substitute target forbidden; missing/multiple/mismatch => blocker. Rebind =>
 new clean attempt with new tracked declaration.
 
-Обязательный verification floor собирается из project-declared sources:
-`AGENTS.md`, `openspec/config.yaml`, `tasks.md`, `design.md` и затронутого
-toolchain. Generic ChangeRail не делает formatter, strict typing или clean/ambient
-environment matrix обязательными для всех проектов, если они не объявлены
-локальными правилами или не следуют из измененного surface.
-
 `coverage_map`: `ff` ids, `do` refs, preflight freshness, reviewer oracle.
 
-Implementation не завершена, пока verification не запущена и результат не
-записан. Для docs/config-only changes обычный baseline:
+Для docs/config-only changes минимальный baseline обычно включает:
 
 ```bash
 openspec validate --all --strict
 git diff --check
 ```
 
-Если change добавляет новые untracked files, whitespace check должен покрывать
-их явно: через staging/intent-to-add перед `git diff --check` или отдельный scan
-по `git ls-files --others --exclude-standard`.
+Новые untracked files должны попадать в whitespace/public checks через
+intent-to-add либо отдельный scan. Project-specific tests обязательны, когда их
+требуют artifacts или affected code.
 
-Project-specific tests или smoke checks также должны выполняться, если их
-требуют local instructions, tasks или affected code.
+Каждая verification claim называет command и observed outcome. Для измененных
+тестов delivery объясняет, какое поведение они наблюдают и почему тест падает
+при заявленном regression; для docs-only work RED evidence можно явно признать
+неприменимой. Raw output остается ignored, а tracked files ссылаются только на
+concise evidence id/path. Предпочтительный ChangeRail-owned contract —
+`bin/changerail-evidence` и `changerail.evidence-index.v1`.
 
-Архивация card-owned OpenSpec changes происходит до review: reviewer должен
-видеть полный delivery payload, включая archive paths и synced specs. Любое
+Card-owned changes архивируются и specs синхронизируются до review. Любое
 содержательное изменение code/docs/specs/schemas/scripts/tests после свежего
-`go` делает verdict stale и требует re-review. Publish может записывать только
-документированную детерминированную board metadata после commit/push.
+`go` делает verdict stale и требует re-review.
 
-Каждая verification claim должна называть выполненную команду и observed
-outcome. Если raw output сохраняется, он остается в ignored runtime evidence, а
-карточка или manifest ссылается на путь и краткое резюме. Для измененных тестов
-delivery фиксирует, почему тест способен упасть при заявленном регрессе и
-наблюдает нужный источник поведения. Для docs-only/config-only changes можно
-записать, почему RED evidence неприменима.
+## Budgets, preflight и complexity
 
-## Pre-review Fix Budget
+`changerail-do --max-fix-cycles` ограничивает pre-review implement/verify
+attempts. `changerail-deliver --max-review-cycles` отдельно ограничивает
+same-card rescue после independent `NO-GO`; counters не расходуют друг друга.
+Defaults — два fix cycles и два semantic same-card rescue attempts.
 
-`changerail-do --max-fix-cycles` ограничивает pre-review implement/verify loop;
-`changerail-deliver --max-review-cycles` отдельно ограничивает same-card
-rescue/re-review после independent `NO-GO`. Эти counters не заменяют и не
-расходуют друг друга.
+`fix_budget_exhausted` является non-delivered `BLOCKED` handoff. Оркестратор
+выбирает одну ветвь: bounded micro-fix в том же capability/scope/authority,
+linked rescue/replacement card для отдельного deliverable либо external
+`BLOCKED`/`NOT-VERIFIABLE` с evidence и resume condition. Ручное увеличение
+budget не является default path.
 
-Если `changerail-do` исчерпал fix budget, он сохраняет remaining findings,
-attempted fixes, evidence и concrete verification target, затем возвращает
-machine-readable non-delivered handoff:
+До LLM review запускается deterministic preflight из lifecycle skill. Process
+failure не расходует semantic review budget. Risk routing: `deterministic` —
+machine-only, `ordinary` — `high`, credential/mutation/live/final boundary —
+`critical`/`xhigh`.
 
-```text
-terminal_outcome: BLOCKED
-terminal_reason: fix_budget_exhausted
-```
+Payload более 300 added production LOC, новая authority/wire protocol или
+повторяющийся defect class требуют investigation/simplification. Bounded
+exception возможен только через clean tracked `4.done` authorization source,
+который связывает exact investigation/successor, ceiling `301..500` и protocol
+allowance. Missing, stale, mismatched или over-ceiling authorization всегда
+останавливает semantic review.
 
-Supervising lifecycle выбирает одну bounded ветвь: локальный дефект в том же
-capability/scope/authority получает bounded same-card micro-fix; отдельный
-deliverable, acceptance scope или independently reviewable risk получает
-linked rescue/replacement карточку перед blocked downstream work; unavailable
-infrastructure, credentials, external authority или другой неустранимый кодом
-blocker остается `BLOCKED`/`NOT-VERIFIABLE` с evidence и resume condition.
-Exceptional manual budget не является default continuation, а fix-budget stop
-не считается review `NO-GO`.
+## Review gate
 
-До LLM запускайте deterministic preflight из lifecycle skills: он не расширяет
-manifest scope, а process failure не расходует semantic review budget.
-Risk tiers: `deterministic` = machine-only, `ordinary` = `high`, critical
-credential/mutation/live/final boundary = `xhigh`. Phase counters независимы.
+Reviewer независимо проверяет:
 
-## Review Gate
-
-Review gate независим от implementation session. Он аудитит:
-
-- diff versus card и OpenSpec scope;
+- diff против card/OpenSpec scope;
 - target declaration, manifest и evidence match, если target объявлен;
-- покрытие requirements и acceptance criteria;
-- verification evidence и retained outputs;
-- public-safety и repository-boundary risks;
-- missing tests или residual risk.
+- requirements и acceptance coverage;
+- обязательный verification floor и retained evidence;
+- способность измененных tests наблюдать заявленное поведение;
+- public-safety, repository boundary и residual risk.
 
-Reviewer производит go/no-go verdict и не исправляет молча работу, которую
-ревьюит. Publish должен fail closed, если verdict отсутствует, stale или
-negative.
+Reviewer не исправляет reviewed payload и пишет machine-checkable verdict.
+Unbacked mandatory claims, weakened tests и failed acceptance становятся
+findings. Publish fail-closed при absent, stale или negative verdict.
 
-Reviewer также проверяет, что обязательный project-declared verification floor
-имеет concrete command/outcome evidence. Unbacked mandatory claims, weakened
-tests и тесты, которые не наблюдают заявленное поведение, должны становиться
-findings, а не молчаливым pass.
+Initial review — `review_cycle: 1`, `same_card_rescue_attempt: 0`. После
+`no-go` implementing context исправляет только scoped blocker, обновляет
+evidence и передает payload новому fresh reviewer. History сохраняет цепочку
+cycles и structured rescue budget в ignored runtime state.
 
-Review-cycle history - ignored runtime evidence отдельно от latest verdict:
-цепочка `no-go -> fix -> re-review -> go` видна, но publish остается fail
-closed. Initial review: `review_cycle: 1`, `same_card_rescue_attempt: 0`.
-Same-card rescue считается только после independent `no-go`; fresh re-review
-увеличивает `review_cycle`. Runtime history хранит structured `rescue_budget`;
-legacy missing fields = `unknown`. Default - два same-card rescue и один payload
-review; extra clean-HEAD LLM audit допустим один раз на declared milestone.
-Hash-bound suite reusable до обязательного rerun перед live/final
-publish. `>300` production LOC, новая authority/wire protocol или repeated
-defect class => investigation; exception - validated `4.done` authorization
-source (exact link, `301..500`, protocol). Иначе investigation-required. Если budget
-исчерпан и latest review всё ещё
-`no-go`, agent не публикует dirty payload и не self-authorizes следующий
-same-card rescue. Он создает linked rescue/replacement карточку с source card,
-последним safe published reference, prior blocker findings, rescue attempts,
-evidence summaries, текущей гипотезой и required verification floor. Если две
-linked replacement/rescue карточки подряд возвращают тот же blocker class или
-unresolved invariant, следующая autonomous карточка должна быть
-investigation/design, а не implementation rescue. External blockers
-(credentials, network, license, stand access, required software) и
-unreproducible goals фиксируются как `BLOCKED`, `SUPERSEDED` или
-`NOT-VERIFIABLE` с concrete evidence.
+После исчерпания same-card budget dirty payload не публикуется. Создается
+linked rescue/replacement card с source, latest safe reference, findings,
+attempts, evidence summary и verification target. Повтор одного blocker class
+в двух последовательных replacement cards требует investigation/design.
+External credentials, network, licenses, stand access и невоспроизводимые цели
+фиксируются как `BLOCKED`, `SUPERSEDED` или `NOT-VERIFIABLE`.
 
 ## Publish
 
-Publishing scoped к завершенной карточке. Перед commit или push:
+Перед commit/push publish проверяет final diff/status, fresh positive verdict,
+required checks, reviewed user-facing docs и manifest scope. Runtime state,
+credentials, traces, local reports и unrelated dirty files исключаются.
 
-- проверьте `git status` и final diff;
-- исключите runtime state, traces, logs, credentials и local reports;
-- подтвердите, что OpenSpec validation и required project checks зеленые;
-- подтвердите, что user-facing docs для измененного behavior или workflow уже
-  входят в reviewed payload;
-- commit only files, которые относятся к named card.
+Commit и push разрешены только явной просьбой operator или invoked publish
+workflow. Если нужны содержательные edits, publish останавливается до staging и
+возвращает payload в delivery/review loop.
 
-Commit и push выполняются только по явной просьбе operator или invoked publish
-workflow.
+После успешной публикации card перемещается в `4.done` только через
+документированную deterministic metadata finalization. Exact commits,
+remote/branch/status/timestamps остаются в ignored delivery manifest ledger, а
+не в tracked card prose.
 
-Для review-gated flow durable docs и source edits должны входить в reviewed
-payload до verdict. Если publish обнаруживает, что нужны содержательные edits,
-он останавливается до staging и возвращает карточку в delivery/review loop.
-После успешного publish карточка финализируется в `4.done` по board protocol.
-Tracked карточка фиксирует только stable completion state; exact
-payload/published commit, remote, branch, final push status и timestamps
-остаются в ignored delivery manifest ledger.
+## Public safety
 
-## Evidence
-
-Verification claims требуют evidence. Подходящие evidence: command output, test
-reports, retained smoke artifacts, review verdicts и explicit manual checks,
-записанные с достаточными деталями для воспроизведения вывода.
-
-Retained evidence для declared target хранит только same non-sensitive identity
-projection; оно не разрешает provision/rebind/substitution и не содержит
-endpoint/credentials/contents target-а.
-
-Для ChangeRail-owned verification commands предпочтительный retained runtime
-contract - `bin/changerail-evidence`: он пишет `changerail.evidence-index.v1`
-под ignored `.runtime/changerail/evidence/`, сохраняет concise command outcome,
-exit code и output reference, а tracked cards/manifests/verdicts ссылаются на
-evidence id/path вместо копирования raw logs.
-
-Ignored runtime evidence может упоминаться в cards или manifests, но не должно
-попадать в commit. Не храните secrets, credentials, customer data, full source
-payloads или large logs в tracked evidence.
-
-Метрики должны читаться из structured run records и review-cycle evidence, а не
-из свободного текста логов. Отсутствующие optional значения, например token
-usage, отображаются явно как unknown.
-
-## Public Safety
-
-ChangeRail core публичен по умолчанию. Shared methodology и templates не должны
-содержать:
-
-- private workspace или customer names;
-- secrets, tokens, keys или `.env` content;
-- local traces, dumps, screenshots, databases или runtime reports;
-- machine-local state вне documented generic examples;
-- domain-specific extension rules, выданные за generic ChangeRail behavior.
-
+ChangeRail core и consumer templates считаются публичными по умолчанию. Нельзя
+коммитить private workspace/customer names, secrets, tokens, keys, `.env`,
+traces, dumps, screenshots, databases, runtime reports или machine-local state.
 Используйте generic examples: `/opt/changerail`, `/opt/example-project`,
 `/opt/example-a`, `/opt/example-b`.
 
-Public-surface verification should include the tracked scanner for current
-files and, before release, reachable history:
+Public-surface verification должна проверять current files, archives и перед
+release reachable history. Token-like findings обязаны редактировать secret
+values в output.
 
-```bash
-python3 scripts/public-surface-scan.py
-python3 scripts/public-surface-scan.py --history
-```
+## Generated sections и extension boundary
 
-Scanner logs MUST redact token-like values.
+Consumer `AGENTS.md` хранит project-specific rules перед generated ChangeRail
+section. Marker позволяет tooling и reviewers отличать локальный contract от
+shared source. Generated section обновляется из `AGENTS.shared.md`, а не
+редактируется вручную; после ChangeRail upgrade consumers должны проверить
+drift и instruction budget.
 
-## Generated Sections And Drift
-
-Consumer projects могут встраивать эту shared methodology в локальный
-`AGENTS.md` как generated section. Generated section должен содержать marker,
-который позволит будущему `verify-project` сравнить его с ChangeRail source of truth.
-
-Внешняя ссылка на `/opt/changerail/AGENTS.shared.md` полезна для людей, но embedded
-generated content является default target для надежного agent context.
-
-## Extension Boundary
-
-ChangeRail generic core должен оставаться отдельно от domain-specific extensions.
-Domain extension может добавить extra skills, commands, verification matrices
-или runtime policies, но не должен делать generic ChangeRail зависимым от этого
-domain.
-
-Если consumer project использует и ChangeRail core, и extension, его project
-`AGENTS.md` должен явно фиксировать ordering и ownership boundaries.
+Внешняя ссылка на shared source полезна для людей, но компактный embedded
+contract остается default для надежного agent context. Domain extensions могут
+добавлять skills, checks и policies, но не делают generic core зависимым от
+domain. Consumer явно фиксирует ordering и ownership boundaries между core и
+extensions.
