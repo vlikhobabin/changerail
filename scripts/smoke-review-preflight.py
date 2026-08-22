@@ -587,6 +587,76 @@ def exact_bounded_authorization_workspace(root: Path) -> tuple[Path, Path]:
     return repo, Path(json.loads(derived.stdout)["manifest"])
 
 
+def exact_phase_routed_authorization_workspace(
+    root: Path,
+    *,
+    source_depends_on: str | None = None,
+    authorization_ceiling: int = 500,
+    authorization_protocol: bool = True,
+) -> tuple[Path, Path]:
+    """Create the exact non-production phase-routed authorization fixture."""
+    repo = root / "repo-phase-routed-delivery-authorization"
+    while repo.exists():
+        repo = repo.with_name(repo.name + "-next")
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "smoke@example.invalid")
+    git(repo, "config", "user.name", "ChangeRail Smoke")
+    write(repo / ".gitignore", ".runtime/\n")
+    write(repo / "docs" / "base.md", "baseline\n")
+    write(repo / "src" / "base.py", "BASE = True\n")
+    investigation_id = "investigate-phase-routed-delivery-authorization-boundary"
+    authorization_id = "authorize-bounded-phase-routed-delivery-payload"
+    successor_id = "implement-phase-routed-delivery-authorization-boundary"
+    investigation_path = f"openspec/board/4.done/{investigation_id}.md"
+    authorization_path = f"openspec/board/4.done/{authorization_id}.md"
+    successor_path = f"openspec/board/3.inprogress/{successor_id}.md"
+    authorization_reference = json.dumps(
+        {"authorization_card": authorization_path, "authorization_id": authorization_id},
+        separators=(",", ":"),
+    )
+    authorization_payload = json.dumps(
+        {
+            "investigation_card": investigation_path,
+            "investigation_id": investigation_id,
+            "successor_card": successor_path,
+            "successor_id": successor_id,
+            "production_loc_ceiling": authorization_ceiling,
+            "allow_new_authority_or_wire_protocol": authorization_protocol,
+        },
+        separators=(",", ":"),
+    )
+    write(
+        repo / investigation_path,
+        f"# Investigation\n\n## Status\n4.done\n\n## Blocks\n- `{successor_id}`\n",
+    )
+    write(
+        repo / authorization_path,
+        "# Authorization\n\n## Status\n4.done\n\n## Depends On\n"
+        f"- `{source_depends_on or investigation_id}`\n\n## Authorization\n"
+        f"- Investigation authorization: `{authorization_payload}`\n",
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "phase-routed authorization baseline")
+    write(
+        repo / successor_path,
+        card_text("critical", protocol=True, authorization=authorization_reference, blocks=investigation_id).replace(
+            "example-change", successor_id
+        ),
+    )
+    write(
+        repo / "openspec" / "changes" / "archive" / f"2026-08-22-{successor_id}" / "tasks.md",
+        "## Tasks\n\n- [x] done\n",
+    )
+    write(repo / "src" / "new.py", "\n".join(f"VALUE_{index} = {index}" for index in range(444)) + "\n")
+    derived = run(
+        [sys.executable, str(MANIFEST_HELPER), "derive", successor_path, "--workspace", str(repo), "--write", "--json"],
+        repo,
+    )
+    require_ok(derived, "derive exact phase-routed authorization manifest")
+    return repo, Path(json.loads(derived.stdout)["manifest"])
+
+
 def exact_runner_retained_resume_authorization_workspace(root: Path) -> tuple[Path, Path]:
     repo = root / "repo-bounded-runner-retained-resume-authorization"
     while repo.exists():
@@ -1257,6 +1327,77 @@ def main() -> int:
         assert result.returncode == 1
         assert data["outcome"] == "investigation-required"
         assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        phase_routed_successor_path = (
+            "openspec/board/3.inprogress/implement-phase-routed-delivery-authorization-boundary.md"
+        )
+        repo, manifest = exact_phase_routed_authorization_workspace(root)
+        result, data = preflight(repo, manifest, "--normalize", card_path=phase_routed_successor_path)
+        require_ok(result, "exact phase-routed authorization")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["risk"]["tier"] == "critical"
+        assert data["complexity_guard"]["added_production_loc"] == 444
+        assert data["complexity_guard"]["limit"] == 500
+        assert data["complexity_guard"]["new_authority_or_wire_protocol"] is True
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+        investigation = repo / (
+            "openspec/board/4.done/investigate-phase-routed-delivery-authorization-boundary.md"
+        )
+        assert "authorize-bounded-phase-routed-delivery-payload" not in investigation.read_text(encoding="utf-8")
+
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "exact phase-routed successor payload")
+        authorization_reference = json.dumps(
+            {
+                "authorization_card": "openspec/board/4.done/authorize-bounded-phase-routed-delivery-payload.md",
+                "authorization_id": "authorize-bounded-phase-routed-delivery-payload",
+            },
+            separators=(",", ":"),
+        )
+        mismatched_path = "openspec/board/3.inprogress/other-phase-routed-successor.md"
+        write(
+            repo / mismatched_path,
+            card_text(
+                "critical",
+                protocol=True,
+                authorization=authorization_reference,
+                blocks="investigate-phase-routed-delivery-authorization-boundary",
+            ).replace("example-change", "other-phase-routed-successor"),
+        )
+        write(
+            repo / "openspec" / "changes" / "archive" / "2026-08-22-other-phase-routed-successor" / "tasks.md",
+            "## Tasks\n\n- [x] done\n",
+        )
+        derived = run(
+            [sys.executable, str(MANIFEST_HELPER), "derive", mismatched_path, "--workspace", str(repo), "--write", "--json"],
+            repo,
+        )
+        require_ok(derived, "derive phase-routed card id/path mismatch manifest")
+        result, data = preflight(repo, Path(json.loads(derived.stdout)["manifest"]), "--normalize", card_path=mismatched_path)
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        repo, manifest = exact_phase_routed_authorization_workspace(
+            root, source_depends_on="other-phase-routed-investigation"
+        )
+        result, data = preflight(repo, manifest, "--normalize", card_path=phase_routed_successor_path)
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        repo, manifest = exact_phase_routed_authorization_workspace(root, authorization_ceiling=501)
+        result, data = preflight(repo, manifest, "--normalize", card_path=phase_routed_successor_path)
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "invalid"
+
+        repo, manifest = exact_phase_routed_authorization_workspace(root, authorization_protocol=False)
+        result, data = preflight(repo, manifest, "--normalize", card_path=phase_routed_successor_path)
+        assert result.returncode == 1
+        assert data["outcome"] == "investigation-required"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+        assert "new authority or wire protocol requires published investigation authorization" in data["complexity_guard"]["reasons"]
 
         exact_successor_path = "openspec/board/3.inprogress/support-runner-resume-after-investigation-required.md"
         repo, manifest = exact_runner_retained_resume_authorization_workspace(root)

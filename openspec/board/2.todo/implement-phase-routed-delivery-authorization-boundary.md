@@ -92,7 +92,7 @@ attempt, payload fingerprint и разрешённый `BLOCKED` resume transiti
 
 ## Related
 - `openspec/board/4.done/investigate-phase-routed-delivery-authorization-boundary.md`
-- `openspec/board/2.todo/authorize-bounded-phase-routed-delivery-payload.md`
+- `openspec/board/4.done/authorize-bounded-phase-routed-delivery-payload.md`
 - `bin/changerail-delivery-runner`
 - `schemas/changerail-delivery-plan.schema.json`
 - `schemas/changerail-delivery-plan-status.schema.json`
