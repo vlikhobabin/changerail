@@ -1,13 +1,13 @@
 # Исследовать границу авторизации phase-routed delivery
 
 ## Status
-2.todo
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
-story
+archived
 
 ## Series
 - none
@@ -38,7 +38,7 @@ replacement-карточку и ее обязательную regression matrix.
 - Milestone audit: `no`
 - New authority or wire protocol: `no`
 - Credential or mutation authority: `no`
-- Repeated defect class: `yes`
+- Repeated defect class: `no`
 - Live admission: `no`
 - Final certification: `no`
 - Published investigation authorization: `none`
@@ -48,7 +48,10 @@ schemas или действующие authorization semantics.
 
 ## Blocks
 - Публикацию `add-phase-routed-delivery-plan-execution`.
-- Создание и выполнение точной replacement/rescue-карточки.
+- Создание и выполнение exact replacement
+  `openspec/board/2.todo/implement-phase-routed-delivery-authorization-boundary.md`.
+- Публикацию exact authorization source
+  `openspec/board/4.done/authorize-bounded-phase-routed-delivery-payload.md`.
 - Двухкарточный pilot wave phase-routed batch runner.
 
 ## Decision Questions
@@ -69,6 +72,35 @@ schemas или действующие authorization semantics.
   какие same-user tampering scenarios должны завершаться fail closed.
 - Можно ли уложить replacement payload в bounded production LOC ceiling без
   ослабления проверок или его необходимо разделить на несколько ordered cards.
+
+## Selected Decisions
+- `max_repair_cycles` обязателен для phase routing; отсутствие
+  отклоняет plan до aggregate/child launch. Defaults 0 и 1 отвергнуты
+  как неявный operator intent.
+- Card lookup использует unique workspace identity и canonical resolved
+  card path; declared plan id остается wire identity и может
+  отличаться от filename stem.
+- `resume-plan` до production child preflight атомарно пишет
+  schema-valid canonical parent для нового aggregate/child run и
+  связывает его с previous-run status fingerprint.
+- Resume разрешает только `phase=P, attempt=N, BLOCKED ->
+  phase=P, attempt=N+1`; terminal `DELIVERED`, review `GO`, exhausted-budget
+  `NO-GO`, invalid receipt, plan drift и payload drift невозобновляемы.
+- Phase-routed mode отклоняет alternate aggregate `--runtime-root` на
+  admission; monolithic mode сохраняет existing behavior.
+- Parent authority минимально связывает plan, aggregate run,
+  workspace, card, phase, attempt, child run/status path, payload fingerprint и
+  transition-specific repair/resume fields. Provenance не дает bypass;
+  несогласованное same-user tampering fail closed, но полная
+  согласованная подмена остается вне non-cryptographic trust model.
+- Exact replacement — `implement-phase-routed-delivery-authorization-boundary`
+  в
+  `openspec/board/2.todo/implement-phase-routed-delivery-authorization-boundary.md`;
+  exact separate authorization —
+  `authorize-bounded-phase-routed-delivery-payload` с ceiling 500 и
+  `allow_new_authority_or_wire_protocol: true`. Одна atomic replacement-карточка
+  выбрана вместо split; превышение 500 требует нового
+  investigation, а не ослабления tests.
 
 ## Acceptance
 - Для каждого decision question выбран ровно один вариант, описаны причины и
@@ -112,16 +144,18 @@ schemas или действующие authorization semantics.
 - Запускать pilot wave до fresh independent `GO` successor-карточки.
 
 ## Change Set
-- none yet
+- `decide-phase-routed-delivery-authorization-boundary`
 
 ## Verify
-- `bin/openspec validate --all --strict`
-- `python3 scripts/public-surface-scan.py`
-- `git diff --check`
-- `bin/changerail-delivery-manifest scope-check <manifest> --workspace . --target working-tree --json`
+- PASS — `bin/openspec validate "decide-phase-routed-delivery-authorization-boundary" --strict`
+- PASS — `bin/openspec validate "changerail-delivery-runner" --strict`
+- PASS — `bin/openspec validate --all --strict` (24 passed, 0 failed)
+- PASS — `python3 scripts/public-surface-scan.py` (0 findings)
+- PASS — `git diff --check` и trailing-whitespace scan untracked artifacts
+- PASS — `bin/changerail-delivery-manifest scope-check <manifest> --workspace . --target working-tree --json` (no missing, extra or mismatched paths)
 
 ## Archive
-- not started
+- `openspec/changes/archive/2026-08-22-decide-phase-routed-delivery-authorization-boundary/`
 
 ## Related
 - `bin/changerail-delivery-runner`
@@ -130,14 +164,17 @@ schemas или действующие authorization semantics.
 - `schemas/changerail-delivery-run.schema.json`
 - `scripts/smoke-delivery-runner.py`
 - `docs/changerail-contracts.md`
+- `openspec/changes/archive/2026-08-22-decide-phase-routed-delivery-authorization-boundary/`
 
 ## Result
-not started
+Decision-only investigation, spec sync и archive завершены. Production runner,
+schemas, smoke implementation, CLI, public runtime docs и runtime behavior не
+изменялись.
+
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
 
 ## Next
-- Выполнить `$chrl-deliver` для публикации decision-only investigation.
-- По опубликованному решению создать exact replacement и отдельную bounded
-  authorization-карточку.
+- done
 
 ## Change 1: `decide-phase-routed-delivery-authorization-boundary`
 
@@ -171,8 +208,18 @@ replacement implementation.
 - none
 
 ### Related
-- `openspec/changes/decide-phase-routed-delivery-authorization-boundary/`
+- `openspec/changes/archive/2026-08-22-decide-phase-routed-delivery-authorization-boundary/`
 
 ## Log
 - 2026-08-22T13:12:37Z создана после fresh cycle-3 `NO-GO`; исходная карточка
   исчерпала две разрешенные same-card rescue attempts.
+- 2026-08-22T14:48:22Z `$changerail-ff` выбрал один
+  aggregate/child authorization contract, создал apply-ready artifacts и
+  подготовил decision-only handoff без production/runtime changes.
+- 2026-08-22T14:53:21Z `$changerail-do` синхронизировал decision requirement,
+  успешно выполнил strict/public-surface/scope проверки и архивировал change;
+  карточка остается в `3.inprogress` для независимого review.
+- 2026-08-22T14:54:13Z preflight классифицировал historic repeated defect class
+  как payload risk; metadata уточнены: decision-only investigation является
+  требуемым simplification и не содержит повторного implementation defect.
+- 2026-08-22T15:36:03Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
