@@ -1710,3 +1710,235 @@ previous failed aggregate run before dispatching another delivery child.
   satisfy normal push-mode queue success criteria
 - **THEN** resume MUST NOT infer delivered status from retained state or a
   partial board-path signal
+
+### Requirement: Phase-routed delivery authorization investigation decision
+ChangeRail MUST publish a tracked investigation decision before replacing the
+rejected phase-routed aggregate/child dirty-worktree authorization payload. The
+decision MUST select one contract for repair budget, card identity, blocked
+resume, aggregate runtime root and parent-status authority, and MUST bind one
+exact replacement with a production regression floor and separate bounded
+authorization source.
+
+#### Scenario: Decision requires an explicit repair budget
+- **WHEN** a delivery plan opts into phase routing
+- **THEN** `max_repair_cycles` is a required schema-valid integer and value 0
+  explicitly disables repair
+- **AND** omission is rejected during plan admission before aggregate status,
+  workspace lock, single-card preflight or child launch
+- **AND** aggregate transitions and child authorization use only the declared
+  value without separate defaults
+
+#### Scenario: Decision separates card lookup from declared id
+- **WHEN** a phase child is authorized for a plan card whose declared id differs
+  from the card filename stem
+- **THEN** the parent card is selected uniquely by workspace identity and
+  canonical resolved card path
+- **AND** the selected entry's declared id remains the plan wire identity used
+  to derive and validate child run/status identity
+- **AND** duplicate or ambiguous workspace/card-path matches fail closed before
+  child launch
+
+#### Scenario: Decision materializes resume authority before child preflight
+- **WHEN** `resume-plan` retries an unchanged phase payload after a real child
+  `BLOCKED` receipt
+- **THEN** it allocates a new aggregate run id and incremented phase attempt
+- **AND** it atomically writes a schema-valid parent status under the canonical
+  new aggregate path before invoking production single-card preflight
+- **AND** the new parent binds the expected new child run/status identity and
+  previous aggregate run id, canonical status path and status fingerprint
+- **AND** the previous parent and child receipts remain immutable lineage
+
+#### Scenario: Decision limits blocked-phase retry
+- **WHEN** a new aggregate parent requests same-phase retry
+- **THEN** the immediately preceding canonical child receipt and child status
+  both match the same phase and attempt and terminate as `BLOCKED`
+- **AND** plan fingerprint, payload fingerprint, workspace, card, repair count
+  and phase remain unchanged while the new attempt and child identity differ
+- **AND** terminal `DELIVERED`, review `GO`, exhausted-budget `NO-GO`, invalid or
+  missing child status, pre-child aggregate failure, plan drift and payload
+  drift do not grant this dirty-worktree authority
+
+#### Scenario: Decision rejects alternate aggregate runtime root
+- **WHEN** a phase-routed plan supplies an aggregate `--runtime-root` that does
+  not normalize to
+  `<consumer-root>/.runtime/changerail/delivery-plans`
+- **THEN** admission terminates `BLOCKED` before single-card preflight, workspace
+  lock or child launch
+- **AND** public CLI documentation does not promise alternate-root support for
+  phase routing
+- **AND** monolithic plan mode retains its existing runtime-root behavior
+
+#### Scenario: Decision defines authority and provenance
+- **WHEN** production single-card preflight evaluates a dirty phase child
+- **THEN** authority is limited to validated plan id/path/fingerprint,
+  aggregate run/path, workspace alias/root, declared and canonical card
+  identity, phase, attempt, expected child run/status path, payload fingerprint
+  and the transition-specific repair or resume fields
+- **AND** timestamps, display reasons, summaries, checks, progress, locks and
+  non-predecessor history do not independently grant dirty-worktree authority
+- **AND** effective child routing is re-derived from the validated tracked plan
+  rather than trusted from provenance fields
+
+#### Scenario: Inconsistent same-user tampering fails closed
+- **WHEN** a parent is relocated or schema-invalid, an authority field is
+  altered, a card/path match is duplicated, plan or payload has drifted, a
+  child identity is reused, resume lineage is stale or the requested transition
+  is terminal or unsupported
+- **THEN** production preflight rejects the dirty workspace before lock or child
+  launch
+- **AND** the contract states that fully coordinated replacement of the tracked
+  plan, payload and every ignored runtime record by the same user is outside
+  this non-cryptographic trust boundary
+
+#### Scenario: Decision binds exact replacement and authorization
+- **WHEN** the investigation is ready for publication
+- **THEN** it binds successor id
+  `implement-phase-routed-delivery-authorization-boundary` and initial path
+  `openspec/board/2.todo/implement-phase-routed-delivery-authorization-boundary.md`
+- **AND** it binds authorization source id
+  `authorize-bounded-phase-routed-delivery-payload`
+- **AND** the later clean published authorization binds this investigation to
+  the successor's exact `3.inprogress` path with production LOC ceiling 500 and
+  `allow_new_authority_or_wire_protocol: true`
+- **AND** work above that ceiling stops for a new investigation or split instead
+  of weakening verification or raising the ceiling
+
+#### Scenario: Successor verifies the production authorization boundary
+- **WHEN** the exact replacement is prepared for independent review
+- **THEN** production aggregate-to-child probes cover explicit repair budgets,
+  omitted-budget rejection, aliased card id, real `BLOCKED` receipt, new resume
+  aggregate/child ids, canonical-root success and alternate-root rejection
+- **AND** negative probes cover each plan, aggregate, workspace, card, phase,
+  attempt, child path, payload, repair and resume-lineage authority field
+- **AND** aggregate start, transition and resume claims invoke production
+  single-card preflight at the authorization boundary
+- **AND** fake child fixtures are used only for tests that do not claim coverage
+  of that boundary
+
+#### Scenario: Investigation remains decision-only
+- **WHEN** this investigation change is delivered
+- **THEN** it changes only its board card and OpenSpec artifacts
+- **AND** production runner, schemas, smoke implementation, CLI, public runtime
+  documentation and runtime behavior remain unchanged
+
+### Requirement: Phase-routed resume-integrity rescue investigation decision
+ChangeRail MUST publish a tracked decision-only investigation before replacing
+the rejected phase-routed resume payload. The decision MUST define exact
+effective no-push authority, derive repair usage from complete ordered history,
+preserve recursive resume ownership, reject duplicate canonical Git workspace
+roots, bind a connected production regression matrix and authorize only one
+exact bounded successor through a separate six-field source.
+
+#### Scenario: Decision requires exact parsed no-push authority
+- **WHEN** direct phase child admission or a retained terminal receipt is
+  validated
+- **THEN** the canonical delivery argument vector contains exactly one distinct
+  `--no-push` token and no other push or delivery argument
+- **AND** retained `command.argv` is re-derived from the validated plan, phase,
+  card, route, launcher and canonical prompt and compared element-for-element
+- **AND** omitted, duplicate, reordered, separate or combined conflicting push
+  arguments fail closed without substring matching
+- **AND** a retained mismatch on resume is rejected before new resume authority,
+  child preflight, lock or model launch
+
+#### Scenario: Decision derives repair usage from ordered history
+- **WHEN** aggregate transition, terminal-parent admission, resume or dirty child
+  preflight evaluates a phase card
+- **THEN** one deterministic state-machine replay validates every ordered
+  receipt from declared start phase and computes repair usage only from valid
+  `review/NO-GO -> repair` transitions
+- **AND** same-phase `BLOCKED` retries do not independently consume repair cycles
+- **AND** retained `repair_cycles_used` MUST equal the replayed value and remain
+  within `max_repair_cycles`
+- **AND** mismatch or exhausted/terminal continuation is rejected before a new
+  running resume parent, child preflight, lock or model launch
+
+#### Scenario: Decision preserves recursive resume ownership
+- **WHEN** an aggregate status has one or more `resume_from` ancestors
+- **THEN** validation traverses the full chain to the initial aggregate and
+  validates every canonical path, run id, status fingerprint, plan identity,
+  immutable history prefix and absence of cycles
+- **AND** each history segment is owned by the aggregate that first appended it
+  and every child `phase_authority.parent_status` matches that actual owner
+- **AND** two consecutive real `BLOCKED` resumes preserve the first and second
+  receipt owners and allow the third aggregate to retry the same phase at
+  `N+1`
+- **AND** truncated, reordered, forked, cyclic, stale or rebound lineage fails
+  closed before model launch
+
+#### Scenario: Decision rejects duplicate canonical Git workspace roots
+- **WHEN** plan semantics resolve declared workspace paths and aliases
+- **THEN** each operational identity is the filesystem-normalized Git
+  `rev-parse --show-toplevel` root
+- **AND** two aliases resolving through equal paths, symlinks or repository
+  subdirectories to one canonical root are rejected before aggregate status,
+  child preflight, workspace lock or model launch
+- **AND** distinct canonical Git roots continue to pass
+
+#### Scenario: Decision uses existing v1 fields for residual integrity
+- **WHEN** the replacement implements command, repair, lineage and workspace
+  decisions
+- **THEN** it uses the unpublished candidate's existing v1 `phase_routing`,
+  `resume_from`, workspace root, phase history, repair usage, payload,
+  `workflow`, `phase_authority` and `command.argv` fields
+- **AND** no additional lineage-owner field, repair wire version or schema id is
+  introduced
+- **AND** cross-record derivations are enforced by production semantic
+  validation while schemas retain structural required fields and ranges
+- **AND** the successor still declares the overall new authority/wire boundary
+  because that candidate protocol has not been published
+
+#### Scenario: Decision binds one exact bounded replacement
+- **WHEN** this investigation is ready for publication
+- **THEN** it binds successor id
+  `replace-phase-routed-resume-integrity-boundary`, initial path
+  `openspec/board/2.todo/replace-phase-routed-resume-integrity-boundary.md` and
+  authorization/review path
+  `openspec/board/3.inprogress/replace-phase-routed-resume-integrity-boundary.md`
+- **AND** it binds authorization id
+  `authorize-bounded-phase-routed-resume-integrity-payload`, initial path
+  `openspec/board/2.todo/authorize-bounded-phase-routed-resume-integrity-payload.md`
+  and published path
+  `openspec/board/4.done/authorize-bounded-phase-routed-resume-integrity-payload.md`
+- **AND** the source contains exactly one authorization object bound to
+  published investigation path
+  `openspec/board/4.done/investigate-phase-routed-resume-integrity-rescue.md`,
+  the exact successor `3.inprogress` path, production LOC ceiling 500 and
+  `allow_new_authority_or_wire_protocol` true
+- **AND** the prior phase-routed authorization is not accepted for this new
+  investigation or successor identity
+
+#### Scenario: Atomic replacement remains inside the hard ceiling
+- **WHEN** the successor rebuilds the measured 488 added-production-line
+  candidate
+- **THEN** schema writer, aggregate transition, semantic validator and connected
+  production probes are delivered atomically
+- **AND** residual fixes replace or consolidate rejected logic so total added
+  production LOC does not exceed 500 without weakening source classification,
+  invariants or tests
+- **AND** a measured result of 501 or more stops for a new investigation and
+  split authorization rather than raising the ceiling or publishing a partial
+  protocol
+
+#### Scenario: Connected matrix observes every cycle-3 boundary
+- **WHEN** the successor is prepared for fresh independent review
+- **THEN** each R1, R2 and R4 negative probe first proves its unmodified
+  canonical base passes the same production boundary, mutates only the named
+  input and asserts the exact rejection reason and `model_launch_delta: 0`
+- **AND** R1 covers direct and retained omitted, duplicate, reordered, separate
+  and combined push arguments
+- **AND** R2 covers independent repair-count/history mutations, budgets 0 and
+  greater than 0, exhaustion and repeated blocked retries of one repair cycle
+- **AND** R4 covers equal literal roots, symlink aliases and separate
+  subdirectories of one Git top-level as well as distinct-root success
+- **AND** the positive R3 probe performs two consecutive real `BLOCKED` resumes,
+  asserts per-receipt aggregate owners, resumes FF at attempt 3 and reaches DO
+  attempt 4 through production aggregate and single-card preflight
+- **AND** fake launchers control deterministic child outcomes only and do not
+  replace the production authority validator
+
+#### Scenario: Investigation remains planning-only
+- **WHEN** this investigation change is delivered
+- **THEN** it changes only its board card and OpenSpec artifacts
+- **AND** production code, schemas, tests, synced main specs, public runtime docs,
+  CLI and runtime behavior are unchanged during fast-forward planning
