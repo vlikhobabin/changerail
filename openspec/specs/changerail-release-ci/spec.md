@@ -132,103 +132,148 @@ mandatory check fails.
 - **THEN** it invokes `scripts/smoke-drift.py` with a generated public-safe
   project fixture rather than requiring no-argument drift behavior
 
-### Requirement: Release baseline history scan reuses only verified path-sensitive content
+### Requirement: Release baseline history scan uses only invocation-local memoization
 The ChangeRail release history scanner MUST freshly enumerate all reachable Git
-inputs on every invocation and MUST scan every selected path-sensitive content
-identity that is not covered by a valid matching content cache entry. Reuse
-MUST be scoped to scanner policy, Git object format, blob identity and exact
-repository-relative path, and MUST NOT act as a receipt for the history step or
-the whole release baseline.
+inputs on every invocation. It MUST use only process-local object and exact
+path-sensitive `(blob OID, repository-relative path)` memoization for that
+invocation, and MUST NOT load, save, validate or otherwise depend on a
+persistent cross-run cache or other retained scanner state. Scanner execution
+MUST NOT mutate repository refs, worktree contents or Git index state.
 
 #### Scenario: Unchanged blob is reachable from many commits
 - **WHEN** the same Git blob is reachable at the same selected path from many
   commits
 - **THEN** the scanner reads its content through batch object I/O and evaluates
-  that `(blob, path)` identity a bounded number of times
-- **AND** it materializes the same ordered per-commit findings as an uncached
-  scan
+  that `(blob, path)` identity at most once during that invocation
+- **AND** it materializes the same ordered per-commit findings as a fresh
+  traversal without retained state
 
 #### Scenario: Same blob appears under two current-policy paths
 - **WHEN** one blob is reachable under two repository-relative paths
 - **THEN** the scanner evaluates the two exact path identities independently
-- **AND** a fixture for current historical `/opt/opsx` expects the same allowed
-  result at both paths while proving distinct cache identities and rename
-  invalidation
+- **AND** rename and exact path identity remain distinct only within the
+  invocation-local memo
 
 #### Scenario: Policy or Git input changes
 - **WHEN** scanner policy, object format, blob content, exact path or reachable
-  refs change
-- **THEN** stale cache identity cannot authorize reuse for the changed input
+  refs change between invocations
+- **THEN** no retained result can authorize reuse for the changed input
 - **AND** the scanner freshly enumerates reachable inputs before producing its
   result
 
-#### Scenario: Cache or Git object data is invalid
-- **WHEN** a cache entry is absent, truncated, malformed, mismatched, oversized
-  or corrupt
-- **THEN** the scanner treats it as a miss and evaluates the authentic Git
-  object
+#### Scenario: Retained scanner state is proposed
+- **WHEN** a candidate proposes a cache file, cache directory, cache
+  key/version, cache environment or CLI control, daemon, transcript, receipt or
+  any other cross-run scanner state
+- **THEN** deterministic verification rejects it before successful history
+  output
 - **AND** a missing, malformed or unreadable required Git object makes the
   history command exit non-zero rather than produce a false pass
 
 ### Requirement: Exhausted path-sensitive history acceleration is replaced fail-closed
-ChangeRail MUST treat both unpublished
-`accelerate-path-sensitive-public-history-scan` and stopped
-`deliver-path-sensitive-public-history-scan-replacement` payloads as
-forensic-only. Only `deliver-path-sensitive-public-history-scan-replacement-v2`
-may reimplement the capability after its fixture and exact authorization
-predecessors are published. Production behavior MUST start from exact safe
-commit `ccccb62562e1646b595119edd3326763860f14a7`, MUST use fresh persistent
-raw-tree batch traversal, and MUST add at most 300 production LOC relative to
-that commit even though the exact preflight authorization ceiling is 301. New
-authority or wire protocol and same-card repair/rescue are forbidden. Each
-raw-tree `raw_name` MUST be exactly one non-empty Git tree path component:
-strict UTF-8 bytes that round-trip unchanged, contain no NUL, slash, ASCII
-control/DEL or backslash, and are neither `.` nor `..`; it MUST be validated
-before prefixing, without splitting or normalization.
+ChangeRail MUST preserve unpublished
+`accelerate-path-sensitive-public-history-scan`,
+`deliver-path-sensitive-public-history-scan-replacement` and fixture-v2
+implementation payloads plus their negative verdicts as forensic-only, and
+MUST NOT copy or publish them as implementation evidence. Future delivery MUST
+use only `deliver-structurally-bounded-public-history-scan` after exact
+`authorize-bounded-structural-public-history-scan` publication. Production
+behavior MUST start from exact safe commit
+`ccccb62562e1646b595119edd3326763860f14a7`, MUST add at most 300 production
+LOC relative to that commit and MUST NOT introduce new authority or wire
+protocol. Each history invocation MUST freshly execute exactly one
+`git rev-list --all` and exactly one persistent `git cat-file --batch`, with no
+cross-run cache, recipe, transcript or benchmark authority. The scanner MUST
+use only invocation-local memoization and MUST NOT mutate repository refs,
+worktree contents or Git index state.
 
-#### Scenario: Non-empty ls-tree framing is malformed
-- **WHEN** an `ls-tree -r -z` compatibility or enumeration stream is non-empty
-  but lacks exactly one terminal NUL, contains an empty interior record, has a
-  malformed mode/type/OID header, or contains an undecodable or unsafe path
-- **THEN** history scanning fails closed before cache lookup, cache reuse,
-  partial findings or a successful history result
-- **AND** only `b""` represents a valid empty tree
+#### Scenario: Fresh traversal uses invocation-local memoization
+- **WHEN** the structural successor scans reachable history
+- **THEN** it strictly parses a fresh ordered `rev-list --all` stream and
+  obtains all required commit, tree and blob objects through its sole
+  persistent `cat-file --batch` child
+- **AND** each object OID is requested at most once per invocation, each exact
+  `(blob OID, repository-relative path)` is scanned at most once, and findings
+  expand deterministically to every ordered reachable `(commit,path,blob)`
+  occurrence
+- **AND** all memoized state is process-local and is neither loaded nor saved
+  across invocations
 
-#### Scenario: Raw-tree name is malformed
-- **WHEN** persistent raw-tree traversal receives an empty, undecodable,
-  unsafe or slash-bearing `raw_name`
-- **THEN** a connected successor negative fixture proves that history scanning
-  fails closed before traversal output, cache lookup, cache reuse, partial
-  findings or a successful history result
+#### Scenario: Connected state oracle proves scanner non-mutation
+- **WHEN** a connected test independently captures, before and after every
+  successful and fault-injected candidate run, the complete ref namespace
+  (refname, direct or symbolic target and peeled target), an exhaustive
+  worktree mapping of repository-relative path, file type/mode and raw bytes,
+  and the exact raw bytes of the Git index
+- **THEN** the before and after snapshots are byte-for-byte identical for each
+  observed component
+- **AND** the oracle runs outside the counted candidate PATH and derives none
+  of its expected state from candidate output, memo counters or a persistent
+  cache
 
-#### Scenario: Clean v2 replacement enumerates reachable objects
-- **WHEN** the exact authorized v2 replacement performs a current cold or warm
-  history scan
-- **THEN** it freshly enumerates every reachable commit and traverses strict
-  commit/tree/blob framing through one persistent batch object reader without a
-  production `ls-tree` process per commit
-- **AND** it preserves ordered per-commit findings and exact `(blob,path)` cache
-  identity while treating every malformed, missing or mistyped object as a hard
-  history failure
+#### Scenario: Reachability, batch or path framing is unsafe
+- **WHEN** `rev-list` or batch data is malformed, truncated, missing,
+  mistyped, unexpectedly duplicated, size-inconsistent or unsuccessful, or a
+  raw tree name is empty, undecodable, non-round-tripping, slash/backslash
+  bearing, control-bearing, absolute, `.` or `..`
+- **THEN** history scanning exits nonzero before any terminal partial findings
+  or successful report
+- **AND** every commit has one valid tree, every raw object has its expected
+  type and complete framing, and every path is validated before prefixing
 
-#### Scenario: Preflight evaluates the exact v2 authorization
-- **WHEN** deterministic preflight evaluates the implementation card
-- **THEN** the investigation and authorization sources are unchanged tracked
-  `4.done` artifacts with reciprocal exact IDs/paths, the reference resolves to
-  authorization status `valid`, ceiling 301 and protocol allowance false
-- **AND** absence, staleness, mismatch, a changed fixture-authority source, more
-  than 300 added production LOC or new authority/wire behavior stops delivery
+#### Scenario: Git child count remains constant across real history scale
+- **WHEN** a connected test runs the candidate against small and enlarged
+  temporary real-Git histories with a PATH-first Git argv recorder
+- **THEN** each candidate run records exact Git child-launch count `2`, one
+  `rev-list --all` and one `cat-file --batch`, regardless of commit, tree, blob,
+  ref or occurrence count
+- **AND** no production `ls-tree`, `show`, per-object Git process or extra Git
+  discovery child is launched
 
-#### Scenario: Initial v2 replacement review is not successful
-- **WHEN** the exact successor receives `NO-GO`, misses a frozen performance or
-  memory threshold, exceeds 300 added production LOC, modifies fixture
-  authority, or lacks mandatory focused, history, benchmark, baseline,
-  manifest, preflight or independent-review proof
-- **THEN** same-card repair, favorable benchmark rerun and re-review are
-  forbidden because repair/rescue limit/used/remaining is `0/0/0`
-- **AND** both earlier payloads remain unpublished and downstream
-  `parallelize-isolated-release-smoke-cases` remains blocked pending a new
-  published decision and replacement
+#### Scenario: Independent verifier proves actual ordered coverage
+- **WHEN** a verifier outside the counted candidate PATH independently runs
+  real `git rev-list --all` and `git ls-tree -r -z --full-tree` per commit
+- **THEN** its strict actual ordered `(commit,path,blob)` tuple list equals the
+  candidate test observer list exactly
+- **AND** expected coverage is not derived from candidate findings, synthetic
+  cardinalities, recipe, realization transcript, cache counters or a tracked
+  fixture authority
+
+#### Scenario: Small real repositories preserve semantics and reject faults
+- **WHEN** focused temporary real-Git cases cover allowed content, leaks,
+  secret redaction, rename/exact path identity, binary/NUL content, non-UTF8
+  blob content and malformed/truncated/mistyped/missing/unsafe injected Git data
+- **THEN** valid cases have normalized finding parity with exact legacy scanner
+  `ccccb625:scripts/public-surface-scan.py`
+- **AND** every fault case exits nonzero without partial success, while the
+  ephemeral repositories and injectors do not become benchmark authority
+
+#### Scenario: Exact successor preflight evaluates bounded authorization
+- **WHEN** deterministic preflight evaluates
+  `deliver-structurally-bounded-public-history-scan`
+- **THEN** its exact authorization reference resolves to unchanged clean
+  tracked `openspec/board/4.done/authorize-bounded-structural-public-history-scan.md`
+  with status `valid`, reciprocal investigation/successor IDs and paths,
+  production ceiling `301` and protocol allowance `false`
+- **AND** absent, stale or mismatched authorization, a baseline other than
+  `ccccb625`, more than 300 added production LOC, or new authority/wire behavior
+  stops delivery
+
+#### Scenario: Final evidence uses correctness gates without timing thresholds
+- **WHEN** the exact candidate has passed focused structural tests and enters
+  final verification
+- **THEN** delivery runs exactly one standalone current-history scan and
+  exactly one full release baseline on the unchanged payload, and both MUST
+  pass their correctness oracles
+- **AND** `/usr/bin/time -v` elapsed-time and max-RSS values are retained only
+  as observational metadata; wall, ratio, CV and process/descendant-RSS
+  thresholds cannot select, retry or change the verdict
+
+#### Scenario: Release CI claims complete all-ref history
+- **WHEN** release CI runs the public-history scan or full release baseline
+- **THEN** checkout uses `fetch-depth: 0` before the scan
+- **AND** shallow or single-ref history cannot satisfy the complete
+  `rev-list --all` proof
 
 ### Requirement: Expensive release smoke uses bounded isolated concurrency
 The review-preflight and delivery-runner release smoke commands MUST execute
@@ -272,30 +317,28 @@ step, including history scan, review-preflight smoke and delivery-runner smoke.
 Optimization MUST remain internal to those commands and MUST NOT introduce a
 reusable whole-baseline pass receipt or new publish authority.
 
-#### Scenario: Warm optimization data exists
-- **WHEN** a maintainer runs the complete release baseline with valid warm
-  per-content cache data or parallel smoke capacity
+#### Scenario: Invocation-local optimization or parallel smoke capacity exists
+- **WHEN** a maintainer runs the complete release baseline with
+  invocation-local history memoization or parallel smoke capacity
 - **THEN** the baseline still invokes each mandatory command in its tracked
   inventory
 - **AND** any failed, missing, corrupt or timed-out command returns the baseline
   non-zero
 
 #### Scenario: Optimized behavior is compared with sequential oracle
-- **WHEN** focused acceptance runs cold/warm history fixtures or sequential and
-  parallel smoke fixtures
+- **WHEN** focused acceptance runs fresh real-Git structural history cases or
+  sequential and parallel smoke fixtures
 - **THEN** normalized findings, case coverage, exit status and diagnostics have
   semantic parity
-- **AND** timing evidence demonstrates the bounded thresholds declared by the
-  reviewed implementation change
+- **AND** structural history timing evidence remains observational and cannot
+  alter the correctness verdict
 
-#### Scenario: Performance evidence is reproducible and memory-bounded
-- **WHEN** an acceleration successor records its acceptance benchmark
-- **THEN** it records frozen fixture version/scale/hash, checkout, Python/Git,
-  OS/kernel, CPU, RAM, jobs, two discarded warmups and five monotonic samples
-  per mode with coefficient of variation at most 15 percent
-- **AND** every child VmHWM is at most 256 MiB and 100 ms aggregate RSS sampling
-  is at most 128 MiB plus 256 MiB per active job ceiling; missing data or an
-  exceeded bound is non-zero
+#### Scenario: Structural history performance metadata is observational
+- **WHEN** the structural history successor records timing or memory metadata
+- **THEN** it records `/usr/bin/time -v` elapsed-time and max-RSS values only
+  alongside the required correctness evidence
+- **AND** no warm sample, ratio, CV, wall-clock or RSS threshold can select,
+  retry or change the verdict
 
 #### Scenario: Maintainer attributes baseline duration
 - **WHEN** the local release baseline executes its mandatory inventory
@@ -436,88 +479,64 @@ owned wiring conflict and successful exact-revision verification.
 - **AND** the successful fixture proves the same local and CI verification path
 
 ### Requirement: Materialized public-history fixture authority MUST precede a scanner candidate
-ChangeRail MUST treat `history-fixture-v1` as historical-only because its
-published fingerprint and counts do not define a materializable preimage.
-Before a new public-history scanner candidate is created, ChangeRail MUST
-publish `history-fixture-v2` as an immutable tracked recipe, deterministic Git
-materializer, root-independent realization transcript, detached component
-authority, independent published-parent legacy oracle, benchmark harness and
-self-tests.
+ChangeRail MUST preserve published fixture-v2 decisions and certification as
+historical forensic records for their original stopped lineage, but MUST treat
+their recipe, transcript, authority, warm-ratio/CV rule and descendant-RSS
+oracle as superseded for future delivery. The structural successor MUST NOT
+depend on, reconstruct, copy or publish the exhausted fixture-v2 implementation
+or either `NO-GO` payload. Its authority MUST instead be the published
+structural decision plus exact bounded authorization, real-Git structural tests
+and final correctness runs.
 
-#### Scenario: v1 digest and counts are the only available source
-- **WHEN** a successor cannot resolve exact ordered recipe bytes, object graph,
-  paths, parents and ref operations from tracked published sources
-- **THEN** `history-fixture-v1` cannot authorize benchmark GREEN or candidate
-  publication
-- **AND** no implementation may reconstruct, guess or select a preimage for its
-  historical fingerprint
+#### Scenario: Historical fixture-v2 lineage is inspected
+- **WHEN** maintainers inspect published decisions
+  `ccccb62562e1646b595119edd3326763860f14a7`,
+  `c2c145ce4d107a8dfcd30603f46e46641c2009c0`,
+  `f6b56f11593e56fddbd6a718f6abe5418ade9129` or certification
+  `3915f54f017e3bf7b9af785f62519a87b75f9b9c`
+- **THEN** their tracked content and retained forensic evidence remain
+  unchanged
+- **AND** none is claimed as accepted implementation evidence for the
+  structural successor
 
-#### Scenario: Recipe v2 is materialized in two fresh roots
-- **WHEN** the pinned materializer validates and realizes the pinned recipe in
-  two different new absolute roots under the sanitized deterministic Git
-  environment
-- **THEN** both runs produce byte-identical canonical transcripts, ordered
-  object/ref/path records, counts, normalized legacy output digest and
-  domain-separated fixture fingerprint
-- **AND** the exact scale is 48 commits, 1152 selected occurrences, 96 unique
-  `(blob,path)` identities and 72 unique blobs
+#### Scenario: Future candidate proposes fixture or persistent-state authority
+- **WHEN** a successor proposes cross-run cache, fixture recipe/materializer,
+  realization transcript, detached fixture authority, warm sample/CV
+  replacement, wall threshold or descendant-RSS threshold
+- **THEN** deterministic verification rejects the candidate as outside this
+  decision and authorization
+- **AND** observational `time -v` metadata cannot be promoted into such an
+  authority
 
-#### Scenario: Fixture component is missing or modified
-- **WHEN** the recipe schema, recipe, materializer, realization transcript,
-  benchmark harness or self-test is absent, untracked, at another path or does
-  not match its separate lowercase SHA-256 in the detached authority record
-- **THEN** fixture validation fails before candidate execution or benchmark
-- **AND** no component or authority file may validate itself through a digest
-  embedded in its own bytes
-
-#### Scenario: Published-parent legacy oracle runs
-- **WHEN** fixture realization or benchmark computes the legacy result
-- **THEN** it executes exact scanner blob
-  `74b218d8d92274d73ffaea129404749a330e8320` from published commit
-  `ccccb62562e1646b595119edd3326763860f14a7`, whose raw bytes have SHA-256
-  `bd353167a9a3460047c4b25ef41827709bd2304b5b72945d244ffac01094bd6d`
-- **AND** the oracle runs in a separate sanitized process without importing
-  candidate or stopped-successor code, tests, cache, normalizer or evidence
-
-#### Scenario: Frozen v2 benchmark evaluates a candidate
-- **WHEN** the pre-candidate pinned harness runs its canonical benchmark
-- **THEN** every fresh-root trial runs legacy uncached, candidate empty-cache
-  cold and its immediate unchanged warm rerun in that order, with two complete
-  discarded warmups and five complete measured trials
-- **AND** unrounded monotonic medians require cold/legacy `<=0.20` and
-  warm/legacy `<=0.05`; population CV `<=0.15` forbids rerun, while higher CV
-  permits exactly one whole-set replacement and a second instability is
-  `NOT-VERIFIABLE`
-- **AND** every scanner/Git child VmHWM is `<=256 MiB`, 100 ms aggregate RSS for
-  active job ceiling 1 is `<=384 MiB`, and missing samples or any bound breach
-  is red
-
-#### Scenario: Harness or evidence attempts favorable selection
-- **WHEN** a payload changes fixture bytes, semantic cases, scale, oracle,
-  normalization, workload, process timer boundary, trial order/count, cache
-  state, threshold, unrounded arithmetic, CV replacement rule, RSS accounting
-  or selects/deletes samples by outcome
-- **THEN** pinned authority verification or connected harness self-tests fail
-- **AND** runtime samples and host metadata remain evidence only and cannot
-  define fixture bytes or authorize a different verdict
-
-#### Scenario: Ordered fixture, authorization and implementation lineage runs
-- **WHEN** maintainers proceed after this investigation is published
-- **THEN** they publish `materialize-public-history-benchmark-fixture-v2`, then
-  `authorize-bounded-public-history-scan-replacement-v2`, and only then create
-  `deliver-path-sensitive-public-history-scan-replacement-v2`
+#### Scenario: Ordered structural authorization and implementation lineage runs
+- **WHEN** maintainers proceed after
+  `investigate-structural-public-history-scan-proof` is reviewed and published
+- **THEN** they create and publish
+  `authorize-bounded-structural-public-history-scan` before creating
+  `deliver-structurally-bounded-public-history-scan`
 - **AND** the authorization source contains exact object
-  `{"investigation_card":"openspec/board/4.done/investigate-materialized-public-history-benchmark-v2.md","investigation_id":"investigate-materialized-public-history-benchmark-v2","successor_card":"openspec/board/3.inprogress/deliver-path-sensitive-public-history-scan-replacement-v2.md","successor_id":"deliver-path-sensitive-public-history-scan-replacement-v2","production_loc_ceiling":301,"allow_new_authority_or_wire_protocol":false}`
+  `{"investigation_card":"openspec/board/4.done/investigate-structural-public-history-scan-proof.md","investigation_id":"investigate-structural-public-history-scan-proof","successor_card":"openspec/board/3.inprogress/deliver-structurally-bounded-public-history-scan.md","successor_id":"deliver-structurally-bounded-public-history-scan","production_loc_ceiling":301,"allow_new_authority_or_wire_protocol":false}`
 - **AND** the implementation card uses only exact reference
-  `{"authorization_card":"openspec/board/4.done/authorize-bounded-public-history-scan-replacement-v2.md","authorization_id":"authorize-bounded-public-history-scan-replacement-v2"}`
+  `{"authorization_card":"openspec/board/4.done/authorize-bounded-structural-public-history-scan.md","authorization_id":"authorize-bounded-structural-public-history-scan"}`
 
-#### Scenario: Fast-forward completes this decision
+#### Scenario: Structural implementation publishes GREEN
+- **WHEN** the exact authorized implementation passes structural, semantic,
+  fault, history, full-baseline, manifest, preflight and independent-review
+  gates within 300 production LOC relative to `ccccb625`
+- **THEN** it may publish without a fixture benchmark, timing threshold or
+  descendant-RSS oracle
+- **AND** only after that publication may maintainers deliver
+  `parallelize-isolated-release-smoke-cases` and then resume the phase-routed
+  runner series
+
+#### Scenario: Fast-forward completes this structural decision
 - **WHEN** `$changerail-ff` prepares
-  `decide-materialized-public-history-benchmark-v2`
-- **THEN** only the source card and this change's proposal, design, delta spec
-  and tasks are created or updated
+  `decide-structural-public-history-scan-proof`
+- **THEN** only the source card and this change's proposal, design, release-CI
+  delta and tasks are created or updated
 - **AND** production/test/runtime LOC remains zero and no successor card,
-  history scan, benchmark, full baseline, archive, review, commit or push occurs
+  history scan, benchmark, full baseline, archive, review, commit or push
+  occurs
 
 ### Requirement: Repaired fixture history certification MUST be one-shot and precommitted
 ChangeRail MUST permit exactly one separate reachable-history certification
