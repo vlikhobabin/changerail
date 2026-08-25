@@ -6,7 +6,6 @@
 docs/config checks, Python smoke checks, templates/bootstrap/verify/drift and
 wiring discovery.
 ## Requirements
-
 ### Requirement: Published bounded passive release admission authorization source
 ChangeRail MUST publish
 `authorize-bounded-passive-release-admission-registry` as one clean tracked
@@ -1204,107 +1203,72 @@ or live authority.
 - **AND** ceiling `500` and allowance `true` cannot authorize another successor,
   a broad waiver or reuse of forensic implementation payload
 
-### Requirement: Tiered release authority MUST use a dormant A1 and authoritative A2 boundary
-After publication of `rescue-tiered-release-authority-two-stage-boundary`, ChangeRail MUST NOT continue or publish the unpublished
-`implement-tiered-release-authority-core` payload. Future release authority
-delivery MUST use two clean, separately authorized successors: dormant passive
-admission/registry library A1 and terminal authority activation A2. The only
-decision sources for this rescue are published commits `25f756e` and
-`0fba407`; failed Scope A code, tests, diff, evidence, receipts and runtime
-state MUST remain forensic-only and MUST NOT be reused.
+### Requirement: Clean release-loop acceleration MUST use bounded H/I/R/A lineage
+After publication of `rescue-private-release-loop-acceleration-publication-boundary`, ChangeRail MUST supersede the exhausted A1/A2 publication order for new release-loop acceleration with the exact clean bounded lineage declared by this requirement. Historical cards and archives remain immutable; the private integration prototype and its commits, diffs, receipts and runtime evidence MUST remain forensic-only and MUST NOT become publication authority.
 
-#### Scenario: A1 authorization binds only passive admission and registry
-- **WHEN** maintainers publish
-  `authorize-bounded-passive-release-admission-registry`
-- **THEN** it contains exactly
-  `{"investigation_card":"openspec/board/4.done/rescue-tiered-release-authority-two-stage-boundary.md","investigation_id":"rescue-tiered-release-authority-two-stage-boundary","successor_card":"openspec/board/3.inprogress/implement-passive-release-admission-registry.md","successor_id":"implement-passive-release-admission-registry","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":false}`
-- **AND** A1 is limited to `<=499` production LOC against the exact published
-  A1 authorization HEAD and cannot claim protocol, credential, mutation, live
-  or terminal release authority
+#### Scenario: Clean rescue replaces only future acceleration order
+- **WHEN** maintainers continue release-loop acceleration after this decision
+- **THEN** they use only the exact H, I, R and A successors declared here
+- **AND** no private prototype commit is cherry-picked, merged or cited as review, receipt or publication evidence
+- **AND** each implementation starts from its exact remote-reachable published predecessors
 
-#### Scenario: A1 owns exact bounded passive behavior
-- **WHEN** `implement-passive-release-admission-registry` is scoped or reviewed
-- **THEN** it exclusively owns the literal 35-record registry, canonical
-  digest, owners, direct commands and sequential groups; total bounded injected
-  admission; effective-PATH Python and parsed distribution-pin/Ruff-origin
-  checks; offline OpenSpec admission; bounded Git added, modified, deleted,
-  renamed, copied and untracked selection; the closed path map; and its parsed
-  Python-AST ownership oracle
-- **AND** missing, duplicate, unknown, malformed, ambiguous, over-limit or
-  unavailable inputs fail closed through connected focused fault cases without
-  starting an admitted semantic command
+#### Scenario: History foundation receives bounded authorization
+- **WHEN** maintainers publish `authorize-clean-structural-history-scan-v3`
+- **THEN** it contains exactly `{"investigation_card":"openspec/board/4.done/rescue-private-release-loop-acceleration-publication-boundary.md","investigation_id":"rescue-private-release-loop-acceleration-publication-boundary","successor_card":"openspec/board/3.inprogress/deliver-clean-structural-history-scan-v3.md","successor_id":"deliver-clean-structural-history-scan-v3","production_loc_ceiling":350,"allow_new_authority_or_wire_protocol":false}`
+- **AND** H is limited to `<=349` production LOC against its published authorization HEAD and owns only bounded structural history traversal, Git-compatible parsing, memoization, non-mutation and focused/CI history ownership proof
 
-#### Scenario: A1 remains structurally dormant
-- **WHEN** A1 is delivered, reviewed or published before separately published
-  `implement-terminal-release-authority-activation`
-- **THEN** no release baseline, CI workflow, manifest/review/publish preflight,
-  receipt schema or production entrypoint imports, invokes or activates A1
-- **AND WHEN** that exact A2 is published
-- **THEN** only that exact A2 may import, invoke or activate published A1
-- **AND** a static negative-wiring oracle becomes RED for every pre-A2 import,
-  invocation, receipt authority or activation path and every post-A2 such path
-  outside exact A2
+#### Scenario: Isolation foundation receives bounded authorization
+- **WHEN** maintainers publish `authorize-bounded-isolated-release-case-executor-v2`
+- **THEN** it contains exactly `{"investigation_card":"openspec/board/4.done/rescue-private-release-loop-acceleration-publication-boundary.md","investigation_id":"rescue-private-release-loop-acceleration-publication-boundary","successor_card":"openspec/board/3.inprogress/implement-bounded-isolated-release-case-executor-v2.md","successor_id":"implement-bounded-isolated-release-case-executor-v2","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
+- **AND** I is limited to `<=499` production LOC and owns only isolated case schemas, jobs/order, hard output and timeout bounds, process containment, cleanup and parsed-CI ownership proof
 
-#### Scenario: Dormant A1 uses focused proof without terminal capture
-- **WHEN** A1 publication eligibility is assessed
-- **THEN** its exclusive deterministic publication gate accepts only real
-  offline admission plus focused, static and current-only deterministic checks,
-  followed by fresh independent Sol/`xhigh` review
-- **AND** A1 MUST NOT execute, require or accept a reachable-history scan, full
-  release baseline, authority receipt or terminal capture as publication
-  evidence
-- **AND** those prohibited authority checks cannot be cited as a reusable
-  full-release pass or publication authority for A2
+#### Scenario: Independent foundations may run in parallel
+- **WHEN** this decision is remote-reachable and H and I authorization sources are published
+- **THEN** H and I may be implemented and reviewed concurrently in separate clean worktrees
+- **AND** their production paths, schemas, tests and authority ownership do not overlap
+- **AND** both exact implementation heads MUST be remote-reachable before R authorization is created
 
-#### Scenario: A2 authorization binds only terminal activation
-- **WHEN** published A1 is remote-reachable and maintainers publish
-  `authorize-bounded-terminal-release-authority-activation`
-- **THEN** it contains exactly
-  `{"investigation_card":"openspec/board/4.done/rescue-tiered-release-authority-two-stage-boundary.md","investigation_id":"rescue-tiered-release-authority-two-stage-boundary","successor_card":"openspec/board/3.inprogress/implement-terminal-release-authority-activation.md","successor_id":"implement-terminal-release-authority-activation","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
-- **AND** A2 is limited to `<=499` production LOC against the exact published
-  A2 authorization HEAD, imports the published A1 contract and cannot redefine
-  A1 registry, admission or selector ownership
+#### Scenario: Registry and affected profile receive bounded authorization
+- **WHEN** published H and I are remote-reachable and maintainers publish `authorize-bounded-public-release-registry-profile-v2`
+- **THEN** it contains exactly `{"investigation_card":"openspec/board/4.done/rescue-private-release-loop-acceleration-publication-boundary.md","investigation_id":"rescue-private-release-loop-acceleration-publication-boundary","successor_card":"openspec/board/3.inprogress/implement-public-release-registry-profile-v2.md","successor_id":"implement-public-release-registry-profile-v2","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
+- **AND** R is limited to `<=499` production LOC and owns only registry anchor/resolution, bounded Git selection, closed path ownership, fail-closed full fallback and affected diagnostic schema
 
-#### Scenario: A2 exclusively activates terminal release authority
-- **WHEN** `implement-terminal-release-authority-activation` runs the canonical
-  full-release gate
-- **THEN** A2 exclusively owns pre-admission reservation, held `O_EXCL` lock and
-  directory fsync, bounded append-only JSONL, atomic terminal publication,
-  signal terminalization, strict receipt/marker/manifest equality, required
-  review/publish gate, canonical CI activation and its parsed YAML ownership
-  oracle
-- **AND** no affected result, A1 focused proof, partial JSONL, stale marker,
-  mismatched fingerprint or nonterminal process state can authorize review,
-  publish or CI success
+#### Scenario: Affected profile never grants authority
+- **WHEN** requested profile is `affected`
+- **THEN** every result is `authoritative:false`, including a pass after uncertainty expands effective selection to the complete registry
+- **AND** unknown, ambiguous, malformed, unavailable, non-ancestor, over-limit or selector-self inputs can only expand selection and cannot omit a required semantic check
 
-#### Scenario: A2 receives exactly one atomic terminal capture
-- **WHEN** A2 focused checks are GREEN on its unchanged final payload
-- **THEN** a fresh Sol/`xhigh` pre-capture audit validates exact lineage,
-  `<=499` comparison, A1/A2 ownership, atomicity and connected failure oracles
-  before capture ID
-  `implement-terminal-release-authority-activation-cycle-1` performs exactly one
-  atomic `full-release` capture
-- **AND** capture, repair and retry/rescue budget is `0/0/0`; FAIL, timeout,
-  signal, malformed or stale receipt, fingerprint change or incomplete terminal
-  state is final without a second capture, while the sole unchanged GREEN
-  payload proceeds to fresh formal Sol/`xhigh` review
+#### Scenario: Payload-bound terminal authority receives bounded authorization
+- **WHEN** published R is remote-reachable and maintainers publish `authorize-bounded-payload-release-authority-v2`
+- **THEN** it contains exactly `{"investigation_card":"openspec/board/4.done/rescue-private-release-loop-acceleration-publication-boundary.md","investigation_id":"rescue-private-release-loop-acceleration-publication-boundary","successor_card":"openspec/board/3.inprogress/implement-payload-bound-release-authority-v2.md","successor_id":"implement-payload-bound-release-authority-v2","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
+- **AND** A is limited to `<=499` production LOC and exclusively owns bounded semantic execution, terminal receipt authority, manifest/review/publish equality and canonical CI activation
 
-#### Scenario: Downstream acceleration order is immutable
-- **WHEN** maintainers continue release-baseline acceleration from this rescue
-- **THEN** remote-reachable publication order is A1 authorization, A1
-  implementation, A2 authorization, A2 implementation, clean scanner-v2
-  authorization and implementation, Windows scheduler authorization and
-  implementation, verify-project authorization and implementation, then the
-  separate review-preflight and delivery-runner smoke successor
-- **AND** no downstream authorization is created before every declared
-  predecessor is published, and no successor absorbs another lineage's
-  registry, scanner, scheduler, verify-project or smoke ownership
+#### Scenario: Every semantic execution is bounded and observable
+- **WHEN** the canonical runner accepts either a full or affected request but before it starts any semantic child
+- **THEN** the same bounded offline toolchain, registry and target admission MUST complete successfully, while any admission failure emits one bounded failure result with zero semantic children started
+- **AND** each admitted semantic step has an explicit timeout, aggregate output bound, process containment, TERM/KILL/reap cleanup and deterministic ordered terminal result
+- **AND** the bounded report records profile, admission, registry/payload fingerprints, selected IDs, resolved steps, per-step monotonic duration, bounded diagnostics and semantic started/completed counts
+- **AND** clock or timing faults cannot alter selection, pass/fail, ordering, retry or authority
 
-#### Scenario: Rescue fast-forward remains decision-only
-- **WHEN** `$changerail-ff` prepares
-  `rescue-tiered-release-authority-two-stage-boundary`
-- **THEN** it creates or updates only the target card and proposal, design,
-  release-CI delta and tasks for one same-slug change
-- **AND** production/test/runtime LOC remain zero and no successor card,
-  implementation, main-spec sync, history scan, full baseline, archive, review,
-  commit or push occurs
+#### Scenario: Full authority is atomic and payload-bound
+- **WHEN** a full-release result is presented to review, publish or CI
+- **THEN** exact `O_EXCL` reservation, held lock, bounded append-only events, atomic no-replace terminal publication and fsync prove one complete admitted PASS
+- **AND** receipt, marker, delivery manifest, review verdict, publish gate and CI evidence contain the same exact payload fingerprint and terminal identity
+- **AND** affected, absent, partial, stale, replayed, mismatched, signaled, timed-out or nonterminal evidence is rejected
+- **AND** CI owns exactly one explicit canonical `--profile full-release` entrypoint with a job-level timeout and no standalone semantic duplicates
+
+#### Scenario: Optimization follows measured authority
+- **WHEN** A is published and maintainers optimize full-release runtime
+- **THEN** per-step telemetry identifies the dominant owners and each production change receives a separate bounded authorization
+- **AND** timing remains observational rather than correctness authority, and failed parallel smoke experiments are not promoted
+
+#### Scenario: Native Windows precedes final certification
+- **WHEN** final acceleration certification is requested
+- **THEN** a native Windows run has already proven Job Object containment, timeout, output overflow, crash, descendant cleanup and deterministic report parity
+- **AND** one final Sol/`xhigh` audit and one predeclared unchanged history/full capture run only after every focused, static, receipt and Windows gate is green
+- **AND** any terminal capture failure receives no retry in that implementation lineage, whether or not the payload remains unchanged
+
+#### Scenario: Rescue planning remains docs-only
+- **WHEN** `$changerail-ff` prepares `rescue-private-release-loop-acceleration-publication-boundary`
+- **THEN** it changes only the target card and one same-slug proposal, design, release-CI delta and tasks set
+- **AND** production, test and runtime LOC remain zero and no successor, implementation, main-spec sync, archive, review, history scan, full baseline, live Windows run, commit or push occurs
