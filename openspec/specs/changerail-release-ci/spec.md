@@ -276,11 +276,13 @@ worktree contents or Git index state.
   `rev-list --all` proof
 
 ### Requirement: Expensive release smoke uses bounded isolated concurrency
-The review-preflight and delivery-runner release smoke commands MUST execute
-every registered mandatory case in a separate process/temp-root isolation
-boundary or in an explicitly declared dependent group. Concurrency and case
-runtime MUST be bounded, and parallel completion order MUST NOT change the
-aggregated result or diagnostic order.
+After the bounded Windows scheduler is remote-reachable, ChangeRail MUST run
+the review-preflight and delivery-runner release smoke commands so that every
+registered mandatory case executes in a separate process/temp-root boundary
+or in an explicitly declared dependent group. Concurrency and case runtime
+MUST be bounded, and parallel completion order MUST NOT change the aggregated
+result or diagnostic order. This successor MUST remain separate from A, B and
+verify-project ownership.
 
 #### Scenario: Independent smoke cases finish out of order
 - **WHEN** registered smoke cases execute concurrently and complete in a
@@ -310,6 +312,13 @@ aggregated result or diagnostic order.
 - **AND** registry ownership is exact one-to-one with that inventory, and a
   fault injection for every registered oracle makes the parent red at its stable
   registry position
+
+#### Scenario: Release smoke waits for the Windows scheduler boundary
+- **WHEN** `parallelize-isolated-release-smoke-cases` is prepared
+- **THEN** exact published B and all prior A/scanner-v2 revisions are
+  remote-reachable and recorded as immutable predecessors
+- **AND** the smoke successor cannot absorb or redefine release registry,
+  Windows scheduler or verify-project ownership
 
 ### Requirement: Baseline acceleration preserves mandatory command coverage
 The local ChangeRail release baseline MUST preserve every frozen mandatory
@@ -620,7 +629,10 @@ non-authoritative inner-loop feedback. The frozen full inventory MUST contain
 exactly 35 ordered leaf IDs with canonical newline-list SHA-256
 `7147ee3c4b067486162f3dc1fee218c87eb40cbdb0d7730a9a78442da7986513`.
 Requested `affected` MUST remain non-authoritative even when fail-closed
-selection expands to the complete inventory.
+selection expands to the complete inventory. After publication of
+`rescue-tiered-release-verification-split-boundary`, executable delivery MUST
+use separate release-authority-core and Windows-scheduler lineages in the
+specified order rather than the old broad successor.
 
 #### Scenario: Toolchain admission fails before semantic execution
 - **WHEN** child Python is older than 3.11, an exact runtime/dev distribution
@@ -648,7 +660,8 @@ selection expands to the complete inventory.
   timeout, oversized or malformed output is reaped and makes the matrix red
 
 #### Scenario: Four duplicate processes are removed without semantic loss
-- **WHEN** full-release and CI execute the local Windows matrix
+- **WHEN** full-release and CI execute the local Windows matrix after the
+  Windows-scheduler successor is published
 - **THEN** entrypoints, wiring Git safety, bootstrap and verify-project each run
   exactly once as matrix-owned leaf IDs
 - **AND** no standalone duplicate invocation remains while jobs-1/default
@@ -696,48 +709,85 @@ selection expands to the complete inventory.
 - **AND** missing, stale, changed-payload, incomplete or malformed evidence
   fails closed; CI invokes only the canonical full-release runner
 
+#### Scenario: Release authority core has one exact owner
+- **WHEN** maintainers publish
+  `authorize-bounded-tiered-release-authority-core`
+- **THEN** it contains only exact six-field authorization
+  `{"investigation_card":"openspec/board/4.done/rescue-tiered-release-verification-split-boundary.md","investigation_id":"rescue-tiered-release-verification-split-boundary","successor_card":"openspec/board/3.inprogress/implement-tiered-release-authority-core.md","successor_id":"implement-tiered-release-authority-core","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
+- **AND** the successor is limited to `<=499` production LOC against its exact
+  published authorization HEAD and exclusively owns admission, the 35-ID
+  registry/digest, profile selection/authority, atomic marker/lock/fsync,
+  capture identity, fingerprint equality, receipt/manifest/schema/pub gates,
+  canonical CI full-runner invocation and their parsed ownership oracles
+
+#### Scenario: Authority core cannot absorb Windows topology
+- **WHEN** the A successor is scoped or reviewed
+- **THEN** it preserves existing Windows process scheduling and cannot add jobs,
+  case schemas, process-group lifecycle, the six-ID matrix-owner transition or
+  removal of the four redundant standalone processes
+- **AND** a scope overlap, 500th production line, credential/mutation/live
+  authority or broad protocol claim fails closed before terminal capture
+
+#### Scenario: Windows scheduler has one exact owner
+- **WHEN** published A and the independently authorized clean scanner-v2 are
+  remote-reachable and maintainers publish
+  `authorize-bounded-windows-release-matrix-scheduler`
+- **THEN** it contains only exact six-field authorization
+  `{"investigation_card":"openspec/board/4.done/rescue-tiered-release-verification-split-boundary.md","investigation_id":"rescue-tiered-release-verification-split-boundary","successor_card":"openspec/board/3.inprogress/implement-bounded-windows-release-matrix-scheduler.md","successor_id":"implement-bounded-windows-release-matrix-scheduler","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
+- **AND** the successor is limited to `<=499` production LOC against its exact
+  published authorization HEAD and exclusively owns the six-case schema/
+  registry, bounded jobs/isolation/order, central process-group cleanup,
+  scheduler fault handling, six-ID owner transition, exact four-process removal
+  and its narrow parsed-CI oracle extension
+
+#### Scenario: Windows scheduler cannot redefine release authority
+- **WHEN** the B successor is scoped or reviewed
+- **THEN** it consumes A's exact registry, selector, capture and receipt
+  contracts without redefining them or the general CI parser
+- **AND** ownership overlap, scanner code, a 500th production line, live access
+  or authority outside scheduling/cleanup/owner transition fails closed
+
 #### Scenario: Ordered authorizations bound separate implementation scopes
-- **WHEN** maintainers continue after publication of this decision
-- **THEN** they first publish tiered authorization with ceiling `500`, protocol
-  allowance `true` and exact successor `implement-tiered-release-verification-loop`,
-  whose implementation is `<=499` production LOC relative to
-  `45a2de98924c61bb9e944767013ea09918bba4b0`
-- **AND** after that implementation is remote-reachable they may separately
-  publish `verify-project` authorization with ceiling `501`, protocol allowance
-  `false` and exact successor `parallelize-isolated-verify-project-cases`,
-  limited to `<=500` LOC against exact published tiered HEAD; scanner-v2 remains
-  independent and uses a separate authorization with ceiling `301`, protocol
-  allowance `false` and exact successor
-  `deliver-clean-git-compatible-structural-history-scan-v2`, limited to
-  `<=300` production LOC relative to exact published tiered HEAD
+- **WHEN** maintainers continue the release acceleration lineage
+- **THEN** they publish A authorization and A implementation, then the separate
+  clean scanner-v2 authorization and implementation, then B authorization and
+  B implementation, with every predecessor remote-reachable before the next
+  authorization is created
+- **AND** only after B publication may they continue with the separate
+  verify-project authorization/implementation and the separate review-preflight
+  and delivery-runner release-smoke successor
 
 #### Scenario: Executable successor receives one terminal full capture
-- **WHEN** either authorized implementation finishes all focused deterministic
+- **WHEN** any ordered executable successor completes focused deterministic
   checks and requests final review
-- **THEN** its predeclared full-release capture runs exactly once without retry,
-  and PASS may proceed to fresh critical Sol/`xhigh` review
-- **AND** FAIL or TIMEOUT stops that lineage for a clean repair/replacement
-  rather than selecting a second result after observing the first
+- **THEN** a fresh Sol/`xhigh` pre-capture audit verifies exact lineage, `<=499`
+  comparison where applicable, authority/ownership scope, fault coverage and
+  absence of forensic payload reuse before exactly one predeclared atomic
+  `full-release` capture on the unchanged payload
+- **AND** repair/retry/rescue budget is `0/0/0`; FAIL, timeout, malformed/stale
+  receipt or fingerprint change is terminal without retry, while the sole GREEN
+  capture may proceed to fresh formal Sol/`xhigh` review
 
 #### Scenario: Fast-forward remains decision-only
 - **WHEN** `$changerail-ff` prepares
-  `decide-tiered-release-verification-loop-boundary`
+  `rescue-tiered-release-verification-split-boundary`
 - **THEN** it creates or updates only the target card and proposal, design,
-  release-CI delta and tasks for this one change
+  release-CI delta and tasks for this one same-slug change
 - **AND** production/test/runtime LOC stay zero and no successor card, main-spec
   sync, history scan, full baseline, archive, review, commit or push occurs
 
 ### Requirement: Verify-project isolation MUST preserve complete semantic coverage
-After tiered orchestration is published, ChangeRail MUST authorize
-`parallelize-isolated-verify-project-cases` separately before implementation.
-The authorization MUST set `production_loc_ceiling` to `501`, disallow a new
-authority or wire protocol, and bind
+After the bounded Windows scheduler is published, ChangeRail MUST authorize
+`parallelize-isolated-verify-project-cases` from that remote-reachable revision
+separately before implementation. The authorization MUST set
+`production_loc_ceiling` to `501`, disallow a new authority or wire protocol,
+and bind
 `openspec/board/4.done/investigate-tiered-release-verification-loop-boundary.md`
 to `openspec/board/3.inprogress/parallelize-isolated-verify-project-cases.md`
 with the exact reciprocal IDs. It MUST limit the successor to `<=500`
-production LOC relative to exact published tiered HEAD. The successor MUST
-retain exactly once semantic coverage for all current approximately 73
-assertions and 45 run paths, without a cross-run cache.
+production LOC relative to exact published B HEAD. The successor MUST retain
+exactly once semantic coverage for all current approximately 73 assertions and
+45 run paths, without a cross-run cache.
 
 #### Scenario: Static registry proves complete current coverage
 - **WHEN** the isolated `verify-project` successor builds its case registry
@@ -774,8 +824,15 @@ assertions and 45 run paths, without a cross-run cache.
 - **THEN** the closed path map selects the owned IDs or expands to full inventory
   without treating an affected receipt as publish authority
 - **AND** the successor has one predeclared terminal full-release capture with
-  no retry after focused GREEN, while scanner-v2 remains independently bounded
-  against the same published tiered HEAD
+  no retry after focused GREEN, while scanner-v2 and B remain independently
+  bounded against their exact published predecessors
+
+#### Scenario: Verify-project waits for the Windows scheduler boundary
+- **WHEN** the separate verify-project authorization is prepared
+- **THEN** exact published A, scanner-v2 and B revisions are remote-reachable,
+  and exact B HEAD is the successor's immutable comparison base
+- **AND** the successor cannot absorb release authority, scanner or Windows
+  scheduler ownership
 
 ### Requirement: Generated consumer CI regression gate
 The ChangeRail release baseline and tracked CI MUST validate the generated
@@ -985,49 +1042,36 @@ MUST occur after capture and before publication.
   benchmark, full baseline, archive, review, commit or push occurs
 
 ### Requirement: Published bounded tiered release verification authorization source
-ChangeRail MUST publish
-`authorize-bounded-tiered-release-verification-loop` as one clean tracked
-`4.done` board card before creating successor
-`implement-tiered-release-verification-loop`. The authorization source MUST
-contain exactly one schema-valid `Investigation authorization` object with only
-`investigation_card`, `investigation_id`, `successor_card`, `successor_id`,
-`production_loc_ceiling` and `allow_new_authority_or_wire_protocol`. Those
-fields MUST bind exact published investigation
-`investigate-tiered-release-verification-loop-boundary` to exact future
-successor `implement-tiered-release-verification-loop` through canonical
-`4.done` and `3.inprogress` paths, ceiling `500` and protocol allowance `true`.
-The authorization MUST NOT raise the successor's independent limit of 499
-executable LOC relative to
-`45a2de98924c61bb9e944767013ea09918bba4b0` or authorize credential, mutation or
-live authority.
+Published `authorize-bounded-tiered-release-verification-loop` MUST remain an
+immutable historical authorization source for the original broad successor.
+After publication of `rescue-tiered-release-verification-split-boundary`, it
+MUST NOT authorize creation, implementation, review or publication of
+`implement-tiered-release-verification-loop`; executable work MUST use the two
+new exact split authorizations. The broad unpublished implementation and all
+of its code, tests, diff, evidence, receipts and runtime state MUST remain
+forensic-only and MUST NOT be reused by either clean successor.
 
 #### Scenario: Authorization source publishes before successor creation
-- **WHEN** maintainers deliver the bounded tiered release verification
-  authorization after publication of its investigation
-- **THEN** the payload contains only the authorization board card, its OpenSpec
-  artifacts and the exact release-CI relationship requirement
-- **AND** production, test and runtime additions remain zero, no successor card
-  or code is created, and no history scan, benchmark or full baseline is run
+- **WHEN** maintainers inspect the previously published decision and
+  authorization
+- **THEN** their tracked objects and reciprocal historical relationship remain
+  unchanged rather than being rewritten as accepted implementation evidence
+- **AND** no new executable card may cite the broad authorization reference or
+  create `implement-tiered-release-verification-loop`
 
 #### Scenario: Exact reciprocal lineage is retained for the future successor
-- **WHEN** the authorization source is published and a later separate flow
-  creates `implement-tiered-release-verification-loop`
-- **THEN** the published investigation blocks both
-  `authorize-bounded-tiered-release-verification-loop` and
-  `implement-tiered-release-verification-loop`, while the authorization source
-  depends on the investigation and blocks that exact successor
-- **AND** the future successor depends on
-  `investigate-tiered-release-verification-loop-boundary` and its `Published
-  investigation authorization` field contains only exact inline JSON
-  `{"authorization_card":"openspec/board/4.done/authorize-bounded-tiered-release-verification-loop.md","authorization_id":"authorize-bounded-tiered-release-verification-loop"}`
+- **WHEN** A or B implementation is created after its authorization is
+  published and remote-reachable
+- **THEN** its `Published investigation authorization` contains only the exact
+  two-field reference to its own A or B authorization card/id
+- **AND** it depends on the split rescue, its own authorization and all ordered
+  published predecessors without citing the broad authorization
 
 #### Scenario: Tiered authorization mismatch fails closed
-- **WHEN** a future card changes any investigation, authorization or successor
-  id/path, omits a reciprocal relation, uses an authorization reference with
-  fields other than exact `authorization_card` and `authorization_id`, exceeds
-  499 executable LOC against `45a2de9`, or claims authority outside the
-  decision-defined affected/full-release boundary
-- **THEN** deterministic verification rejects the source for that candidate
-- **AND** ceiling `500` cannot authorize a 500th executable line, another
-  successor, credential/mutation/live authority or a reusable
-  authority/protocol waiver
+- **WHEN** an A/B candidate includes a cherry-pick, patch, copied code/test,
+  old diff, receipt, report, evidence, runtime state or other implementation
+  payload derived from the unpublished broad worktree
+- **THEN** deterministic scope verification or the fresh pre-capture audit
+  rejects the candidate before its sole terminal capture
+- **AND** the old lineage is not declared accepted, repaired or published
+  retroactively
