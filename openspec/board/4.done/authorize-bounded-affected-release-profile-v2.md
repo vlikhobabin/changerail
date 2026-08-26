@@ -51,7 +51,7 @@ archived
 - `implement-bounded-affected-release-profile-v2`
 
 ## Authorization
-- Exact implementation authorization:
+- Investigation authorization:
   `{"investigation_card":"openspec/board/4.done/rescue-affected-release-profile-exact-report-proof-boundary.md","investigation_id":"rescue-affected-release-profile-exact-report-proof-boundary","successor_card":"openspec/board/3.inprogress/implement-bounded-affected-release-profile-v2.md","successor_id":"implement-bounded-affected-release-profile-v2","production_loc_ceiling":500,"allow_new_authority_or_wire_protocol":true}`
 
 ## Acceptance
