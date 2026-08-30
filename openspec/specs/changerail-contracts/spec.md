@@ -1272,9 +1272,11 @@ current successor path/id, a readable published `4.done` investigation path/id,
 the successor's `Depends On` reference, the investigation's `Blocks` reference
 and the authorization source's `Depends On` reference. A relation reference
 MUST match its exact card id as bare `<id>`, `<id>.md`, or canonical
-`openspec/board/<lane>/<id>.md`; other stems, paths and ambiguous values MUST
-not match. The authorization ceiling MUST be an integer from 301 through 500,
-and the preflight result MUST retain its machine-verifiable state. A valid
+`openspec/board/<lane>/<id>.md`; `<id>` MAY be a lowercase slug or the exact
+sortable UTC form `YYYY-MM-DDTHH-MM-SSZ-<lowercase-slug>`. Other mixed-case
+ids, malformed timestamps, stems, paths and ambiguous values MUST not match.
+The authorization ceiling MUST be an integer from 301 through 500, and the
+preflight result MUST retain its machine-verifiable state. A valid
 authorization MUST apply only to its exact successor and SHALL satisfy that
 successor's repeated-defect investigation requirement while leaving the
 declared LOC ceiling and protocol allowance independent and fail-closed.
@@ -1292,6 +1294,13 @@ declared LOC ceiling and protocol allowance independent and fail-closed.
   or canonical board path ending in that filename
 - **THEN** preflight treats it as the exact successor id
 - **AND** a different stem or noncanonical path does not match
+
+#### Scenario: Published cards use sortable UTC timestamp ids
+- **WHEN** all exact authorization-chain ids use
+  `YYYY-MM-DDTHH-MM-SSZ-<lowercase-slug>` and reciprocal relations use an
+  admitted exact reference form
+- **THEN** preflight validates the chain and follows its declared risk route
+- **AND** arbitrary mixed-case or malformed timestamp ids remain non-matches
 
 #### Scenario: Repeated defect has no valid authorization
 - **WHEN** a successor declares a repeated defect and its authorization is

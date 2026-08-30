@@ -10,6 +10,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 
@@ -31,9 +32,13 @@ MAX_BREAKDOWN_PATHS = 20
 AUTHORIZATION_FIELD = "Published investigation authorization"
 AUTHORIZATION_SOURCE_FIELD = "Investigation authorization"
 CARD_ID_RE = r"[a-z0-9][a-z0-9-]*"
-BOARD_CARD_REFERENCE_RE = re.compile(rf"^openspec/board/[1-5]\.(?:backlog|todo|inprogress|done|canceled)/({CARD_ID_RE})\.md$")
-CARD_FILENAME_RE = re.compile(rf"^({CARD_ID_RE})\.md$")
-BARE_CARD_ID_RE = re.compile(rf"^{CARD_ID_RE}$")
+TIMESTAMPED_CARD_ID_RE = rf"\d{{4}}-\d{{2}}-\d{{2}}T\d{{2}}-\d{{2}}-\d{{2}}Z-{CARD_ID_RE}"
+REFERENCE_CARD_ID_RE = rf"(?:{CARD_ID_RE}|{TIMESTAMPED_CARD_ID_RE})"
+BOARD_CARD_REFERENCE_RE = re.compile(
+    rf"^openspec/board/[1-5]\.(?:backlog|todo|inprogress|done|canceled)/({REFERENCE_CARD_ID_RE})\.md$"
+)
+CARD_FILENAME_RE = re.compile(rf"^({REFERENCE_CARD_ID_RE})\.md$")
+BARE_CARD_ID_RE = re.compile(rf"^{REFERENCE_CARD_ID_RE}$")
 
 
 @dataclass(frozen=True)
@@ -390,19 +395,31 @@ def _production_complexity(
     return {"added_production_loc": total, "source_breakdown": _finalize_breakdown(buckets)}
 
 
+def _valid_reference_card_id(value: str) -> bool:
+    if re.fullmatch(CARD_ID_RE, value):
+        return True
+    if not re.fullmatch(TIMESTAMPED_CARD_ID_RE, value):
+        return False
+    try:
+        datetime.strptime(value[:20], "%Y-%m-%dT%H-%M-%SZ")
+    except ValueError:
+        return False
+    return True
+
+
 def _reference_matches(text: str, heading: str, expected: str) -> bool:
     references = re.findall(r"`([^`\n]+)`", dm.section_body(text, heading))
     normalized: set[str] = set()
     for reference in references:
-        if BARE_CARD_ID_RE.fullmatch(reference):
-            normalized.add(reference)
-            continue
+        candidate: str | None = reference if BARE_CARD_ID_RE.fullmatch(reference) else None
         filename = CARD_FILENAME_RE.fullmatch(reference)
         board_path = BOARD_CARD_REFERENCE_RE.fullmatch(reference)
         if filename:
-            normalized.add(filename.group(1))
+            candidate = filename.group(1)
         elif board_path:
-            normalized.add(board_path.group(1))
+            candidate = board_path.group(1)
+        if candidate is not None and _valid_reference_card_id(candidate):
+            normalized.add(candidate)
     return expected in normalized
 
 

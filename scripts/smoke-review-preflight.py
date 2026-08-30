@@ -15,6 +15,7 @@ HELPER = ROOT / "bin" / "changerail-review-verdict"
 SOURCE_HELPER = ROOT / "bin" / "changerail-source-classification"
 MANIFEST_HELPER = ROOT / "scripts" / "changerail_delivery_manifest.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+from changerail_review_preflight import _reference_matches  # noqa: E402
 from changerail_verification_coverage import (  # noqa: E402
     card_acceptance_hashes,
     fingerprint_coverage_map,
@@ -545,6 +546,99 @@ def preflight(
     return result, json.loads(result.stdout)
 
 
+def timestamped_reference_matcher_smoke() -> None:
+    expected = "2026-08-30T09-30-11Z-example-card"
+    for reference in (
+        expected,
+        f"{expected}.md",
+        f"openspec/board/3.inprogress/{expected}.md",
+    ):
+        assert _reference_matches(f"## Depends On\n- `{reference}`\n", "Depends On", expected)
+
+    for reference in (
+        "Example-Card",
+        "2026-08-30t09-30-11z-example-card",
+        "2026-08-30T09-30-11-example-card",
+        "2026-08-30T09-30-11Z-Example-card",
+        f"docs/{expected}.md",
+        f"openspec/board/3.inprogress/{expected}-other.md",
+    ):
+        assert not _reference_matches(f"## Depends On\n- `{reference}`\n", "Depends On", expected)
+
+    for malformed in (
+        "2026-13-40T25-61-61Z-example-card",
+        "2026-02-30T09-30-11Z-example-card",
+        "0000-08-30T09-30-11Z-example-card",
+    ):
+        assert not _reference_matches(f"## Depends On\n- `{malformed}`\n", "Depends On", malformed)
+
+
+def timestamped_authorization_workspace(root: Path) -> tuple[Path, Path, str]:
+    repo = root / "repo-timestamped-authorization"
+    repo.mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "config", "user.email", "smoke@example.invalid")
+    git(repo, "config", "user.name", "ChangeRail Smoke")
+    write(repo / ".gitignore", ".runtime/\n")
+    write(repo / "docs" / "base.md", "baseline\n")
+    write(repo / "src" / "base.py", "BASE = True\n")
+    investigation_id = "2026-08-30T09-30-11Z-investigate-example-boundary"
+    authorization_id = "2026-08-30T09-30-12Z-authorize-example-payload"
+    successor_id = "2026-08-30T09-30-13Z-deliver-example-payload"
+    authorization_reference = json.dumps(
+        {
+            "authorization_card": f"openspec/board/4.done/{authorization_id}.md",
+            "authorization_id": authorization_id,
+        },
+        separators=(",", ":"),
+    )
+    authorization_payload = json.dumps(
+        {
+            "investigation_card": f"openspec/board/4.done/{investigation_id}.md",
+            "investigation_id": investigation_id,
+            "successor_card": f"openspec/board/3.inprogress/{successor_id}.md",
+            "successor_id": successor_id,
+            "production_loc_ceiling": 500,
+            "allow_new_authority_or_wire_protocol": False,
+        },
+        separators=(",", ":"),
+    )
+    write(
+        repo / "openspec" / "board" / "4.done" / f"{investigation_id}.md",
+        "# Investigation\n\n## Status\n4.done\n\n## Blocks\n"
+        f"- `{successor_id}.md`\n",
+    )
+    write(
+        repo / "openspec" / "board" / "4.done" / f"{authorization_id}.md",
+        "# Authorization\n\n## Status\n4.done\n\n## Depends On\n"
+        f"- `openspec/board/4.done/{investigation_id}.md`\n\n## Authorization\n"
+        f"- Investigation authorization: `{authorization_payload}`\n",
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-q", "-m", "baseline")
+    successor_path = f"openspec/board/3.inprogress/{successor_id}.md"
+    write(
+        repo / successor_path,
+        card_text(
+            "ordinary",
+            repeated=True,
+            authorization=authorization_reference,
+            blocks=investigation_id,
+        ),
+    )
+    write(
+        repo / "openspec" / "changes" / "archive" / "2026-08-30-example-change" / "tasks.md",
+        "## Tasks\n\n- [x] done\n",
+    )
+    write(repo / "src" / "new.py", "VALUE = 1\n")
+    derived = run(
+        [sys.executable, str(MANIFEST_HELPER), "derive", successor_path, "--workspace", str(repo), "--write", "--json"],
+        repo,
+    )
+    require_ok(derived, "derive timestamped authorization manifest")
+    return repo, Path(json.loads(derived.stdout)["manifest"]), successor_path
+
+
 def exact_bounded_authorization_workspace(root: Path) -> tuple[Path, Path]:
     repo = root / "repo-bounded-review-fingerprint-authorization"
     while repo.exists():
@@ -1033,6 +1127,14 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="changerail-review-preflight-") as temp:
         root = Path(temp)
         source_profile_helper_smoke(root)
+        timestamped_reference_matcher_smoke()
+
+        repo, manifest, timestamped_successor_path = timestamped_authorization_workspace(root)
+        result, data = preflight(repo, manifest, "--normalize", card_path=timestamped_successor_path)
+        require_ok(result, "timestamped published investigation authorization")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["risk"]["reasoning_effort"] == "high"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
 
         repo, manifest = workspace(root, "ordinary", production_lines=3)
         payload = json.loads(manifest.read_text(encoding="utf-8"))
