@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -14,7 +15,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VENV_BIN = ROOT / ".runtime" / "changerail" / "ci-venv" / "bin"
-DRIFT_PROJECT = ROOT / ".runtime" / "changerail" / "ci-drift" / "example-project"
 
 
 @dataclass(frozen=True)
@@ -34,8 +34,8 @@ def baseline_env() -> dict[str, str]:
     return env
 
 
-def steps() -> list[Step]:
-    return [
+def steps(suite: str) -> list[Step]:
+    core = [
         Step("openspec validation", ["./bin/openspec", "validate", "--all", "--strict"]),
         Step("json config parse", ["python3", "-m", "json.tool", ".mcp.json"]),
         Step(
@@ -49,12 +49,10 @@ def steps() -> list[Step]:
         Step("contract schema validation", ["python3", "scripts/smoke-contract-schemas.py"]),
         Step("python syntax inventory", ["python3", "scripts/compile-python-inventory.py"]),
         Step("python runtime smoke", ["python3", "scripts/smoke-python-runtime.py"]),
-        Step("windows entrypoint smoke", ["python3", "scripts/smoke-windows-entrypoints.py"]),
-        Step("windows wiring Git safety smoke", ["python3", "scripts/smoke-windows-wiring-git-safety.py"]),
-        Step("windows smoke matrix", ["python3", "scripts/smoke-windows-matrix.py"]),
         Step("python lint", ["ruff", "check", "bin", "scripts"]),
         Step("ci workflow contract", ["python3", "scripts/smoke-release-ci.py"]),
         Step("public surface scan self-test", ["python3", "scripts/public-surface-scan.py", "--self-test"]),
+        Step("public surface history smoke", ["python3", "scripts/smoke-public-surface-history.py"]),
         Step("public surface scan", ["python3", "scripts/public-surface-scan.py"]),
         Step("public surface scan history", ["python3", "scripts/public-surface-scan.py", "--history"]),
         Step("wiring discovery smoke", ["python3", "scripts/smoke-wiring-discovery.py"]),
@@ -62,18 +60,6 @@ def steps() -> list[Step]:
         Step("runtime diagnostics smoke", ["python3", "scripts/smoke-runtime-diagnostics.py"]),
         Step("bootstrap smoke", ["python3", "scripts/smoke-bootstrap-project.py"]),
         Step("consumer CI smoke", ["python3", "scripts/smoke-consumer-ci.py"]),
-        Step("review verdict validation smoke", ["python3", "scripts/smoke-review-verdict-validation.py"]),
-        Step("review fingerprint smoke", ["python3", "scripts/smoke-review-fingerprint.py"]),
-        Step("review fingerprint benchmark smoke", ["python3", "scripts/smoke-review-fingerprint-benchmark.py"]),
-        Step("review fingerprint cache smoke", ["python3", "scripts/smoke-review-fingerprint-cache.py"]),
-        Step("review preflight smoke", ["python3", "scripts/smoke-review-preflight.py"]),
-        Step("retained evidence smoke", ["python3", "scripts/smoke-retained-evidence.py"]),
-        Step("maintenance runner smoke", ["python3", "scripts/smoke-maintenance-runner.py"]),
-        Step("delivery manifest smoke", ["python3", "scripts/smoke-delivery-manifest.py"]),
-        Step("delivery manifest derive smoke", ["python3", "scripts/smoke-delivery-manifest-derive.py"]),
-        Step("delivery runner one-command smoke", ["python3", "scripts/smoke-delivery-runner.py"]),
-        Step("delivery metrics smoke", ["python3", "scripts/smoke-delivery-metrics.py"]),
-        Step("openspec archive diagnostics smoke", ["python3", "scripts/smoke-openspec-archive-diagnostics.py"]),
         Step("generated drift fixture reset", ["rm", "-rf", ".runtime/changerail/ci-drift"]),
         Step(
             "generated drift fixture bootstrap",
@@ -88,10 +74,25 @@ def steps() -> list[Step]:
                 "none",
             ],
         ),
-        Step("generated drift smoke", ["python3", "scripts/smoke-drift.py", "--project", str(DRIFT_PROJECT)]),
+        Step("generated drift smoke", ["python3", "scripts/smoke-drift.py", "--project", ".runtime/changerail/ci-drift/example-project"]),
         Step("whitespace check", ["git", "diff", "--check"]),
         Step("ignored status check", ["git", "status", "--short", "--ignored"]),
     ]
+    extended = [
+        Step("review verdict validation smoke", ["python3", "scripts/smoke-review-verdict-validation.py"]),
+        Step("review fingerprint smoke", ["python3", "scripts/smoke-review-fingerprint.py"]),
+        Step("review fingerprint benchmark smoke", ["python3", "scripts/smoke-review-fingerprint-benchmark.py"]),
+        Step("review fingerprint cache smoke", ["python3", "scripts/smoke-review-fingerprint-cache.py"]),
+        Step("review preflight smoke", ["python3", "scripts/smoke-review-preflight.py"]),
+        Step("retained evidence smoke", ["python3", "scripts/smoke-retained-evidence.py"]),
+        Step("maintenance runner smoke", ["python3", "scripts/smoke-maintenance-runner.py"]),
+        Step("delivery manifest smoke", ["python3", "scripts/smoke-delivery-manifest.py"]),
+        Step("delivery manifest derive smoke", ["python3", "scripts/smoke-delivery-manifest-derive.py"]),
+        Step("delivery runner one-command smoke", ["python3", "scripts/smoke-delivery-runner.py"]),
+        Step("delivery metrics smoke", ["python3", "scripts/smoke-delivery-metrics.py"]),
+        Step("openspec archive diagnostics smoke", ["python3", "scripts/smoke-openspec-archive-diagnostics.py"]),
+    ]
+    return core if suite == "core" else extended
 
 
 def print_output(result: subprocess.CompletedProcess[str]) -> None:
@@ -101,10 +102,19 @@ def print_output(result: subprocess.CompletedProcess[str]) -> None:
         print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
 
 
-def main() -> int:
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=("core", "extended"), default="core")
+    parser.add_argument("--list", action="store_true", help="List exact command argv without running it.")
+    args = parser.parse_args(argv)
+    selected = steps(args.suite)
+    if args.list:
+        for step in selected:
+            print(json.dumps(step.command, ensure_ascii=False))
+        return 0
     env = baseline_env()
-    for index, step in enumerate(steps(), start=1):
-        print(f"[{index}/{len(steps())}] {step.name}: {command_text(step.command)}")
+    for index, step in enumerate(selected, start=1):
+        print(f"[{index}/{len(selected)}] {step.name}: {command_text(step.command)}")
         executable = shutil.which(step.command[0], path=env.get("PATH"))
         if executable is None:
             print(f"FAIL {step.name}: executable not found: {step.command[0]}", file=sys.stderr)
@@ -135,9 +145,9 @@ def main() -> int:
             )
             return result.returncode
         print(f"PASS {step.name}")
-    print(json.dumps({"status": "pass", "steps": len(steps())}, sort_keys=True))
+    print(json.dumps({"status": "pass", "steps": len(selected)}, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

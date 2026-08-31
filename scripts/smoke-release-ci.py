@@ -3,184 +3,127 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
 SCHEMA = "changerail.release-ci-smoke.v1"
-
-REQUIRED_SNIPPETS = {
-    "trigger push": "push:",
-    "trigger pull request": "pull_request:",
-    "trigger manual dispatch": "workflow_dispatch:",
-    "checkout action pin": "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-    "checkout action version comment": "actions/checkout v4",
-    "node setup action pin": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
-    "node setup action version comment": "actions/setup-node v4",
-    "toml config check": "import tomllib",
-    "drift fixture bootstrap": "./bin/bootstrap-project .runtime/changerail/ci-drift/example-project",
-    "drift uses generated project": "--project .runtime/changerail/ci-drift/example-project",
-}
-
-REQUIRED_COMMANDS = {
-    "python release venv": "python3 -m venv .runtime/changerail/ci-venv",
-    "python release dependencies": ".runtime/changerail/ci-venv/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt",
-    "openspec validation": "./bin/openspec validate --all --strict",
-    "json config check": "python3 -m json.tool .mcp.json",
-    "whitespace check": "git diff --check",
-    "contract schema validation": "python3 scripts/smoke-contract-schemas.py",
-    "python syntax inventory": "python3 scripts/compile-python-inventory.py",
-    "python runtime smoke": "python3 scripts/smoke-python-runtime.py",
-    "windows entrypoint smoke": "python3 scripts/smoke-windows-entrypoints.py",
-    "windows wiring Git safety smoke": "python3 scripts/smoke-windows-wiring-git-safety.py",
-    "windows smoke matrix": "python3 scripts/smoke-windows-matrix.py",
-    "python lint": "ruff check bin scripts",
-    "release ci smoke": "python3 scripts/smoke-release-ci.py",
-    "public surface scan self-test": "python3 scripts/public-surface-scan.py --self-test",
-    "public surface scan": "python3 scripts/public-surface-scan.py",
-    "public surface scan history": "python3 scripts/public-surface-scan.py --history",
-    "wiring smoke": "python3 scripts/smoke-wiring-discovery.py",
-    "verify smoke": "python3 scripts/smoke-verify-project.py",
-    "runtime diagnostics smoke": "python3 scripts/smoke-runtime-diagnostics.py",
-    "bootstrap smoke": "python3 scripts/smoke-bootstrap-project.py",
-    "consumer CI smoke": "python3 scripts/smoke-consumer-ci.py",
-    "review verdict validation smoke": "python3 scripts/smoke-review-verdict-validation.py",
-    "review fingerprint smoke": "python3 scripts/smoke-review-fingerprint.py",
-    "review fingerprint benchmark smoke": "python3 scripts/smoke-review-fingerprint-benchmark.py",
-    "review fingerprint cache smoke": "python3 scripts/smoke-review-fingerprint-cache.py",
-    "review preflight smoke": "python3 scripts/smoke-review-preflight.py",
-    "delivery manifest smoke": "python3 scripts/smoke-delivery-manifest.py",
-    "delivery manifest derive smoke": "python3 scripts/smoke-delivery-manifest-derive.py",
-    "delivery runner smoke": "python3 scripts/smoke-delivery-runner.py",
-    "delivery metrics smoke": "python3 scripts/smoke-delivery-metrics.py",
-    "maintenance runner smoke": "python3 scripts/smoke-maintenance-runner.py",
-    "openspec archive diagnostics smoke": "python3 scripts/smoke-openspec-archive-diagnostics.py",
-    "drift smoke": "python3 scripts/smoke-drift.py",
-}
-
-FORBIDDEN_SNIPPETS = {
-    "private absolute project path": "/opt" + "/",
-    "private drift inventory": "internal/changerail-drift.json",
-    "ci drift config inventory": "smoke-drift.py --config",
-    "mutable checkout action tag": "actions/checkout@v4",
-    "mutable setup-node action tag": "actions/setup-node@v4",
-}
+ROOT = Path(__file__).resolve().parents[1]
+CORE = (
+    '["./bin/openspec", "validate", "--all", "--strict"]',
+    '["python3", "-m", "json.tool", ".mcp.json"]',
+    '["python3", "-c", "import tomllib; tomllib.load(open(\'.codex/config.toml\', \'rb\')); print(\'TOML_OK\')"]',
+    '["python3", "scripts/smoke-contract-schemas.py"]',
+    '["python3", "scripts/compile-python-inventory.py"]',
+    '["python3", "scripts/smoke-python-runtime.py"]',
+    '["ruff", "check", "bin", "scripts"]',
+    '["python3", "scripts/smoke-release-ci.py"]',
+    '["python3", "scripts/public-surface-scan.py", "--self-test"]',
+    '["python3", "scripts/smoke-public-surface-history.py"]',
+    '["python3", "scripts/public-surface-scan.py"]',
+    '["python3", "scripts/public-surface-scan.py", "--history"]',
+    '["python3", "scripts/smoke-wiring-discovery.py"]',
+    '["python3", "scripts/smoke-verify-project.py"]',
+    '["python3", "scripts/smoke-runtime-diagnostics.py"]',
+    '["python3", "scripts/smoke-bootstrap-project.py"]',
+    '["python3", "scripts/smoke-consumer-ci.py"]',
+    '["rm", "-rf", ".runtime/changerail/ci-drift"]',
+    '["./bin/bootstrap-project", ".runtime/changerail/ci-drift/example-project", "--name", "example-project", "--kind", "generic", "--lock-enforcement", "none"]',
+    '["python3", "scripts/smoke-drift.py", "--project", ".runtime/changerail/ci-drift/example-project"]',
+    '["git", "diff", "--check"]',
+    '["git", "status", "--short", "--ignored"]',
+)
+EXTENDED = (
+    '["python3", "scripts/smoke-review-verdict-validation.py"]',
+    '["python3", "scripts/smoke-review-fingerprint.py"]',
+    '["python3", "scripts/smoke-review-fingerprint-benchmark.py"]',
+    '["python3", "scripts/smoke-review-fingerprint-cache.py"]',
+    '["python3", "scripts/smoke-review-preflight.py"]',
+    '["python3", "scripts/smoke-retained-evidence.py"]',
+    '["python3", "scripts/smoke-maintenance-runner.py"]',
+    '["python3", "scripts/smoke-delivery-manifest.py"]',
+    '["python3", "scripts/smoke-delivery-manifest-derive.py"]',
+    '["python3", "scripts/smoke-delivery-runner.py"]',
+    '["python3", "scripts/smoke-delivery-metrics.py"]',
+    '["python3", "scripts/smoke-openspec-archive-diagnostics.py"]',
+)
+DELIVERY = '["python3", "scripts/smoke-delivery-runner.py"]'
+CHECKOUT = "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"
+SETUP_NODE = "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020"
 
 
-@dataclass
-class Check:
-    name: str
-    status: str
-    message: str
+def add(checks: list[dict[str, str]], name: str, ok: bool, message: str) -> None:
+    checks.append({"name": name, "status": "pass" if ok else "fail", "message": message})
 
 
-def repo_root_from_script() -> Path:
-    return Path(__file__).resolve().parents[1]
+def inventory(*args: str) -> tuple[str, ...]:
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/run-release-baseline.py"), *args, "--list"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    )
+    return tuple(result.stdout.splitlines())
 
 
-def check_required(text: str) -> list[Check]:
-    checks: list[Check] = []
-    for name, snippet in REQUIRED_SNIPPETS.items():
-        if snippet in text:
-            checks.append(Check(name, "pass", "required snippet present"))
-        else:
-            checks.append(Check(name, "fail", f"missing required snippet: {snippet}"))
-    return checks
+def valid_inventories(core: tuple[str, ...], extended: tuple[str, ...]) -> bool:
+    return core == CORE and extended == EXTENDED and len(set(core)) == len(core) and len(set(extended)) == len(extended) and not set(core) & set(extended) and DELIVERY not in core and extended.count(DELIVERY) == 1
 
 
-def command_inventory(text: str) -> set[str]:
-    commands: set[str] = set()
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line == "|":
-            continue
-        if line.startswith("run: "):
-            value = line.removeprefix("run: ").strip()
-            if value and value != "|":
-                commands.add(value)
-            continue
-        if line.startswith(("python3 ", "./bin/", ".runtime/", "ruff ", "git ", "rm ")):
-            commands.add(line.removesuffix("\\").rstrip())
-    return commands
-
-
-def check_required_commands(text: str) -> list[Check]:
-    checks: list[Check] = []
-    commands = command_inventory(text)
-    for name, command in REQUIRED_COMMANDS.items():
-        if command in commands:
-            checks.append(Check(name, "pass", "required command present"))
-        else:
-            checks.append(Check(name, "fail", f"missing required command: {command}"))
-    return checks
-
-
-def check_forbidden(text: str) -> list[Check]:
-    checks: list[Check] = []
-    for name, snippet in FORBIDDEN_SNIPPETS.items():
-        if snippet in text:
-            checks.append(Check(name, "fail", f"forbidden snippet present: {snippet}"))
-        else:
-            checks.append(Check(name, "pass", "forbidden snippet absent"))
-    return checks
+def workflow_checks(checks: list[dict[str, str]], path: Path, *, extended: bool) -> None:
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    lines = [line.strip() for line in text.splitlines()]
+    route = "python3 scripts/run-release-baseline.py --suite extended" if extended else "python3 scripts/run-release-baseline.py"
+    required = {
+        "workflow exists": path.is_file(),
+        "pinned checkout": CHECKOUT in text,
+        "pinned setup node": SETUP_NODE in text,
+        "full history checkout": "fetch-depth: 0" in lines,
+        "exact suite route": lines.count("run: " + route) == 1,
+        "manual trigger" if extended else "push trigger": ("workflow_dispatch:" if extended else "push:") in lines,
+        "schedule trigger" if extended else "pull request trigger": ("schedule:" if extended else "pull_request:") in lines,
+        "route isolation": (
+            "run: python3 scripts/run-release-baseline.py" not in lines
+            if extended else "run: python3 scripts/run-release-baseline.py --suite extended" not in lines
+        ),
+        "windows diagnostics excluded": not any("smoke-windows-" in line for line in lines),
+        "one-command smoke not direct": not any("smoke-delivery-runner.py" in line for line in lines),
+    }
+    for name, ok in required.items():
+        add(checks, ("extended " if extended else "core ") + name, ok, str(path))
 
 
 def run_smoke(workflow: Path) -> dict[str, object]:
-    checks: list[Check] = []
-    if not workflow.is_file():
-        checks.append(Check("workflow exists", "fail", f"missing workflow: {workflow}"))
-        text = ""
-    else:
-        checks.append(Check("workflow exists", "pass", f"found workflow: {workflow}"))
-        text = workflow.read_text(encoding="utf-8")
-
-    checks.extend(check_required(text))
-    checks.extend(check_required_commands(text))
-    checks.extend(check_forbidden(text))
-    failed = sum(1 for check in checks if check.status != "pass")
-    return {
-        "schema": SCHEMA,
-        "workflow": str(workflow),
-        "summary": {
-            "status": "fail" if failed else "pass",
-            "total": len(checks),
-            "passed": len(checks) - failed,
-            "failed": failed,
-        },
-        "checks": [asdict(check) for check in checks],
-    }
-
-
-def parse_args(argv: list[str]) -> argparse.Namespace:
-    root = repo_root_from_script()
-    parser = argparse.ArgumentParser(description="Validate ChangeRail CI workflow contract.")
-    parser.add_argument(
-        "--workflow",
-        type=Path,
-        default=root / ".github" / "workflows" / "changerail-ci.yml",
-        help="Path to the ChangeRail CI workflow.",
-    )
-    parser.add_argument("--json", action="store_true", help="Print full JSON report.")
-    return parser.parse_args(argv)
+    checks: list[dict[str, str]] = []
+    core, explicit_core, extended = inventory(), inventory("--suite", "core"), inventory("--suite", "extended")
+    add(checks, "default core inventory", core == CORE, "exact ordered 22-item inventory")
+    add(checks, "explicit core inventory", explicit_core == CORE, "default and explicit core match")
+    add(checks, "extended inventory", extended == EXTENDED, "exact ordered 12-item inventory")
+    add(checks, "inventory uniqueness", len(set(core)) == len(core) and len(set(extended)) == len(extended), "no duplicates")
+    add(checks, "inventory disjointness", not set(core) & set(extended), "no overlap")
+    add(checks, "one-command ownership", DELIVERY not in core and extended.count(DELIVERY) == 1, "extended only")
+    mutations = ((CORE[:-1], EXTENDED), (CORE + ('["extra"]',), EXTENDED), (CORE + (CORE[0],), EXTENDED), (CORE, EXTENDED + (CORE[0],)), (CORE + (DELIVERY,), tuple(item for item in EXTENDED if item != DELIVERY)))
+    add(checks, "negative inventory oracle", all(not valid_inventories(*item) for item in mutations), "missing/extra/duplicate/overlap/core-ownership rejected")
+    workflow_checks(checks, workflow, extended=False)
+    workflow_checks(checks, ROOT / ".github/workflows/changerail-extended.yml", extended=True)
+    failed = sum(check["status"] != "pass" for check in checks)
+    return {"schema": SCHEMA, "workflow": str(workflow), "summary": {"status": "fail" if failed else "pass", "total": len(checks), "passed": len(checks) - failed, "failed": failed}, "checks": checks}
 
 
 def main(argv: list[str]) -> int:
-    args = parse_args(argv)
+    parser = argparse.ArgumentParser(description="Validate ChangeRail release suite contracts.")
+    parser.add_argument("--workflow", type=Path, default=ROOT / ".github/workflows/changerail-ci.yml")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
     report = run_smoke(args.workflow)
-    summary = report["summary"]
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:
-        print(
-            "summary: "
-            f"{summary['status']} "
-            f"({summary['passed']}/{summary['total']} passed, {summary['failed']} failed)"
-        )
+        summary = report["summary"]
+        print(f"summary: {summary['status']} ({summary['passed']}/{summary['total']} passed, {summary['failed']} failed)")
         for check in report["checks"]:
             if check["status"] != "pass":
                 print(f"FAIL {check['name']}: {check['message']}")
-    return 0 if summary["status"] == "pass" else 1
+    return 0 if report["summary"]["status"] == "pass" else 1
 
 
 if __name__ == "__main__":

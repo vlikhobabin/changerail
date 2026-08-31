@@ -115,7 +115,7 @@ def iter_files(paths: list[Path]) -> list[Path]:
             files.append(path)
             continue
         for child in path.rglob("*"):
-            if any(part in SKIP_DIRS for part in child.parts):
+            if any(part in SKIP_DIRS for part in child.relative_to(path).parts):
                 continue
             if child.is_file():
                 files.append(child)
@@ -231,54 +231,148 @@ def path_in_roots(path: str, roots: list[str]) -> bool:
     return any(path == root or path.startswith(root.rstrip("/") + "/") for root in roots)
 
 
-def scan_history(paths: list[Path], root: Path) -> list[Finding]:
-    revs = subprocess.run(
-        ["git", "-C", str(root), "rev-list", "--all"],
-        capture_output=True,
-        text=True,
+def _run_git(root: Path, args: list[str], *, input_data: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-C", str(root), *args],
+        input=input_data,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=20,
         check=False,
     )
-    if revs.returncode != 0:
-        return [
-            Finding(
-                path="<git-history>",
-                line=0,
-                kind="history",
-                value="<unavailable>",
-                message=(revs.stderr.strip() or "git rev-list failed"),
+
+
+def _mode_kind(mode: str) -> str:
+    return {
+        "000000": "zero",
+        "040000": "tree",
+        "100644": "regular",
+        "100755": "regular",
+        "120000": "symlink",
+        "160000": "commit",
+    }.get(mode, "")
+
+
+def _parse_raw(data: bytes, oid_length: int, roots: list[str]) -> dict[str, list[tuple[str, str]]]:
+    if not data.endswith(b"\0"):
+        raise ValueError("incomplete raw history framing")
+    fields = data[:-1].split(b"\0")
+    blobs: dict[str, list[tuple[str, str]]] = {}
+    index = 0
+    while index < len(fields):
+        marker = fields[index]
+        if len(marker) != oid_length + 1 or marker[:1] != b"\x1e" or not re.fullmatch(rb"[0-9a-f]+", marker[1:]):
+            raise ValueError("invalid raw history marker")
+        commit = marker[1:].decode()
+        index += 1
+        first_header = True
+        while index < len(fields) and not fields[index].startswith(b"\x1e"):
+            header = fields[index]
+            if first_header:
+                if not header.startswith(b"\n:"):
+                    raise ValueError("invalid first raw header")
+                header = header[1:]
+            elif not header.startswith(b":"):
+                raise ValueError("invalid raw header state")
+            first_header = False
+            parts = header.split(b" ")
+            if len(parts) != 5 or index + 1 >= len(fields):
+                raise ValueError("invalid raw header fields")
+            old_mode, new_mode = parts[0][1:].decode(), parts[1].decode()
+            old_oid, new_oid, status = parts[2].decode(), parts[3].decode(), parts[4].decode()
+            path_bytes = fields[index + 1]
+            if not path_bytes:
+                raise ValueError("empty raw path")
+            path = path_bytes.decode("utf-8", "replace")
+            old_kind, new_kind = _mode_kind(old_mode), _mode_kind(new_mode)
+            oid_ok = all(len(oid) == oid_length and re.fullmatch(r"[0-9a-f]+", oid) for oid in (old_oid, new_oid))
+            old_zero, new_zero = old_kind == "zero" and old_oid == "0" * oid_length, new_kind == "zero" and new_oid == "0" * oid_length
+            zero_consistent = (old_kind == "zero") == (old_oid == "0" * oid_length) and (new_kind == "zero") == (new_oid == "0" * oid_length)
+            transition_ok = (
+                status == "A" and old_zero and new_kind not in {"", "zero"} and not new_zero
+                or status == "D" and new_zero and old_kind not in {"", "zero"} and not old_zero
+                or status == "M" and not old_zero and not new_zero and old_kind == new_kind and bool(old_kind)
+                or status == "T" and not old_zero and not new_zero and old_kind != new_kind and bool(old_kind and new_kind)
             )
-        ]
-    roots = rel_scan_roots(paths, root)
-    findings: list[Finding] = []
-    for ref in revs.stdout.splitlines():
-        tree = subprocess.run(
-            ["git", "-C", str(root), "ls-tree", "-r", "-z", "--name-only", ref],
-            capture_output=True,
-            check=False,
+            if not oid_ok or not zero_consistent or not transition_ok:
+                raise ValueError("invalid raw mode or status transition")
+            if new_kind in {"regular", "symlink"} and path_in_roots(path, roots) and not any(part in SKIP_DIRS for part in Path(path).parts):
+                occurrence = (commit, path)
+                if occurrence not in blobs.setdefault(new_oid, []):
+                    blobs[new_oid].append(occurrence)
+            index += 2
+    return blobs
+
+
+def _parse_batch(data: bytes, requested: list[str]) -> dict[str, bytes]:
+    parsed: dict[str, bytes] = {}
+    offset = 0
+    for oid in requested:
+        line_end = data.find(b"\n", offset)
+        if line_end < 0:
+            raise ValueError("missing batch header")
+        parts = data[offset:line_end].split(b" ")
+        if len(parts) != 3 or parts[0].decode() != oid or parts[1] != b"blob" or not parts[2].isdigit():
+            raise ValueError("invalid batch header")
+        size = int(parts[2])
+        start, end = line_end + 1, line_end + 1 + size
+        if end >= len(data) or data[end : end + 1] != b"\n":
+            raise ValueError("truncated batch payload")
+        parsed[oid] = data[start:end]
+        offset = end + 1
+    if offset != len(data):
+        raise ValueError("unexpected batch response")
+    return parsed
+
+
+def _history_failure() -> list[Finding]:
+    return [Finding("<git-history>", 0, "history", "<unavailable>", "git history scan unavailable")]
+
+
+def scan_history(paths: list[Path], root: Path) -> list[Finding]:
+    try:
+        resolved = _run_git(root, ["rev-parse", "--is-shallow-repository", "HEAD^{commit}"])
+        if resolved.returncode:
+            raise ValueError("release HEAD unavailable")
+        lines = resolved.stdout.splitlines()
+        heads = [line.decode() for line in lines if re.fullmatch(rb"[0-9a-f]{40}|[0-9a-f]{64}", line)]
+        if lines.count(b"false") != 1 or len(heads) != 1 or len(lines) != 2:
+            raise ValueError("full release history unavailable")
+        head = heads[0]
+        roots = rel_scan_roots(paths, root)
+        history = _run_git(
+            root,
+            [
+                "log", "--full-history", "-m", "--raw", "-z", "--root", "--no-renames", "--no-abbrev",
+                "--format=tformat:%x1e%H", head, "--", *roots,
+            ],
         )
-        if tree.returncode != 0:
-            continue
-        for raw_path in tree.stdout.split(b"\0"):
-            if not raw_path:
-                continue
-            rel = raw_path.decode("utf-8", "replace")
-            if any(part in SKIP_DIRS for part in Path(rel).parts):
-                continue
-            if not path_in_roots(rel, roots):
-                continue
-            blob = subprocess.run(
-                ["git", "-C", str(root), "show", f"{ref}:{rel}"],
-                capture_output=True,
-                check=False,
-            )
-            if blob.returncode != 0 or b"\x00" in blob.stdout[:4096]:
+        if history.returncode:
+            raise ValueError("raw history unavailable")
+        occurrences = _parse_raw(history.stdout, len(head), roots)
+        oids = sorted(occurrences)
+        objects: dict[str, bytes] = {}
+        if oids:
+            batch = _run_git(root, ["cat-file", "--batch"], input_data=("\n".join(oids) + "\n").encode())
+            if batch.returncode:
+                raise ValueError("history objects unavailable")
+            objects = _parse_batch(batch.stdout, oids)
+        findings: list[Finding] = []
+        for oid in oids:
+            content = objects[oid]
+            if b"\x00" in content[:4096]:
                 continue
             try:
-                text = blob.stdout.decode("utf-8")
+                text = content.decode("utf-8")
             except UnicodeDecodeError:
                 continue
-            findings.extend(scan_text(text, rel, history=True, ref=ref[:12]))
-    return findings
+            first_ref, first_path = occurrences[oid][0]
+            for finding in scan_text(text, first_path, history=True, ref=first_ref[:12]):
+                for ref, path in occurrences[oid]:
+                    findings.append(Finding(path, finding.line, finding.kind, finding.value, finding.message, ref[:12]))
+        return findings
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return _history_failure()
 
 
 def scan(paths: list[Path], root: Path, *, history: bool = False) -> dict[str, object]:

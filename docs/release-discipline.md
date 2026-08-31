@@ -105,8 +105,9 @@ symlink-based consumer projects не меняют tracked files. Такая за
 3. Добавить `BREAKING:` entries при изменении публичного contract.
 4. Обновить compatibility notes.
 5. Обновить migration guide.
-6. Запустить локальный release baseline.
-7. Проверить release CI contract smoke и focused smoke inventory.
+6. Запустить Linux-focused core release baseline.
+7. Отдельно запустить обязательную extended regression suite и проверить
+   exact CI inventory contract.
 8. Запустить дополнительные trusted-network checks, если release меняет
    executable dependency pins.
 9. Проверить, что [security policy](../SECURITY.md) существует, связан из
@@ -171,30 +172,47 @@ python3 -m venv .runtime/changerail/ci-venv
 .runtime/changerail/ci-venv/bin/python -m pip install \
   --disable-pip-version-check -r requirements-dev.txt
 python3 scripts/run-release-baseline.py
+python3 scripts/run-release-baseline.py --suite extended
 ```
 
-`scripts/run-release-baseline.py` воспроизводит обязательный release baseline:
-OpenSpec strict validation, JSON/TOML config parsing, schema validation,
-tracked Python syntax inventory, Python runtime selector smoke,
-`ruff check bin scripts`, focused smoke checks, the platform-neutral Windows
-smoke matrix, generated drift fixture, public-surface scans,
-`git diff --check` и ignored-status check. Raw runtime reports остаются under
-`.runtime/` and are not committed.
+Default command воспроизводит Linux-focused `core` admission: OpenSpec и config
+validation, syntax/lint, bounded public-history regression, public-surface,
+wiring/bootstrap/consumer-CI, generated drift и repository-integrity checks.
+Exact отдельная команда `python3 scripts/run-release-baseline.py --suite
+extended` выполняет heavy review/delivery/maintenance regressions. One-command
+delivery regression `python3 scripts/smoke-delivery-runner.py` принадлежит
+только `extended`, выполняется там ровно один раз и MUST NOT входить в default
+core. `--list` показывает exact ordered inventory выбранной suite; combined
+`all` route отсутствует. Raw runtime reports остаются under `.runtime/` and are
+not committed.
+
+Windows entrypoint, wiring Git-safety и aggregate matrix остаются retained
+opt-in diagnostics вне обеих release suites. Их отсутствие не блокирует
+текущий Linux-focused release claim.
 
 Native Windows release claims require one of two reviewed outcomes: a passing
 `python3 scripts/smoke-windows-matrix.py --live --inventory
 internal/windows-lab-inventory.json --json` run, or an explicit blocker in
 compatibility notes that names only generic host ids, sanitized dependency
 state and ignored evidence paths. Missing Python runtime modules, missing npm or
-missing npx are host prerequisites, not a full support pass.
+missing npx are host prerequisites, not a full support pass. Будущая native
+Windows claim также требует обе release suites и current/history public-surface
+scans; до такой fresh proof текущая claim остаётся Linux-focused, а missing
+Windows evidence не блокирует её публикацию.
 
 ## CI Gate
 
-Tracked CI workflow:
+Tracked CI workflows:
 
 ```text
 .github/workflows/changerail-ci.yml
+.github/workflows/changerail-extended.yml
 ```
+
+Push/pull-request route выполняет ровно
+`python3 scripts/run-release-baseline.py`. Scheduled/manual route выполняет
+ровно `python3 scripts/run-release-baseline.py --suite extended`. Оба pinned
+checkout запрашивают `fetch-depth: 0`.
 
 Local CI contract smoke:
 
@@ -202,38 +220,10 @@ Local CI contract smoke:
 python3 scripts/smoke-release-ci.py
 ```
 
-The CI workflow runs:
-
-- `./bin/openspec validate --all --strict`;
-- docs/config baseline checks from `AGENTS.md`;
-- `scripts/smoke-contract-schemas.py` for all public contract schemas;
-- `scripts/compile-python-inventory.py` for tracked Python helpers and smoke
-  scripts;
-- `scripts/smoke-python-runtime.py`;
-- `scripts/smoke-windows-entrypoints.py`;
-- `scripts/smoke-windows-wiring-git-safety.py`;
-- `scripts/smoke-windows-matrix.py`;
-- `ruff check bin scripts` with pinned release-gate tooling;
-- `scripts/smoke-release-ci.py` to validate the workflow command inventory;
-- public-surface scans for current files and reachable history;
-- `scripts/smoke-wiring-discovery.py`;
-- `scripts/smoke-verify-project.py`;
-- `scripts/smoke-bootstrap-project.py`;
-- `scripts/smoke-consumer-ci.py` for structured read-only workflow validation,
-  strict-lock clean-clone execution and negative lock/wiring fixtures;
-- `scripts/smoke-review-verdict-validation.py`;
-- `scripts/smoke-review-fingerprint.py`;
-- `scripts/smoke-review-fingerprint-benchmark.py`;
-- `scripts/smoke-review-fingerprint-cache.py`;
-- `scripts/smoke-retained-evidence.py`;
-- `scripts/smoke-maintenance-runner.py`;
-- `scripts/smoke-delivery-manifest.py`;
-- `scripts/smoke-delivery-manifest-derive.py`;
-- `scripts/smoke-delivery-runner.py`, including one-command delivery success,
-  transient preflight resume and fail-closed review-gated regression coverage;
-- `scripts/smoke-delivery-metrics.py`;
-- `scripts/smoke-openspec-archive-diagnostics.py`;
-- `scripts/smoke-drift.py` against a generated generic runtime project.
+`scripts/smoke-release-ci.py` сравнивает оба `--list` с exact ordered 22-item
+core и 12-item extended inventories, требует uniqueness/disjointness, проверяет
+negative missing/extra/duplicate/overlap cases и fail closed при drift любого
+workflow route. Windows diagnostics не входят ни в один inventory.
 
 CI drift checks must use generated fixtures under `.runtime/` and must not use
 private workspace inventory.

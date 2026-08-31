@@ -22,6 +22,12 @@ change Codex CLI, Claude Code, OpenSpec CLI or MCP npm package pins. Existing
 consumers should install refreshed runtime dependencies, run project-local
 verification and restart active agent sessions after updating.
 
+Текущий stable admission claim является Linux-focused. Retained native Windows
+wrappers и исторические two-host results остаются полезными diagnostics, но
+native Windows сейчас не release-certified: Windows entrypoint, wiring
+Git-safety и aggregate matrix запускаются только явно и не входят в `core` или
+`extended` release suites.
+
 ## Codex CLI
 
 Status: supported through repo-local launcher and skill discovery.
@@ -514,8 +520,8 @@ inventory through secure runner-local configuration. SSH targets, usernames,
 credentials, private disposable roots and raw host output must remain outside
 tracked repository files.
 
-Current native Windows clean-clone end-to-end result after the follow-up
-prerequisite remediation pass:
+Последний исторический native Windows clean-clone result после prerequisite
+remediation pass:
 
 ```text
 aggregate live matrix report: .runtime/changerail/windows-smoke/20260802T151242Z-1f65f8db/report.json
@@ -524,12 +530,13 @@ aggregate result: passed, 9/9 matrix items passed
 clean-clone lifecycle: passed, 2/2 hosts passed, 16/16 host checks passed
 ```
 
-This result establishes the generated-copy native Windows clean-clone lifecycle
-on both prepared operator-managed Windows hosts. The support claim is scoped to
-the documented prerequisites: Git, Python `3.11+` with
-`requirements-runtime.txt`, `cmd.exe`, Node/npm/npx and npm registry access.
-Host identities, SSH targets, private disposable roots and raw output remain
-ignored runtime state.
+Этот retained result доказывал generated-copy lifecycle на двух подготовленных
+operator-managed hosts для прежней reviewed claim, но не является текущей
+release certification. Новая native Windows claim требует fresh live proof,
+current/history public-surface scans и обе Linux release suites. До этого
+missing Windows evidence не блокирует Linux-focused release. Host identities,
+SSH targets, private disposable roots and raw output remain ignored runtime
+state.
 
 | Host | Prerequisite baseline | Live clean-clone result |
 | --- | --- | --- |
@@ -613,7 +620,14 @@ python3 -m venv .runtime/changerail/ci-venv
 .runtime/changerail/ci-venv/bin/python -m pip install \
   --disable-pip-version-check -r requirements-dev.txt
 python3 scripts/run-release-baseline.py
+python3 scripts/run-release-baseline.py --suite extended
 ```
+
+Default `core` является Linux-focused stable admission. Exact `extended`
+invocation обязателен отдельно перед release publish и единолично владеет
+`python3 scripts/smoke-delivery-runner.py`. Retained Windows entrypoint, wiring
+Git-safety и aggregate matrix commands остаются explicit opt-in diagnostics
+вне обеих suites.
 
 ## Consumer Project Gates
 

@@ -1,8 +1,8 @@
-name: ChangeRail CI
+name: ChangeRail Extended Regression
 
 on:
-  push:
-  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verify:
-    name: Verify ChangeRail core release gates
+    name: Verify ChangeRail extended regressions
     runs-on: ubuntu-latest
 
     steps:
@@ -32,5 +32,5 @@ jobs:
           .runtime/changerail/ci-venv/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
           echo "$PWD/.runtime/changerail/ci-venv/bin" >> "$GITHUB_PATH"
 
-      - name: Run exact core release suite
-        run: python3 scripts/run-release-baseline.py
+      - name: Run exact extended release suite
+        run: python3 scripts/run-release-baseline.py --suite extended
