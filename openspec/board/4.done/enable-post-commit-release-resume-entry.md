@@ -1,10 +1,10 @@
 # Включить post-commit resume entry для публикации release
 
 ## Status
-3.inprogress
+4.done
 
 ## Owner
-ChangeRail maintainers
+unassigned
 
 ## OpenSpec Stage
 archived
@@ -199,8 +199,10 @@ Rescue implementation, spec sync и archive metadata завершены; exact-t
 qualification и cycle-2 handoff сохраняются только в ignored runtime после
 tracked freeze. Commit payload, push, review cycle 2 и publish не выполнялись.
 
+Reviewed payload finalized through ChangeRail scoped publish; exact payload and published commit ledger is retained in the ignored delivery manifest.
+
 ## Next
-- `$changerail-review openspec/board/3.inprogress/enable-post-commit-release-resume-entry.md`
+- done
 
 ## Change 1: `enable-post-commit-release-resume-entry`
 
@@ -263,3 +265,4 @@ handoff можно было безопасно и идемпотентно пр�
   помечен superseded; следующий шаг — один tracked freeze, runtime-only полный
   floor и отдельный `$changerail-review ... --cycle 2` без review/publication в
   этой implementation session.
+- 2026-09-01T19:35:13Z publish finalized card into `4.done`; exact ledger retained in ignored manifest.
