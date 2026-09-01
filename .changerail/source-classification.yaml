@@ -9,3 +9,5 @@ non_production_roots:
   - scripts/smoke-review-preflight.py
   - scripts/smoke-bootstrap-project.py
   - scripts/smoke-verify-project.py
+  - scripts/smoke-verify-project-sharding.py
+  - scripts/smoke-public-surface-history.py
