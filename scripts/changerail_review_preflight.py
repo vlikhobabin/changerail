@@ -74,14 +74,38 @@ def _boolean(value: str | None, name: str) -> bool:
     raise ValueError(f"{name} must be yes or no")
 
 
-def _raw_field(text: str, name: str) -> str | None:
-    match = re.search(rf"^-\s*{re.escape(name)}:\s*(.+?)\s*$", text, re.MULTILINE | re.IGNORECASE)
-    if not match:
-        return None
-    value = match.group(1).strip()
-    if value.startswith("`") and value.endswith("`"):
-        value = value[1:-1]
-    return value
+def _section_bodies(text: str, heading: str) -> list[str]:
+    pattern = re.compile(rf"^## {re.escape(heading)}\s*\n(.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL)
+    return [match.group(1) for match in pattern.finditer(text)]
+
+
+def _raw_fields(text: str, name: str) -> list[str]:
+    pattern = re.compile(rf"^-\s*{re.escape(name)}:\s*(.*?)\s*$", re.MULTILINE | re.IGNORECASE)
+    values = []
+    for match in pattern.finditer(text):
+        value = match.group(1).strip()
+        if value.startswith("`") and value.endswith("`"):
+            value = value[1:-1]
+        values.append(value)
+    return values
+
+
+class _DecodedObjectPairs(list[tuple[str, Any]]):
+    pass
+
+
+def _exact_json_object(raw: str, expected_fields: set[str], label: str) -> dict[str, Any]:
+    decoded = json.loads(raw, object_pairs_hook=_DecodedObjectPairs)
+    if not isinstance(decoded, _DecodedObjectPairs):
+        raise ValueError(f"{label} must be a JSON object")
+    seen: set[str] = set()
+    for key, _ in decoded:
+        if key in seen:
+            raise ValueError(f"{label} contains duplicate decoded key: {key}")
+        seen.add(key)
+    if seen != expected_fields:
+        raise ValueError(f"{label} must contain exactly the required fields")
+    return dict(decoded)
 
 
 def _risk(text: str, override: str | None) -> dict[str, Any]:
@@ -390,20 +414,37 @@ def _production_complexity(
     return {"added_production_loc": total, "source_breakdown": _finalize_breakdown(buckets)}
 
 
-def _reference_matches(text: str, heading: str, expected: str) -> bool:
-    references = re.findall(r"`([^`\n]+)`", dm.section_body(text, heading))
-    normalized: set[str] = set()
-    for reference in references:
-        if BARE_CARD_ID_RE.fullmatch(reference):
-            normalized.add(reference)
-            continue
-        filename = CARD_FILENAME_RE.fullmatch(reference)
-        board_path = BOARD_CARD_REFERENCE_RE.fullmatch(reference)
-        if filename:
-            normalized.add(filename.group(1))
-        elif board_path:
-            normalized.add(board_path.group(1))
-    return expected in normalized
+def _normalize_card_reference(reference: str) -> str | None:
+    if BARE_CARD_ID_RE.fullmatch(reference):
+        return reference
+    filename = CARD_FILENAME_RE.fullmatch(reference)
+    board_path = BOARD_CARD_REFERENCE_RE.fullmatch(reference)
+    if filename:
+        return filename.group(1)
+    if board_path:
+        return board_path.group(1)
+    return None
+
+
+def _relation_references(text: str, heading: str) -> list[str]:
+    sections = _section_bodies(text, heading)
+    if len(sections) != 1:
+        raise ValueError(f"{heading} must occur exactly once")
+    return [normalized for raw in re.findall(r"`([^`\n]+)`", sections[0]) if (normalized := _normalize_card_reference(raw))]
+
+
+def _require_expected_relation(text: str, heading: str, expected: str, label: str) -> None:
+    if _relation_references(text, heading).count(expected) != 1:
+        raise ValueError(f"{label} must reference the expected card exactly once")
+
+
+def _require_single_source_dependency(text: str, expected: str) -> None:
+    sections = _section_bodies(text, "Depends On")
+    if len(sections) != 1:
+        raise ValueError("authorization source Depends On must occur exactly once")
+    match = re.fullmatch(r"\s*-\s*`([^`\n]+)`\s*", sections[0])
+    if not match or _normalize_card_reference(match.group(1)) != expected:
+        raise ValueError("authorization source Depends On must contain exactly the investigation dependency")
 
 
 def _tracked_at_head(workspace: Path, path: str) -> bool:
@@ -415,14 +456,17 @@ def _tracked_at_head(workspace: Path, path: str) -> bool:
 
 
 def _published_investigation_authorization(review_text: str, card_text: str, card: dict[str, Any], workspace: Path) -> dict[str, Any]:
-    raw = _raw_field(review_text, AUTHORIZATION_FIELD)
     state: dict[str, Any] = {"status": "not-declared", "detail": "no published investigation authorization is declared"}
-    if raw is None or raw.lower() == "none":
+    review_sections = _section_bodies(card_text, "Review")
+    reference_fields = [value for section in review_sections for value in _raw_fields(section, AUTHORIZATION_FIELD)]
+    if not reference_fields or (len(reference_fields) == 1 and reference_fields[0].lower() == "none"):
         return state
     try:
-        reference = json.loads(raw)
-        if not isinstance(reference, dict) or set(reference) != {"authorization_card", "authorization_id"}:
-            raise ValueError("authorization reference must contain exactly authorization_card and authorization_id")
+        if len(review_sections) != 1 or len(reference_fields) != 1:
+            raise ValueError("Published investigation authorization must occur exactly once in one Review section")
+        reference = _exact_json_object(
+            reference_fields[0], {"authorization_card", "authorization_id"}, "authorization reference"
+        )
         if not all(isinstance(reference[field], str) and reference[field] for field in reference):
             raise ValueError("authorization reference values must be non-empty strings")
         source_path = (workspace / reference["authorization_card"]).resolve(strict=False)
@@ -435,11 +479,14 @@ def _published_investigation_authorization(review_text: str, card_text: str, car
             raise ValueError("authorization source path/id does not match the published card")
         if not _tracked_at_head(workspace, source["path"]):
             raise ValueError("authorization source card is not an unchanged tracked HEAD artifact")
-        authorization_raw = _raw_field(source_text, AUTHORIZATION_SOURCE_FIELD)
-        authorization = json.loads(authorization_raw or "")
+        authorization_sections = _section_bodies(source_text, "Authorization")
+        authorization_fields = [
+            value for section in authorization_sections for value in _raw_fields(section, AUTHORIZATION_SOURCE_FIELD)
+        ]
+        if len(authorization_sections) != 1 or len(authorization_fields) != 1:
+            raise ValueError("Investigation authorization must occur exactly once in one Authorization section")
         expected_fields = {"investigation_card", "investigation_id", "successor_card", "successor_id", "production_loc_ceiling", "allow_new_authority_or_wire_protocol"}
-        if not isinstance(authorization, dict) or set(authorization) != expected_fields:
-            raise ValueError("authorization source must contain exactly the required fields")
+        authorization = _exact_json_object(authorization_fields[0], expected_fields, "authorization source")
         string_fields = expected_fields - {"production_loc_ceiling", "allow_new_authority_or_wire_protocol"}
         if not all(isinstance(authorization[field], str) and authorization[field] for field in string_fields):
             raise ValueError("authorization source card paths and ids must be non-empty strings")
@@ -460,12 +507,9 @@ def _published_investigation_authorization(review_text: str, card_text: str, car
             raise ValueError("authorization source investigation path/id does not match the published card")
         if not _tracked_at_head(workspace, investigation["path"]):
             raise ValueError("authorization investigation card is not an unchanged tracked HEAD artifact")
-        if not _reference_matches(card_text, "Depends On", investigation["id"]):
-            raise ValueError("successor Depends On does not reference the investigation id")
-        if not _reference_matches(investigation_text, "Blocks", card["id"]):
-            raise ValueError("published investigation Blocks does not reference the target card id")
-        if not _reference_matches(source_text, "Depends On", investigation["id"]):
-            raise ValueError("authorization source Depends On does not reference the investigation id")
+        _require_expected_relation(card_text, "Depends On", investigation["id"], "successor Depends On")
+        _require_expected_relation(investigation_text, "Blocks", card["id"], "published investigation Blocks")
+        _require_single_source_dependency(source_text, investigation["id"])
         return {"status": "valid", "detail": "published authorization source binds the exact successor", "reference": reference, "authorization": authorization}
     except (json.JSONDecodeError, ValueError, dm.ManifestError) as exc:
         state.update({"status": "invalid", "detail": str(exc)})

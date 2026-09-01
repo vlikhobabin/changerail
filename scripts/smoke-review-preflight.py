@@ -446,6 +446,53 @@ def workspace(root: Path, risk: str, *, production_lines: int = 0, protocol: boo
     return repo, Path(json.loads(derived.stdout)["manifest"])
 
 
+def mutate_authorization_workspace(
+    root: Path,
+    label: str,
+    target: str,
+    old: str,
+    new: str,
+) -> tuple[Path, Path]:
+    repo, _ = workspace(root, "ordinary", production_lines=444, authorization=True)
+    paths = {
+        "successor": repo / "openspec/board/3.inprogress/example-card.md",
+        "source": repo / "openspec/board/4.done/published-investigation-authorization.md",
+        "investigation": repo / "openspec/board/4.done/published-investigation.md",
+    }
+    path = paths[target]
+    original = path.read_text(encoding="utf-8")
+    if original.count(old) != 1:
+        raise AssertionError(f"{label}: mutation anchor count is not one")
+    write(path, original.replace(old, new, 1))
+    if target != "successor":
+        git(repo, "add", str(path.relative_to(repo)))
+        git(repo, "commit", "-q", "-m", f"authorization fixture: {label}")
+    derived = run(
+        [
+            sys.executable,
+            str(MANIFEST_HELPER),
+            "derive",
+            "openspec/board/3.inprogress/example-card.md",
+            "--workspace",
+            str(repo),
+            "--write",
+            "--json",
+        ],
+        repo,
+    )
+    require_ok(derived, f"derive {label} manifest")
+    return repo, Path(json.loads(derived.stdout)["manifest"])
+
+
+def assert_invalid_authorization(repo: Path, manifest: Path, label: str) -> None:
+    result, data = preflight(repo, manifest, "--normalize")
+    assert result.returncode == 1, label
+    assert data["outcome"] == "investigation-required", label
+    authorization = data["complexity_guard"]["published_investigation_authorization"]
+    assert authorization["status"] == "invalid", label
+    assert data["llm_review"]["required"] is False, label
+
+
 def source_classification(*, bsl: bool = False, designer_xml: bool = False, root: str = "src") -> str:
     kinds: list[str] = []
     if bsl:
@@ -1231,6 +1278,173 @@ def main() -> int:
         result, data = preflight(repo, manifest, "--normalize")
         require_ok(result, "Go test LOC exclusion")
         assert data["complexity_guard"]["added_production_loc"] == 0
+
+        repo, _ = workspace(root, "ordinary", production_lines=444, authorization=True)
+        investigation = repo / "openspec/board/4.done/published-investigation.md"
+        write(
+            investigation,
+            investigation.read_text(encoding="utf-8").replace(
+                "- `example-card`\n",
+                "- `example-card`\n- `other-shared-successor`\n",
+            ),
+        )
+        git(repo, "add", str(investigation.relative_to(repo)))
+        git(repo, "commit", "-q", "-m", "shared investigation fixture")
+        successor = repo / "openspec/board/3.inprogress/example-card.md"
+        write(
+            successor,
+            successor.read_text(encoding="utf-8").replace(
+                "- `published-investigation`\n",
+                "- `published-investigation`\n- `unrelated-successor-dependency`\n",
+            ),
+        )
+        derived = run(
+            [
+                sys.executable,
+                str(MANIFEST_HELPER),
+                "derive",
+                str(successor.relative_to(repo)),
+                "--workspace",
+                str(repo),
+                "--write",
+                "--json",
+            ],
+            repo,
+        )
+        require_ok(derived, "derive exact positive authorization chain")
+        manifest = Path(json.loads(derived.stdout)["manifest"])
+        result, data = preflight(repo, manifest, "--normalize")
+        require_ok(result, "exact positive authorization chain with shared relations")
+        assert data["outcome"] == "ready-for-llm-review"
+        assert data["complexity_guard"]["published_investigation_authorization"]["status"] == "valid"
+
+        authorization_reference = json.dumps(
+            {
+                "authorization_card": "openspec/board/4.done/published-investigation-authorization.md",
+                "authorization_id": "published-investigation-authorization",
+            },
+            separators=(",", ":"),
+        )
+        authorization_payload = json.dumps(
+            {
+                "investigation_card": "openspec/board/4.done/published-investigation.md",
+                "investigation_id": "published-investigation",
+                "successor_card": "openspec/board/3.inprogress/example-card.md",
+                "successor_id": "example-card",
+                "production_loc_ceiling": 500,
+                "allow_new_authority_or_wire_protocol": False,
+            },
+            separators=(",", ":"),
+        )
+        successor_field = f"- Published investigation authorization: `{authorization_reference}`\n"
+        source_field = f"- Investigation authorization: `{authorization_payload}`\n"
+        authorization_cases = [
+            (
+                "duplicate successor reference",
+                "successor",
+                successor_field,
+                successor_field + successor_field,
+            ),
+            (
+                "duplicate successor Review section",
+                "successor",
+                "## Change Set\n",
+                f"## Review\n{successor_field}\n## Change Set\n",
+            ),
+            (
+                "extra successor JSON key",
+                "successor",
+                authorization_reference,
+                authorization_reference[:-1] + ',"extra":true}',
+            ),
+            (
+                "duplicate successor decoded key",
+                "successor",
+                authorization_reference,
+                authorization_reference[:-1] + ',"authorization_id":"published-investigation-authorization"}',
+            ),
+            (
+                "duplicate source field",
+                "source",
+                source_field,
+                source_field + source_field,
+            ),
+            (
+                "duplicate source Authorization section",
+                "source",
+                f"## Authorization\n{source_field}",
+                f"## Authorization\n{source_field}\n## Authorization\n{source_field}",
+            ),
+            (
+                "extra source JSON key",
+                "source",
+                authorization_payload,
+                authorization_payload[:-1] + ',"extra":true}',
+            ),
+            (
+                "duplicate source decoded key",
+                "source",
+                authorization_payload,
+                authorization_payload[:-1] + ',"successor_id":"example-card"}',
+            ),
+            (
+                "missing source dependency",
+                "source",
+                "## Depends On\n- `published-investigation`\n\n",
+                "",
+            ),
+            (
+                "duplicate source dependency",
+                "source",
+                "- `published-investigation`\n",
+                "- `published-investigation`\n- `published-investigation.md`\n",
+            ),
+            (
+                "mismatched source dependency",
+                "source",
+                "- `published-investigation`\n",
+                "- `other-investigation`\n",
+            ),
+            (
+                "extra source dependency",
+                "source",
+                "- `published-investigation`\n",
+                "- `published-investigation`\n- `unrelated-source-dependency`\n",
+            ),
+            (
+                "duplicate source Depends On section",
+                "source",
+                "## Authorization\n",
+                "## Depends On\n- `published-investigation`\n\n## Authorization\n",
+            ),
+            (
+                "duplicate expected successor dependency",
+                "successor",
+                "- `published-investigation`\n",
+                "- `published-investigation`\n- `published-investigation.md`\n",
+            ),
+            (
+                "duplicate successor Depends On section",
+                "successor",
+                "## Result\n",
+                "## Depends On\n- `published-investigation`\n\n## Result\n",
+            ),
+            (
+                "duplicate expected investigation target",
+                "investigation",
+                "- `example-card`\n",
+                "- `example-card`\n- `example-card.md`\n",
+            ),
+            (
+                "duplicate investigation Blocks section",
+                "investigation",
+                "## Blocks\n- `example-card`\n",
+                "## Blocks\n- `example-card`\n\n## Blocks\n- `example-card`\n",
+            ),
+        ]
+        for label, target, old, new in authorization_cases:
+            repo, manifest = mutate_authorization_workspace(root, label, target, old, new)
+            assert_invalid_authorization(repo, manifest, label)
 
         repo, manifest = workspace(root, "ordinary", production_lines=444, go_test_lines=120,
                                    protocol=True, authorization=True, authorization_protocol=True)

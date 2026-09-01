@@ -206,14 +206,23 @@ Default complexity guard останавливает payload больше 300 pro
 {"authorization_card":"openspec/board/4.done/example-authorization.md","authorization_id":"example-authorization"}
 ```
 
-Referenced `4.done` card должен быть unchanged tracked `HEAD` artifact и сам
-содержать `Investigation authorization` JSON с exact investigation/successor
-card/id, ceiling `301..500` и protocol allowance. Preflight также проверяет
-`investigation Blocks successor`, `successor Depends On investigation` и
-`authorization source Depends On investigation`; отсутствие или mismatch
-остаётся `investigation-required`.
-Relation принимает только exact bare id, `<id>.md` или canonical
-`openspec/board/<lane>/<id>.md`; foreign stem и non-board path не совпадают.
+Non-default reference принимается только как один exact field в единственном
+`## Review` и как JSON object с двумя unique decoded keys. Referenced `4.done`
+card должен быть unchanged tracked `HEAD` artifact и содержать один exact
+`Investigation authorization` field в единственном `## Authorization`: JSON
+object с шестью unique decoded keys для exact investigation/successor card/id,
+ceiling `301..500` и protocol allowance. Duplicate field/section/key и
+missing/extra key остаются `investigation-required`; JSON вне exact field не
+является authorization candidate. Этот exact-one source contract заменяет
+прежнюю tolerance к нескольким exact source fields.
+
+Каждый проверяемый relation section существует ровно один раз. Authorization
+source `Depends On` содержит только одну dependency — exact investigation;
+successor `Depends On` и investigation `Blocks` содержат required edge ровно
+один раз, но сохраняют unrelated successor dependencies и другие targets
+shared investigation. Relation принимает только exact bare id, `<id>.md` или
+canonical `openspec/board/<lane>/<id>.md`; duplicate equivalent edge, foreign
+stem и non-board path не совпадают.
 
 ## Verification Coverage
 
