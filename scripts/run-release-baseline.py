@@ -50,6 +50,7 @@ def steps(suite: str) -> list[Step]:
         Step("python syntax inventory", ["python3", "scripts/compile-python-inventory.py"]),
         Step("python runtime smoke", ["python3", "scripts/smoke-python-runtime.py"]),
         Step("python lint", ["ruff", "check", "bin", "scripts"]),
+        Step("source distribution smoke", ["python3", "scripts/smoke-source-distribution.py"]),
         Step("ci workflow contract", ["python3", "scripts/smoke-release-ci.py"]),
         Step("public surface scan self-test", ["python3", "scripts/public-surface-scan.py", "--self-test"]),
         Step("public surface history smoke", ["python3", "scripts/smoke-public-surface-history.py"]),

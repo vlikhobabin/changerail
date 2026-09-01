@@ -6,18 +6,108 @@ credentials, traces или machine-local inventory.
 
 ## Unreleased
 
-- `bootstrap-project --refresh-wiring` is lock-owned and remains fail-closed
-  when `openspec/changerail-consumer-lock.json` is missing. Legacy lockless
-  consumers use explicit `--configure-existing --adopt-lockless-wiring`
-  migration after reviewing the dry-run inventory.
-- `verify-project` now reports whether lockless wiring appears adoptable or
-  unsafe without recommending overwrite of project-owned surfaces.
-- `bootstrap-project --refresh-wiring` ремонтирует только wiring для lock,
-  который уже совпадает с текущим ChangeRail source revision. Если consumer
-  lock указывает на старую revision, текущий checkout намеренно останавливается
-  с source-drift диагностикой: сначала используйте checkout, совпадающий с
-  lock, или заведите отдельный explicit migration на принятие новой ChangeRail
-  revision в consumer lock.
+- none
+
+## 0.5.0 -> 1.0.0
+
+### What Changed
+
+- ChangeRail now publishes its first stable workflow/toolchain contract and a
+  reproducible language-neutral source distribution with version, license,
+  source-revision and SHA-256 metadata.
+- Delivery evidence can bind to tracked execution-target identity,
+  verification-coverage plans/ledgers, recovery-aware episodes and retained
+  external-blocker resume state.
+- Review preflight now routes deterministic, ordinary and critical payloads,
+  fails closed on scope/manifest/archive defects, and requires
+  investigation/simplification for unbounded production changes or new
+  authority/wire protocol without published authorization.
+- Delivery runner preflight, progress, discovery containment, manifest
+  reconciliation and remote-target proof are stricter and preserve structured
+  fail-closed handoffs.
+- Public source classification, bounded reachable-history scanning and split
+  core/extended release suites strengthen the public release boundary.
+- `bootstrap-project --refresh-wiring` remains lock-owned and fail-closed when
+  `openspec/changerail-consumer-lock.json` is missing or names another source
+  revision. Legacy lockless consumers use explicit
+  `--configure-existing --adopt-lockless-wiring` only after reviewing the
+  dry-run inventory; verification reports adoptable/unsafe state without
+  overwriting project-owned surfaces.
+- **BREAKING:** declared execution targets forbid provider/platform/service
+  substitution during delivery, verification, resume, review and publish.
+- **BREAKING:** risk-aware preflight and fresh independent review are required
+  publication gates; process defects no longer count as semantic review
+  cycles, and bounded rescue exhaustion escalates to linked rescue or
+  investigation instead of exceptional in-place continuation.
+- **BREAKING:** source-revision drift in a consumer lock is not repaired by a
+  blind wiring refresh; accepting a new ChangeRail revision is a reviewed
+  consumer migration.
+
+Codex CLI, Claude Code, OpenSpec CLI `1.3.1`, runtime dependency versions and
+the four tracked MCP npm pins are unchanged from `0.5.0`. Native Windows helper
+diagnostics remain available, but `1.0.0` is Linux-focused and does not claim
+native Windows release certification without fresh live evidence.
+
+### Required Actions
+
+Review the changelog, compatibility boundary and source asset checksum, then
+move the ChangeRail checkout to the immutable release tag:
+
+```bash
+git -C /opt/changerail fetch origin tag v1.0.0
+git -C /opt/changerail checkout v1.0.0
+python3 -m pip install --disable-pip-version-check \
+  -r /opt/changerail/requirements-runtime.txt
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+Restart active Codex and Claude sessions so they load the stable lifecycle,
+review and publish contracts. Symlink-backed consumers whose wiring already
+targets `/opt/changerail` normally need no tracked rewiring, but they still
+need project verification and a reviewed consumer-lock source-revision update
+when a lock is present.
+
+Do not run `--refresh-wiring` from `1.0.0` against a lock that still names the
+`0.5.0` source revision. First review and accept the new revision in a scoped
+consumer migration. For a legacy lockless consumer, inspect the dry run and
+use only the explicit adoption surface:
+
+```bash
+/opt/changerail/bin/bootstrap-project /opt/example-project \
+  --configure-existing --adopt-lockless-wiring --skip-verify
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+Operators with copied skills, command wrappers, runbooks or generated-owned
+wiring must refresh only those owned copies through the consumer's reviewed
+bootstrap/adoption procedure. Preserve project-owned `AGENTS.md` prefixes,
+local MCP configuration and runtime policy.
+
+The release verification floor for maintainers is:
+
+```bash
+python3 scripts/run-release-baseline.py
+python3 scripts/run-release-baseline.py --suite extended
+python3 scripts/public-surface-scan.py
+python3 scripts/public-surface-scan.py --history
+```
+
+### Rollback
+
+Before changing a consumer, retain its reviewed `0.5.0` lock/config state.
+Rollback moves the source checkout to immutable `v0.5.0`, restores any scoped
+consumer-lock revision update, reinstalls runtime requirements and reruns
+verification:
+
+```bash
+git -C /opt/changerail checkout v0.5.0
+python3 -m pip install --disable-pip-version-check \
+  -r /opt/changerail/requirements-runtime.txt
+/opt/changerail/bin/verify-project /opt/example-project
+```
+
+Restart active agent sessions after rollback. Do not move or overwrite
+`v1.0.0`; any stable-release correction uses a new semver tag.
 
 ## 0.4.0 -> 0.5.0
 

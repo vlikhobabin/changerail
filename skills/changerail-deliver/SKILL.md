@@ -14,6 +14,7 @@ $changerail-ff <card-path>      # plan/decompose and create apply-ready artifact
 $changerail-do <card-path>      # implement, verify, sync specs and archive
 $changerail-review <card-path>  # independent fresh-context verdict
 $changerail-pub <card-path>     # scoped commit and push
+$changerail-deliver <card-path> --resume-release  # direct release resume
 ```
 
 This skill is an orchestration layer. Before executing each phase, read and
@@ -44,6 +45,7 @@ Expected forms:
 $changerail-deliver <card-path>
 $changerail-deliver <board-column>
 $changerail-deliver <card-path> --no-push
+$changerail-deliver <card-path> --resume-release
 ```
 
 Useful flags:
@@ -63,6 +65,24 @@ Accept legacy prompt forms such as `/changerail:deliver`, `changerail:deliver`,
 Codex CLI instructions with `$changerail-deliver`.
 
 If no path is provided and it cannot be inferred, ask for it.
+
+## Release Resume Routing
+
+Resolve `--resume-release` before the normal Card Discovery and Per-Card
+Pipeline. It accepts exactly one card path and is incompatible with a board
+column/queue, `--from`, `--until`, `--max-cards`, `--no-push`,
+`--max-fix-cycles`, `--no-review`, `--max-review-cycles` or any option that
+would plan, implement, review, stage or commit a payload.
+
+Perform only bounded discovery: resolve exactly one live card by filename,
+require its current path/status to be `3.inprogress`, identify the current
+non-detached branch, and locate the existing successor manifest. Then invoke
+the effective `$changerail-pub <card-path> --resume-release` contract directly
+and propagate any hard stop. Do not run `ff`, `do`, an LLM review,
+deterministic current-payload preflight, `--check-fresh`, working-tree/staged
+scope gates or the normal publish entry. The pub resume admission remains the
+single source of truth for clean workspace/card, verdict schema/result,
+payload parent/tree, committed manifest and exact remote/release identity.
 
 ## Operating Mode
 
@@ -117,6 +137,8 @@ If no path is provided and it cannot be inferred, ask for it.
 - Stop on the first safety stop.
 
 ## Card Discovery
+
+This section and the Per-Card Pipeline apply only to normal entry.
 
 For a single file path, queue exactly that card. For a directory path, queue
 `*.md` files in lexical order and skip obvious non-card files such as
@@ -360,6 +382,21 @@ Run `changerail-pub` for the re-resolved card. Pass `--no-push` when supplied. D
 publish without a fresh risk-appropriate `machine-reviewed` receipt or valid
 `go` verdict unless the operator explicitly
 invoked standalone publish and the publish skill permits that exception.
+
+When reviewed card acceptance explicitly requires a release tag, hosted
+release or public assets, completion includes the `changerail-pub` reviewed
+release continuation. Keep the card in `3.inprogress` until its remote tag,
+hosted metadata and downloaded assets have passed the declared read-only
+proofs; only then may publish create and push deterministic card-only
+finalization. A pushed payload commit by itself is an exact resumable handoff,
+not a completed `changerail-deliver` pipeline for such a card.
+
+Canonical verdict freshness is validated on the reviewed working tree
+immediately before staging. The subsequent scoped payload commit is not a new
+review state: publish MUST prove that its parent equals the verdict's recorded
+`head_commit` and its tree equals `verdict.workspace.tree_sha`, without
+requesting or claiming a post-commit freshness validation or extra clean-HEAD
+LLM audit.
 
 ## Safety Stops
 

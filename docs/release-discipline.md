@@ -14,13 +14,13 @@ VERSION
 
 Формат строго `MAJOR.MINOR.PATCH`.
 
-Текущая подготовленная версия:
+Текущая версия:
 
 ```text
-0.5.0
+1.0.0
 ```
 
-До `1.0.0` ChangeRail остается pre-stable. Это значит:
+Релизы до `1.0.0` считались pre-stable:
 
 - patch release исправляет документацию, smoke checks или мелкие defects без
   изменения публичных contracts;
@@ -28,7 +28,7 @@ VERSION
   changes должны быть явно отмечены в changelog и migration guide;
 - major release до `1.0.0` не используется.
 
-После `1.0.0` правила становятся обычными:
+Начиная с `1.0.0` действуют обычные semver-правила:
 
 - `PATCH` - compatible fixes;
 - `MINOR` - compatible additions;
@@ -120,6 +120,85 @@ migration, tag и distribution metadata готовит отдельная critic
 final-certification карточка; scope-normalization change не публикует release
 самостоятельно.
 
+## Generic Source Distribution
+
+ChangeRail публикуется как language-neutral source bundle, а не как Python,
+npm или другой language-specific package. Для версии `<version>` public GitHub
+Release содержит три maintainer-owned assets:
+
+```text
+changerail-<version>.tar.gz
+changerail-<version>.tar.gz.sha256
+changerail-<version>.release-metadata.txt
+```
+
+Archive строится только из exact Git commit через tracked builder, имеет один
+root `changerail-<version>/`, сохраняет tracked file modes и не включает
+working-tree, ignored или machine-local state. `VERSION` и `LICENSE` находятся
+внутри archive. Metadata sidecar фиксирует version, `LICENSE`, dereferenced
+source commit, archive/checksum basenames и SHA-256 archive. Одинаковый commit
+и tracked builder MUST давать byte-identical assets.
+
+После создания annotated tag maintainer строит assets из его dereferenced
+commit в ignored output directory:
+
+```bash
+python3 scripts/build-source-distribution.py \
+  --repository . --source-ref v1.0.0 \
+  --output-dir .runtime/changerail/releases/v1.0.0 --json
+cd .runtime/changerail/releases/v1.0.0
+sha256sum --check changerail-1.0.0.tar.gz.sha256
+```
+
+Publication order fail-closed: exact frozen candidate verification → fresh
+risk-appropriate review → scoped commit/push → remote commit reachability →
+annotated tag → tag push/read-only target proof → assets from the tag commit →
+public GitHub Release → downloaded checksum proof → deterministic card-only
+finalization commit/push. До downloaded proof release card остается в
+`3.inprogress`; finalization не перемещает immutable release tag. Tag/Release
+не создаются до fresh `GO`. Existing object с unexpected target, annotation
+или asset metadata не переписывается; force update запрещен.
+
+Для `1.0.0` publication identity фиксирована reviewed payload:
+
+- tag: `v1.0.0`, exact annotated message `ChangeRail 1.0.0`;
+- GitHub Release title: `ChangeRail 1.0.0`;
+- GitHub Release notes: exact UTF-8 body tracked
+  `docs/releases/1.0.0.md`;
+- assets: ровно три basename из `Generic Source Distribution`, без duplicate
+  или unexpected uploaded assets.
+
+После final verification normal publish повторно выполняет deterministic
+preflight, canonical `--check-fresh` и working-tree scope непосредственно перед
+staging; staged scope выполняется после staging. Same-path byte change после
+раннего admission останавливает workflow до commit/push. После
+scoped commit clean state не называется fresh: parent commit должен совпасть с
+`verdict.workspace.head_commit`, а commit tree — с
+`verdict.workspace.tree_sha`.
+
+Первичный publish запускается обычной командой `$changerail-pub <card>` и
+сохраняет deterministic preflight, current-worktree `--check-fresh`, полный
+verification floor и manifest checks для working tree и staged index. После
+безопасного payload commit/push прерванная release transaction возобновляется
+явно через `$changerail-pub <card> --resume-release` либо
+`$changerail-deliver <card> --resume-release`; deliver передает управление
+напрямую в тот же publish route без повторного `ff`, `do` или review.
+
+Resume допускает только clean `3.inprogress` card на exact payload commit. До
+mutation он отвергает local replacement refs и graft state, валидирует
+существующий positive verdict без current-worktree freshness claim и с
+replacement processing disabled доказывает raw parent/tree lineage, exact
+committed-diff parity с единым manifest и равенство authorized remote feature
+branch payload commit. Source builder также использует raw-object semantics.
+Он не запускает working-tree/staged gates, staging, новый payload commit или
+дополнительный clean-HEAD LLM review. После admission существующие
+tag/title/notes/state должны совпадать exact; каждый присутствующий contracted
+asset сначала скачивается и byte-compare-ится с fresh build из tag, и только
+отсутствующий basename может быть загружен. Transaction продолжается с первого
+доказанно отсутствующего шага. Unexpected, duplicate или mismatched object
+останавливает publication без force, replacement или provider/credential/
+execution-target substitution.
+
 ## Release Checklist
 
 Перед публикацией release maintainer должен:
@@ -132,16 +211,19 @@ final-certification карточка; scope-normalization change не публи
 6. Запустить Linux-focused core release baseline.
 7. Отдельно запустить обязательную extended regression suite и проверить
    exact CI inventory contract.
-8. Запустить дополнительные trusted-network checks, если release меняет
-   executable dependency pins.
+8. Проверить current tracked executable dependency integrity через trusted
+   network; при изменении pins выполнить также полный supply-chain update
+   ritual.
 9. Проверить, что [security policy](../SECURITY.md) существует, связан из
    публичных docs и не содержит private contact details или local paths.
 10. Выполнить independent review gate перед publish.
+11. После fresh `GO` опубликовать scoped commit, annotated tag и три generic
+    source assets в порядке из `Generic Source Distribution`.
 
-Для pre-stable bootstrap releases факт выхода релиза публикуется reviewed
-payload-ом с обновленными `VERSION`, `CHANGELOG.md`, compatibility notes и
-migration guide. Git tag и packaged distribution metadata остаются отдельным
-release step, когда проект явно включает tag-based публикацию.
+Для stable releases reviewed payload с обновленными `VERSION`, `CHANGELOG.md`,
+compatibility notes и migration guide является источником release metadata,
+но публичная release identity завершается только annotated tag и GitHub
+Release с contracted source assets.
 
 Для executable supply-chain updates maintainer также обновляет tracked pins:
 
@@ -200,8 +282,9 @@ python3 scripts/run-release-baseline.py --suite extended
 ```
 
 Default command воспроизводит Linux-focused `core` admission: OpenSpec и config
-validation, syntax/lint, bounded public-history regression, public-surface,
-wiring/bootstrap/consumer-CI, generated drift и repository-integrity checks.
+validation, syntax/lint, generic source-distribution reproducibility, bounded
+public-history regression, public-surface, wiring/bootstrap/consumer-CI,
+generated drift и repository-integrity checks.
 Exact отдельная команда `python3 scripts/run-release-baseline.py --suite
 extended` выполняет heavy review/delivery/maintenance regressions. One-command
 delivery regression `python3 scripts/smoke-delivery-runner.py` принадлежит
@@ -244,7 +327,7 @@ Local CI contract smoke:
 python3 scripts/smoke-release-ci.py
 ```
 
-`scripts/smoke-release-ci.py` сравнивает оба `--list` с exact ordered 22-item
+`scripts/smoke-release-ci.py` сравнивает оба `--list` с exact ordered 23-item
 core и 12-item extended inventories, требует uniqueness/disjointness, проверяет
 negative missing/extra/duplicate/overlap cases и fail closed при drift любого
 workflow route. Windows diagnostics не входят ни в один inventory.

@@ -22,4 +22,5 @@ Generated from the tracked ChangeRail repository knowledge catalog.
 | `docs/migration-guide.md` | active | how-to | ChangeRail core | none | python3 scripts/public-surface-scan.py |
 | `docs/openspec-lifecycle.md` | active | reference | ChangeRail core | none | ./bin/openspec validate --all --strict |
 | `docs/release-discipline.md` | active | runbook | ChangeRail core | none | python3 scripts/run-release-baseline.py, python3 scripts/public-surface-scan.py |
+| `docs/releases/1.0.0.md` | active | reference | ChangeRail core | none | python3 scripts/smoke-source-distribution.py, python3 scripts/public-surface-scan.py |
 | `docs/wiring-discovery.md` | active | reference | ChangeRail core | none | python3 -m json.tool .mcp.json, python3 scripts/public-surface-scan.py |

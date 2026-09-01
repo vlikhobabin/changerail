@@ -133,7 +133,7 @@ def staging_paths(data: dict[str, Any]) -> list[str]:
 
 def git_output(workspace: Path, args: list[str]) -> str:
     result = subprocess.run(
-        ["git", "-C", str(workspace), *args],
+        ["git", "--no-replace-objects", "-C", str(workspace), *args],
         capture_output=True,
         text=True,
         check=False,
@@ -146,7 +146,7 @@ def git_output(workspace: Path, args: list[str]) -> str:
 
 def git_output_bytes(workspace: Path, args: list[str]) -> bytes:
     result = subprocess.run(
-        ["git", "-C", str(workspace), *args],
+        ["git", "--no-replace-objects", "-C", str(workspace), *args],
         capture_output=True,
         check=False,
     )
@@ -356,6 +356,10 @@ def git_status_entries(workspace: Path) -> list[dict[str, Any]]:
 
 def git_staged_entries(workspace: Path) -> list[dict[str, Any]]:
     output = git_output_bytes(workspace, ["diff", "--cached", "--name-status", "-z", "--find-renames", "--"])
+    return git_name_status_entries(output, "staged")
+
+
+def git_name_status_entries(output: bytes, label: str) -> list[dict[str, Any]]:
     records = [record for record in output.split(b"\x00") if record]
     entries: list[dict[str, Any]] = []
     index = 0
@@ -367,18 +371,38 @@ def git_staged_entries(workspace: Path) -> list[dict[str, Any]]:
         operation = status[0]
         if operation in {"R", "C"}:
             if index + 1 >= len(records):
-                raise ManifestError(f"git staged diff missing paths for {status}", 2)
+                raise ManifestError(f"git {label} diff missing paths for {status}", 2)
             source_path = decode_git_path(records[index])
             target_path = decode_git_path(records[index + 1])
             entries.append(operation_entry(target_path, "R", source_path))
             index += 2
             continue
         if index >= len(records):
-            raise ManifestError(f"git staged diff missing path for {status}", 2)
+            raise ManifestError(f"git {label} diff missing path for {status}", 2)
         path = decode_git_path(records[index])
         entries.append(operation_entry(path, operation))
         index += 1
     return entries
+
+
+def git_committed_entries(workspace: Path, commit: str) -> list[dict[str, Any]]:
+    common_dir = Path(git_output(workspace, ["rev-parse", "--git-common-dir"]).strip())
+    common_dir = common_dir if common_dir.is_absolute() else workspace / common_dir
+    grafts = common_dir / "info" / "grafts"
+    replacements = git_output(workspace, ["for-each-ref", "--format=%(refname)", "refs/replace/"]).strip()
+    if replacements or (grafts.is_file() and grafts.read_bytes().strip()):
+        raise ManifestError("committed target rejects Git replacement or graft state", 2)
+    resolved = git_output(workspace, ["rev-parse", "--verify", f"{commit}^{{commit}}"]).strip()
+    if resolved != commit:
+        raise ManifestError("--commit must be an exact commit object id", 2)
+    lineage = git_output(workspace, ["rev-list", "--parents", "-n", "1", resolved]).split()
+    if len(lineage) != 2:
+        raise ManifestError("committed target must have exactly one parent", 2)
+    output = git_output_bytes(
+        workspace,
+        ["diff", "--name-status", "-z", "--find-renames", lineage[1], resolved, "--"],
+    )
+    return git_name_status_entries(output, "committed")
 
 
 def scope_excluded_paths(data: dict[str, Any]) -> set[str]:
@@ -451,11 +475,18 @@ def scope_expected_entries(data: dict[str, Any], excluded: set[str]) -> dict[str
     return scope_entry_map(entries, excluded, "manifest committable_paths")
 
 
-def scope_actual_entries(workspace: Path, target: str, excluded: set[str]) -> dict[str, dict[str, Any]]:
+def scope_actual_entries(
+    workspace: Path,
+    target: str,
+    excluded: set[str],
+    commit: str | None = None,
+) -> dict[str, dict[str, Any]]:
     if target == "working-tree":
         return scope_entry_map(git_status_entries(workspace), excluded, "working-tree scope")
     if target == "staged":
         return scope_entry_map(git_staged_entries(workspace), excluded, "staged scope")
+    if target == "committed" and commit is not None:
+        return scope_entry_map(git_committed_entries(workspace, commit), excluded, "committed scope")
     raise ManifestError(f"unknown scope target: {target}", 2)
 
 
@@ -501,10 +532,15 @@ def coalesce_equivalent_renames(
         entries[target_path] = dict(rename_entry)
 
 
-def compare_scope(data: dict[str, Any], workspace: Path, target: str) -> dict[str, Any]:
+def compare_scope(
+    data: dict[str, Any],
+    workspace: Path,
+    target: str,
+    commit: str | None = None,
+) -> dict[str, Any]:
     excluded = scope_excluded_paths(data)
     expected = scope_expected_entries(data, excluded)
-    actual = scope_actual_entries(workspace, target, excluded)
+    actual = scope_actual_entries(workspace, target, excluded, commit)
     # Git can classify an unstaged filesystem move as delete+add and the staged
     # form as a rename. Exact source/target pairs describe the same scope.
     coalesce_equivalent_renames(expected, actual)
@@ -943,8 +979,12 @@ def cmd_scope_check(args: argparse.Namespace) -> int:
     if not isinstance(data, dict):
         raise ManifestError("manifest must be an object", 1)
     workspace = args.workspace.resolve(strict=False)
+    if args.target == "committed" and not args.commit:
+        raise ManifestError("--commit is required for committed target", 2)
+    if args.target != "committed" and args.commit:
+        raise ManifestError("--commit is only valid for committed target", 2)
     targets = list(SCOPE_TARGETS) if args.target == "both" else [args.target]
-    results = {target: compare_scope(data, workspace, target) for target in targets}
+    results = {target: compare_scope(data, workspace, target, args.commit) for target in targets}
     ok = all(result["ok"] for result in results.values())
     payload = {
         "ok": ok,
@@ -1044,10 +1084,11 @@ def build_parser() -> argparse.ArgumentParser:
     staging.add_argument("--json", action="store_true")
     staging.set_defaults(func=cmd_staging_plan)
 
-    scope = subparsers.add_parser("scope-check", help="compare manifest scope with Git working tree or staged index")
+    scope = subparsers.add_parser("scope-check", help="compare manifest scope with working tree, staged index or one commit")
     scope.add_argument("manifest", type=Path)
     scope.add_argument("--workspace", type=Path, default=Path("."))
-    scope.add_argument("--target", choices=["working-tree", "staged", "both"], default="both")
+    scope.add_argument("--target", choices=["working-tree", "staged", "committed", "both"], default="both")
+    scope.add_argument("--commit")
     scope.add_argument("--json", action="store_true")
     scope.set_defaults(func=cmd_scope_check)
 

@@ -18,6 +18,7 @@ CORE = (
     '["python3", "scripts/compile-python-inventory.py"]',
     '["python3", "scripts/smoke-python-runtime.py"]',
     '["ruff", "check", "bin", "scripts"]',
+    '["python3", "scripts/smoke-source-distribution.py"]',
     '["python3", "scripts/smoke-release-ci.py"]',
     '["python3", "scripts/public-surface-scan.py", "--self-test"]',
     '["python3", "scripts/smoke-public-surface-history.py"]',
@@ -95,7 +96,7 @@ def workflow_checks(checks: list[dict[str, str]], path: Path, *, extended: bool)
 def run_smoke(workflow: Path) -> dict[str, object]:
     checks: list[dict[str, str]] = []
     core, explicit_core, extended = inventory(), inventory("--suite", "core"), inventory("--suite", "extended")
-    add(checks, "default core inventory", core == CORE, "exact ordered 22-item inventory")
+    add(checks, "default core inventory", core == CORE, "exact ordered 23-item inventory")
     add(checks, "explicit core inventory", explicit_core == CORE, "default and explicit core match")
     add(checks, "extended inventory", extended == EXTENDED, "exact ordered 12-item inventory")
     add(checks, "inventory uniqueness", len(set(core)) == len(core) and len(set(extended)) == len(extended), "no duplicates")

@@ -75,10 +75,24 @@ bin/changerail-delivery-manifest scope-check \
 bin/changerail-delivery-manifest scope-check \
   .runtime/changerail/delivery-manifests/<card-id>.json \
   --target staged --json
+bin/changerail-delivery-manifest scope-check \
+  .runtime/changerail/delivery-manifests/<card-id>.json \
+  --target committed --commit <payload-commit> --json
 ```
 
 The JSON result reports `missing`, `extra` and `mismatched` path operations for
 each target and must be treated as fail-closed before publish.
+
+The read-only `committed` target requires `--commit` to be the exact full object
+id of a commit with exactly one parent. It rejects any local `refs/replace/` or
+non-empty common-git-dir `info/grafts` state before reading lineage, uses Git
+raw-object semantics with replacement processing disabled, and compares the normalized
+`parent..commit` name-status diff with `committable_paths`, including exact
+add, modify, delete and rename operations. `--commit` is forbidden for
+`working-tree`, `staged` and `both`; root commits, merge commits, wrong commits
+and any missing, extra or operation-mismatched path fail closed. This target
+does not change the manifest schema or the existing working-tree/staged
+semantics.
 
 Review uses manifest evidence as audit input. It is acceptable to reference
 ignored runtime evidence paths, including `bin/changerail-evidence` ids and

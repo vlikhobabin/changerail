@@ -9,24 +9,52 @@ notes, migration guide и проверки.
 Current ChangeRail version:
 
 ```text
-0.5.0
+1.0.0
 ```
 
 Source: root `VERSION`.
 
-`0.5.0` adds the repository knowledge and maintenance surface, hardens
-consumer bootstrap/verification through explicit profiles, consumer locks,
-generated-owned refresh and runtime diagnostics, and expands release CI with
-maintenance, repository-knowledge and generated consumer-CI smokes. It does not
-change Codex CLI, Claude Code, OpenSpec CLI or MCP npm package pins. Existing
-consumers should install refreshed runtime dependencies, run project-local
-verification and restart active agent sessions after updating.
+`1.0.0` is the first stable ChangeRail workflow/toolchain release. Since
+`0.5.0` it adds deterministic execution-target, verification-coverage,
+recovery/evidence and source-classification contracts; hardens delivery,
+manifest, review-preflight and bounded public-history gates; and publishes a
+reproducible generic source distribution. It does not change the Codex CLI,
+Claude Code, OpenSpec CLI or MCP npm package pins recorded for `0.5.0`.
+Existing consumers must review the stable workflow-policy changes, install the
+same pinned runtime dependencies, refresh owned copies where applicable, run
+project-local verification and restart active agent sessions.
 
 Текущий stable admission claim является Linux-focused. Retained native Windows
 wrappers и исторические two-host results остаются полезными diagnostics, но
 native Windows сейчас не release-certified: Windows entrypoint, wiring
 Git-safety и aggregate matrix запускаются только явно и не входят в `core` или
 `extended` release suites.
+
+## Source Distribution
+
+Status: supported as a language-neutral release archive.
+
+The canonical `1.0.0` public assets are:
+
+```text
+changerail-1.0.0.tar.gz
+changerail-1.0.0.tar.gz.sha256
+changerail-1.0.0.release-metadata.txt
+```
+
+The archive is built from the dereferenced annotated tag commit with
+`scripts/build-source-distribution.py`. It contains the tracked Git tree under
+`changerail-1.0.0/`, including matching `VERSION` and `LICENSE`; the metadata
+sidecar identifies the exact source revision and SHA-256. This distribution
+does not declare a Python, npm, OCI or installer compatibility surface.
+
+Verification:
+
+```bash
+sha256sum --check changerail-1.0.0.tar.gz.sha256
+tar -xzf changerail-1.0.0.tar.gz
+test "$(cat changerail-1.0.0/VERSION)" = "1.0.0"
+```
 
 ## Codex CLI
 

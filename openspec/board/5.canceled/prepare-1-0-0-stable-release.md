@@ -1,13 +1,13 @@
 # Подготовить и опубликовать ChangeRail 1.0.0
 
 ## Status
-2.todo
+5.canceled
 
 ## Owner
 ChangeRail maintainers
 
 ## OpenSpec Stage
-not-started
+superseded
 
 ## Series
 - none
@@ -70,8 +70,21 @@ release commit/tag и public distribution metadata.
 - trusted `npm view` integrity checks from `docs/release-discipline.md`
 - `git diff --check`
 
+Ранние qualification fingerprints до independent review superseded и не
+являются final-certification evidence. Authoritative exact tree, source-archive
+SHA-256, retained evidence path и outcomes для следующего frozen candidate
+записываются после rescue в ignored delivery manifest/preflight, чтобы tracked
+card не содержала self-referential tree fingerprint. Требуемый floor остается:
+CPU affinity `0,1`, строго последовательные core `23/23` и extended `12/12`,
+release-CI `27/27`, current/history public scans, strict OpenSpec/config/
+whitespace, live trusted npm SRI `4/4`, action tags и byte-identical source
+assets. Pinned dev requirements не менялись. Native Windows live evidence для
+exact candidate не заявляется; Linux-focused caveat находится в public release
+docs.
+
 ## Archive
-- pending
+- `openspec/changes/archive/2026-09-01-define-first-stable-distribution-contract/`
+- `openspec/changes/archive/2026-09-01-prepare-changerail-1-0-0-release/`
 
 ## Related
 - `docs/release-discipline.md`
@@ -81,11 +94,13 @@ release commit/tag и public distribution metadata.
 - `VERSION`
 
 ## Result
-pending
+Исходный release rescue route superseded опубликованной linked replacement
+`openspec/board/4.done/enable-post-commit-release-resume-entry.md`. Replacement
+сохранила подготовленный payload и завершила публикацию ChangeRail `v1.0.0`;
+predecessor больше не является live delivery handoff.
 
 ## Next
-- wait until `stabilize-first-stable-release-scope` is published, then run
-  `$changerail-deliver openspec/board/2.todo/prepare-1-0-0-stable-release.md`
+- done
 
 ## Change 1: `define-first-stable-distribution-contract`
 
@@ -139,3 +154,24 @@ payload, который связывает release metadata, verification и pub
 ## Log
 - 2026-08-31T00:00:00Z создано как отдельный final-certification handoff;
   publication начинается только после завершения scope-normalization card.
+- 2026-09-01T00:00:00Z dependency подтверждена на exact published merge PR #6
+  `aabfb2d8d7ba98e727766f2cb0299a607389b6d9`; два ordered change получили
+  apply-ready proposal/spec/design/tasks и прошли strict OpenSpec validation.
+- 2026-09-01T07:05:00Z distribution change synced/archived; release
+  qualification after one bounded lint fix passed sequential core/extended,
+  public/trusted and reproducible-asset gates on a two-CPU isolated candidate.
+  Tag/GitHub Release не создавались; handoff остается critical xhigh review.
+- 2026-09-01T07:10:00Z release-discipline delta synced, второй change archived
+  at `openspec/changes/archive/2026-09-01-prepare-changerail-1-0-0-release/`;
+  card остается `3.inprogress` до fresh review и scoped publish.
+- 2026-09-01T08:00:00Z independent review cycle 1 вернул `NO-GO`: bounded
+  rescue 1 добавляет dirty-tracked distribution oracle, согласует metadata
+  sidecar wording и authoritative fail-closed release continuation; прежние
+  candidate fingerprints superseded, tag/Release по-прежнему отсутствуют.
+- 2026-09-01T08:20:00Z independent review cycle 2 подтвердил устранение ранних
+  findings и вернул `NO-GO` по post-commit freshness и partial-resume identity;
+  bounded rescue 2 фиксирует tree-equality handoff и exact annotation/title/
+  notes/assets rules. Tag/GitHub Release не создавались.
+- 2026-09-01T19:42:39Z закрыто как superseded опубликованной linked replacement
+  `enable-post-commit-release-resume-entry`; replacement сохранила payload и
+  завершила `v1.0.0`, новый release handoff не создается.

@@ -406,3 +406,218 @@ ChangeRail MUST опубликовать отдельную clean tracked author
   неизменными до публикации authorization-card
 - **AND** production/runtime/test implementation, release-card, tag, GitHub
   Release, assets и release mutation MUST отсутствовать
+
+### Requirement: Reproducible generic source distribution
+ChangeRail MUST publish a language-neutral source archive built from one exact
+Git commit, and repeated builds from that commit with the same tracked builder
+MUST produce byte-identical archive and metadata assets.
+
+#### Scenario: Maintainer builds a release bundle
+- **WHEN** a maintainer invokes the tracked source-distribution builder for an
+  exact commit whose tree contains a valid `VERSION` and `LICENSE`
+- **THEN** it produces a gzip-compressed tar archive under one
+  `changerail-<version>/` root
+- **AND** the archive contains only files tracked by that commit
+- **AND** a repeated build from the same commit produces identical bytes
+
+#### Scenario: Source ref or required metadata is invalid
+- **WHEN** the source ref does not resolve to a commit or its tree lacks a
+  valid semantic version or license file
+- **THEN** the builder fails before claiming a release bundle
+- **AND** it does not substitute working-tree or machine-local content
+
+### Requirement: Source distribution identity and integrity metadata
+Every ChangeRail source distribution MUST expose unambiguous version, license,
+source-revision and SHA-256 metadata that can be verified without private or
+machine-local state.
+
+#### Scenario: Consumer verifies downloaded assets
+- **WHEN** a consumer receives the archive, checksum sidecar and release
+  metadata sidecar
+- **THEN** the archive basename identifies the exact semantic version
+- **AND** the checksum sidecar verifies the archive bytes
+- **AND** release metadata names the dereferenced Git commit, `LICENSE`, archive
+  basename and checksum basename
+- **AND** the archive contains matching `VERSION` and `LICENSE` files
+
+#### Scenario: Metadata does not match the candidate
+- **WHEN** version, source revision, filename or checksum disagree with the
+  exact release candidate
+- **THEN** release publication fails closed
+- **AND** no mismatched asset is described as the ChangeRail release
+
+### Requirement: Reviewed release publication order
+ChangeRail MUST create a release tag and public distribution only after a
+fresh risk-appropriate review has approved the exact payload and the scoped
+release commit is remotely reachable.
+
+#### Scenario: Final review has not returned GO
+- **WHEN** the semantic verdict is absent, stale, invalid or negative
+- **THEN** the release commit is not published as a stable release
+- **AND** no release tag or public distribution is created
+
+#### Scenario: Existing publication identity is unexpected
+- **WHEN** the intended tag or public release already exists with an
+  unexpected target, annotation or asset metadata
+- **THEN** publication stops without rewriting the existing identity
+- **AND** force-push, tag replacement and destructive recovery are forbidden
+
+### Requirement: First stable release metadata is coherent
+ChangeRail `1.0.0` MUST publish one coherent metadata set whose version,
+changelog, compatibility, migration and release notes agree on the stable
+support boundary and transition from `0.5.0`.
+
+#### Scenario: Consumer evaluates the stable upgrade
+- **WHEN** a consumer reads the `1.0.0` release payload
+- **THEN** root `VERSION` contains exactly `1.0.0`
+- **AND** `CHANGELOG.md` contains dated `1.0.0` entries and a new empty
+  `Unreleased` section
+- **AND** compatibility and migration docs describe required actions,
+  verification and rollback for `0.5.0 -> 1.0.0`
+- **AND** metadata does not claim dependency-pin changes that did not occur
+
+#### Scenario: Native Windows final proof is unavailable
+- **WHEN** no current public-safe live native Windows evidence exists for the
+  exact release candidate
+- **THEN** release-facing docs state a reviewed Linux-focused stable support
+  boundary
+- **AND** they present native Windows as not release-certified rather than
+  inventing or extrapolating host evidence
+
+### Requirement: First stable candidate receives sequential isolated certification
+The first stable ChangeRail candidate MUST complete its release verification
+floor in an isolated clone of the exact frozen payload with pinned development
+dependencies and no more than two CPUs available to heavy suites.
+
+#### Scenario: Maintainer certifies the frozen candidate
+- **WHEN** tracked release preparation is complete
+- **THEN** the core and extended release suites run strictly sequentially in
+  the same isolated candidate clone
+- **AND** release CI smoke, current/history public scans and applicable trusted
+  dependency integrity checks pass for that candidate
+- **AND** evidence binds the outcomes to one exact commit/tree fingerprint
+
+#### Scenario: Candidate check fails or changes
+- **WHEN** a required check fails or tracked candidate bytes change after the
+  recorded evidence
+- **THEN** final certification fails closed
+- **AND** the affected verification and fresh independent review are repeated
+  before publication
+
+### Requirement: First stable tag and public release are remotely verifiable
+ChangeRail MUST publish `v1.0.0` as an annotated tag on the exact reviewed and
+published release commit and MUST expose the contracted source assets through
+a public GitHub Release.
+
+#### Scenario: Release publication succeeds
+- **WHEN** all final gates are green and the reviewed commit is reachable from
+  the authorized remote branch
+- **THEN** annotated tag `v1.0.0` dereferences to that exact commit
+- **AND** the public GitHub Release targets the same tag
+- **AND** its archive, checksum and release metadata assets match the tracked
+  distribution contract
+- **AND** remote refs and downloaded asset checksums are confirmed read-only
+- **AND** the release card moves from `3.inprogress` to `4.done` only after
+  those publication proofs succeed
+
+#### Scenario: Reviewed working tree becomes the release commit
+- **WHEN** canonical verdict freshness passed immediately before scoped staging
+- **THEN** the payload commit parent equals the verdict's recorded HEAD
+- **AND** the payload commit tree equals the verdict's recorded tree
+- **AND** the clean committed state is not presented as another fresh verdict
+  or used to require an undeclared clean-HEAD LLM audit
+
+#### Scenario: First stable publication resumes after a partial upload
+- **WHEN** `v1.0.0` uses exact annotation `ChangeRail 1.0.0` and the public
+  release uses exact title `ChangeRail 1.0.0` and notes body from tracked
+  `docs/releases/1.0.0.md`
+- **THEN** every present uploaded asset has a unique contracted basename and
+  byte-matches the fresh build from the tag
+- **AND** only an absent contracted basename may be uploaded on resume
+- **AND** a duplicate, unexpected or mismatched asset fails closed without
+  replacement
+
+#### Scenario: Publication authority or identity is unavailable
+- **WHEN** tag/release credentials are unavailable or an existing object has
+  unexpected target or metadata
+- **THEN** publication stops at the exact safe handoff
+- **AND** no force update, replacement tag or fabricated release evidence is
+  used
+- **AND** the release card remains `3.inprogress` until the transaction can be
+  resumed and proved complete
+
+### Requirement: First stable publication resume is bound to committed lineage
+Post-commit возобновление публикации ChangeRail `1.0.0` MUST принимать только
+существующий clean payload commit, однозначно связанный с positive successor
+verdict, единым delivery manifest и authorized remote feature branch.
+
+#### Scenario: Pushed reviewed payload enters resume
+- **WHEN** resume mode получает существующие verdict и manifest для successor
+  release card
+- **THEN** verdict MUST пройти validation существующей schema и иметь
+  `result: go` без current-worktree freshness claim
+- **AND** parent payload commit MUST равняться
+  `verdict.workspace.head_commit`
+- **AND** payload commit tree MUST равняться `verdict.workspace.tree_sha`
+- **AND** workspace MUST быть чистым, а exact card MUST оставаться в
+  post-commit `3.inprogress`
+- **AND** committed `parent..payload` diff MUST в точности совпадать с
+  manifest committable scope
+- **AND** local replacement refs и graft state MUST отсутствовать, а commit
+  identity/parent/tree/diff/archive reads MUST использовать raw-object
+  semantics с replacement processing disabled
+- **AND** authorized remote feature branch MUST указывать ровно на payload
+  commit до tag/release/assets mutation
+
+#### Scenario: Resume lineage or scope cannot be proved
+- **WHEN** verdict отсутствует, invalid или negative, lineage неполна, commit
+  имеет unexpected parent/tree, workspace/card dirty или wrong-state,
+  replacement/graft state присутствует, manifest scope отличается либо remote
+  branch указывает на другой commit
+- **THEN** publication MUST fail closed до mutation
+- **AND** workflow MUST NOT исправлять состояние через новый review/commit,
+  force, rebase, reset, stash или расширение authority
+
+### Requirement: First stable publication resumes from the first absent exact step
+После успешного committed-lineage admission release continuation MUST заново
+доказать полную external identity и продолжить только с первого отсутствующего
+шага существующей `v1.0.0` transaction.
+
+#### Scenario: Transaction was interrupted after a safe handoff
+- **WHEN** prior invocation остановилась после payload push, tag creation,
+  hosted release creation или partial contracted asset upload
+- **THEN** resume MUST read-only проверить все уже присутствующие объекты
+- **AND** exact matching steps MUST быть приняты idempotently
+- **AND** workflow MUST продолжить с первого доказанно отсутствующего шага
+  без повторного payload commit или clean-HEAD LLM review
+
+#### Scenario: Existing release identity is exact
+- **WHEN** existing tag/release/assets проверяются для resume
+- **THEN** annotated `v1.0.0` MUST указывать на payload commit и иметь exact
+  annotation `ChangeRail 1.0.0`
+- **AND** public non-draft non-prerelease release MUST иметь exact title
+  `ChangeRail 1.0.0` и полный notes body из tracked
+  `docs/releases/1.0.0.md`
+- **AND** каждый present asset MUST иметь уникальный contracted basename и
+  byte-match с fresh build из dereferenced tag
+- **AND** загружаться MUST только доказанно отсутствующие contracted basenames
+
+#### Scenario: Existing release identity is wrong or unprovable
+- **WHEN** tag target/type/annotation, release tag/title/notes/state или asset
+  basename/uniqueness/bytes отличаются либо требуемое evidence отсутствует
+- **THEN** resume MUST остановиться без mutation
+- **AND** tag, release или asset MUST NOT быть force-updated, replaced или
+  принят по неполному identity proof
+
+#### Scenario: Initial publication remains a pre-staging certification gate
+- **WHEN** successor release впервые переходит от reviewed working tree к
+  payload commit
+- **THEN** весь original release qualification floor MUST пройти на одном
+  exact successor tree, сначала core и затем extended
+- **AND** fresh independent xhigh final review MUST вернуть `GO` для того же
+  tree до любой publication mutation
+- **AND** initial publish MUST сохранить deterministic preflight,
+  current-worktree freshness и working-tree/staged scope checks
+- **AND** после final verification initial publish MUST повторить preflight,
+  `--check-fresh` и working-tree scope непосредственно перед staging и
+  остановиться до commit/push при intervening same-path byte mutation
