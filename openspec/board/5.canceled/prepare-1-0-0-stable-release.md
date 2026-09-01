@@ -1,13 +1,13 @@
 # Подготовить и опубликовать ChangeRail 1.0.0
 
 ## Status
-3.inprogress
+5.canceled
 
 ## Owner
 ChangeRail maintainers
 
 ## OpenSpec Stage
-archived
+superseded
 
 ## Series
 - none
@@ -94,13 +94,13 @@ docs.
 - `VERSION`
 
 ## Result
-Stable metadata, generic source distribution contract и frozen-candidate
-qualification подготовлены без deferred payloads, runtime/dependency pin
-changes, tag или GitHub Release. Final exact-payload certification и mutation
-остаются за fresh xhigh review и последующей publish phase.
+Исходный release rescue route superseded опубликованной linked replacement
+`openspec/board/4.done/enable-post-commit-release-resume-entry.md`. Replacement
+сохранила подготовленный payload и завершила публикацию ChangeRail `v1.0.0`;
+predecessor больше не является live delivery handoff.
 
 ## Next
-- `$changerail-review openspec/board/3.inprogress/prepare-1-0-0-stable-release.md`
+- done
 
 ## Change 1: `define-first-stable-distribution-contract`
 
@@ -172,3 +172,6 @@ payload, который связывает release metadata, verification и pub
   findings и вернул `NO-GO` по post-commit freshness и partial-resume identity;
   bounded rescue 2 фиксирует tree-equality handoff и exact annotation/title/
   notes/assets rules. Tag/GitHub Release не создавались.
+- 2026-09-01T19:42:39Z закрыто как superseded опубликованной linked replacement
+  `enable-post-commit-release-resume-entry`; replacement сохранила payload и
+  завершила `v1.0.0`, новый release handoff не создается.
