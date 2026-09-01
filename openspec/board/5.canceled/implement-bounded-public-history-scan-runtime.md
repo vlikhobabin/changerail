@@ -1,13 +1,13 @@
 # Реализовать bounded public history scan runtime
 
 ## Status
-2.todo
+5.canceled
 
 ## Owner
 ChangeRail maintainers
 
 ## OpenSpec Stage
-not-started
+superseded
 
 ## Series
 - none
@@ -43,8 +43,7 @@ card не нужна; превышение границы требует split �
 - `investigate-bounded-public-history-scan-runtime`
 
 ## Blocks
-- `stabilize-first-stable-release-scope`
-- `prepare-1-0-0-stable-release`
+- none; replacement опубликован и blocker снят.
 
 ## Acceptance
 - `--history` разрешает один полный `HEAD^{commit}`, не зависит от unrelated
@@ -84,10 +83,15 @@ card не нужна; превышение границы требует split �
 - `scripts/run-release-baseline.py`
 
 ## Result
-pending
+Superseded опубликованной replacement card
+`openspec/board/4.done/replace-bounded-public-history-scan-and-align-release-suites.md`.
+Replacement сохранил bounded history scan, согласовал core/extended release
+suites и все 69 verify-project scenarios через sharding `39 + 30`; исходная
+todo больше не является live delivery handoff.
 
 ## Next
-- `$changerail-deliver openspec/board/2.todo/implement-bounded-public-history-scan-runtime.md`
+- done; продолжить `stabilize-first-stable-release-scope` на опубликованной
+  базе `origin/main@9d33d2a8db260af5f8ba7c5a75fec5ff280a778f`.
 
 ## Change 1: `implement-bounded-public-history-scan-runtime`
 
@@ -118,3 +122,6 @@ authority или report schema.
 ## Log
 - 2026-08-31T00:00:00Z создано из опубликованной bounded decision; отдельная
   authorization не требуется при сохранении ordinary 300 LOC boundary.
+- 2026-09-01T00:00:00Z закрыто как superseded published replacement
+  `replace-bounded-public-history-scan-and-align-release-suites`; новый
+  investigation/implementation handoff не создается.

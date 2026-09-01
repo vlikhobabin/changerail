@@ -1,13 +1,13 @@
 # Реализовать phase-routed delivery authorization boundary
 
 ## Status
-2.todo
+5.canceled
 
 ## Owner
 unassigned
 
 ## OpenSpec Stage
-not-started
+canceled
 
 ## Series
 - none
@@ -102,10 +102,15 @@ attempt, payload fingerprint и разрешённый `BLOCKED` resume transiti
 - `openspec/specs/changerail-delivery-runner/spec.md`
 
 ## Result
-pending
+Superseded/deferred по решению оператора от 2026-08-31. Первый stable release
+ограничен опубликованным generic core; phase-routed implementation,
+authorization successor и pilot wave выведены из release scope. Опубликованные
+investigation/authorization cards сохраняются как исторические решения, но не
+разрешают продолжение этой устаревшей implementation-карточки.
 
 ## Next
-- Wait for published authorization, then run `$changerail-ff` for this card.
+- done; возможное возвращение начинается с нового triage карточки
+  `openspec/board/1.backlog/reconsider-phase-routed-delivery-after-stable-release.md`.
 
 ## Change 1: `implement-phase-routed-delivery-authorization-boundary`
 
@@ -141,3 +146,5 @@ authorization.
 ## Log
 - 2026-08-22T00:00:00Z created as the exact replacement selected by the
   published investigation; implementation remains blocked on authorization.
+- 2026-08-31T00:00:00Z закрыто как superseded/deferred по явному решению
+  оператора; новые authorization/successor artifacts и pilot wave не создаются.

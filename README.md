@@ -6,8 +6,9 @@ toolchain для Codex CLI и Claude Code.
 
 Public source of truth, bootstrap/verification, drift gate, delivery/review/pub
 contracts, runner status, metrics, release CI и release discipline уже
-реализованы. Текущий фокус - закрыть release hardening и подготовить stable
-release на основе практического feedback.
+реализованы. Текущий фокус - подготовить первый stable release из чистого
+reviewed generic core и закрыть release checklist без интеграции локальных
+forensic или явно отложенных payloads.
 
 ## Зачем нужен ChangeRail
 
@@ -148,10 +149,16 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 
 Следующие направления:
 
-- первый stable release после проверки operational hardening на consumer
-  projects;
-- поддержка packaged distribution/release tags;
+- первый stable release `1.0.0` после полного green baseline и проверки
+  compatibility на consumer projects;
+- release tag и packaged distribution metadata через отдельный
+  final-certification payload;
 - дальнейшее упрощение adoption и upgrade runbooks по feedback потребителей.
+
+Phase-routed multi-agent delivery и автоматическое управление retention
+runtime artifacts отложены. Они не входят в первый stable release: к ним можно
+вернуться только через новый board triage после публикации стабильного core и
+сокращения общего технического и операционного долга.
 
 ## Структура репозитория
 
@@ -317,7 +324,11 @@ contracts/helpers, bootstrap/templates, verification и drift gates, release CI,
 
 Ближайшие шаги:
 
-1. Подготовить первый stable release после operational feedback и проверки
-   compatibility на consumer projects.
-2. Добавить release tags и packaged distribution metadata.
-3. Упростить consumer upgrade/adoption flow на основе первых migration циклов.
+1. Подтвердить полный release baseline в изолированном clone точного candidate
+   от опубликованного `origin/main` без локальных forensic/deferred refs.
+2. Подготовить и опубликовать `1.0.0`: version/changelog, compatibility и
+   migration notes, independent review, release tag и distribution metadata.
+3. Сократить общий технический и операционный долг и упростить consumer
+   upgrade/adoption flow по первым migration циклам.
+4. Только после этих gates повторно triage-ить phase-routed delivery и runtime
+   artifact retention как отдельные продуктовые инициативы.
