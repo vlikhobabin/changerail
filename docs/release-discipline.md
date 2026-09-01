@@ -96,6 +96,30 @@ symlink-based consumer projects не меняют tracked files. Такая за
 назвать session restart, verification commands и refresh steps для проектов,
 которые держат локальные копии skills или runbooks.
 
+## First Stable Release Scope
+
+Первый stable release строится только из чистого reviewed generic core на
+точной опубликованной базе `origin/main`. Наличие локальной ветки, worktree,
+forensic commit или ignored evidence не включает payload в release candidate.
+Dirty, rejected и явно deferred work может войти только отдельной scoped
+карточкой после собственных verification и fresh independent review.
+
+Полный final baseline запускается в изолированном clone exact candidate,
+который содержит только release-reachable refs. Обычный linked worktree делит
+локальный ref graph с исходным repository и не является достаточным
+доказательством bounded history scan: локальные forensic/deferred refs не
+должны ни расширять, ни ослаблять проверку истории будущего release tag.
+
+Machine-local inventory веток/worktree хранится только под ignored
+`.runtime/changerail/release-scope/`. Реальные локальные пути, частные имена
+веток и содержимое dirty worktree не переносятся в tracked release docs.
+
+Phase-routed delivery и runtime artifact retention отложены и не блокируют
+первый stable release. После green baseline version/changelog, compatibility,
+migration, tag и distribution metadata готовит отдельная critical
+final-certification карточка; scope-normalization change не публикует release
+самостоятельно.
+
 ## Release Checklist
 
 Перед публикацией release maintainer должен:
