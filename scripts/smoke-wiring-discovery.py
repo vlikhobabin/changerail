@@ -81,8 +81,6 @@ DELIVER_FIX_BUDGET_CONTRACT = (
     "max-fix-cycles",
     "max-review-cycles",
 )
-
-
 @dataclass
 class Check:
     name: str
@@ -208,6 +206,52 @@ def frontmatter_metadata(skill_md: Path) -> tuple[dict[object, object] | None, s
     return metadata, None
 
 
+def markdown_section(text: str, heading: str, level: int = 2) -> str:
+    marker = "#" * level
+    match = re.search(rf"^{marker} {re.escape(heading)}\s*\n(.*?)(?=^{marker} |\Z)", text, re.MULTILINE | re.DOTALL)
+    return match.group(1) if match else ""
+
+
+def bash_commands(text: str) -> str:
+    return "\n".join(re.findall(r"```bash\s*\n(.*?)```", text, re.DOTALL))
+
+
+def ordered_failures(text: str, fragments: tuple[str, ...], label: str) -> list[str]:
+    cursor = 0
+    failures: list[str] = []
+    for fragment in fragments:
+        position = text.find(fragment, cursor)
+        if position < 0:
+            failures.append(f"{label} missing or out of order: {fragment}")
+        else:
+            cursor = position + len(fragment)
+    return failures
+
+
+def release_route_failures(text: str, name: str) -> list[str]:
+    if name == "changerail-deliver":
+        route = markdown_section(text, "Release Resume Routing")
+        return ordered_failures(route, ("before the normal Card Discovery", "exactly one card path", "`3.inprogress`", "$changerail-pub <card-path> --resume-release", "Do not run `ff`, `do`, an LLM review"), "deliver resume route")
+    entry, workflow, resume = (markdown_section(text, heading) for heading in ("Entry Routing", "Normal Entry Workflow", "Post-Commit Release Resume Entry"))
+    commit = markdown_section(workflow, "4. Commit", 3)
+    failures = ordered_failures(text, ("## Entry Routing", "## Normal Entry Review Gate", "## Normal Entry Workflow", "## Post-Commit Release Resume Entry"), "publish route sections")
+    failures += ordered_failures(bash_commands(commit), ("bin/changerail-review-verdict preflight", "bin/changerail-review-verdict validate", "--check-fresh", "--target working-tree", "git add --", "--target staged", "git commit -m"), "normal pre-staging commands")
+    resume_commands = bash_commands(resume)
+    failures += ordered_failures(resume_commands, ("bin/changerail-review-verdict validate", "bin/changerail-delivery-manifest validate", "git status --porcelain", "git for-each-ref", "git rev-parse --git-common-dir", "git --no-replace-objects rev-list", "git --no-replace-objects rev-parse", "--target committed", "git ls-remote"), "resume admission commands")
+    for forbidden in ("--check-fresh", "--target working-tree", "--target staged", "git add --", "git commit"):
+        if forbidden in resume_commands:
+            failures.append(f"resume executes forbidden normal command: {forbidden}")
+    failures += ordered_failures(resume, ("After payload push", "After tag creation", "After hosted release creation", "After partial asset upload"), "resume interruption handoffs")
+    for state in ("Dirty or pre-commit", "Invalid or negative verdict", "Wrong parent or tree", "Committed scope mismatch", "Wrong card path or status", "Divergent remote branch"):
+        if state not in " ".join(resume.split()):
+            failures.append(f"resume controlled hard-stop fixture missing: {state}")
+    if "stop before mutation; staging, commit and push counters remain zero" not in resume:
+        failures.append("resume lacks explicit no-mutation oracle")
+    if entry.find("--resume-release") < 0 or entry.find("Normal Entry Review Gate") < 0:
+        failures.append("entry route does not split resume before normal gates")
+    return failures
+
+
 def check_frontmatter_negative_fixture(run_dir: Path, mode: str, surface: str) -> Check:
     fixture = run_dir / "frontmatter-negative-fixtures" / mode / surface / "SKILL.md"
     fixture.parent.mkdir(parents=True, exist_ok=True)
@@ -280,6 +324,22 @@ def check_skill_contract(
         missing = [fragment for fragment in DO_FIX_BUDGET_CONTRACT if fragment not in text]
         if missing:
             failures.append("changerail-do fix budget contract missing: " + ", ".join(missing))
+    if expected_name in {"changerail-pub", "changerail-deliver"} and not failures:
+        text = skill_md.read_text(encoding="utf-8")
+        route_failures = release_route_failures(text, expected_name)
+        failures.extend(route_failures)
+        if not route_failures and expected_name == "changerail-pub":
+            commit = markdown_section(markdown_section(text, "Normal Entry Workflow"), "4. Commit", 3)
+            for label, fixture in (
+                ("same-path mutation between early gate and staging", text.replace(commit, commit.replace("--check-fresh", "--stale-early-result", 1), 1)),
+                ("resume cross-route staging", text.replace("## Post-Commit Release Resume Entry", "## Post-Commit Release Resume Entry\n\n```bash\ngit add -- forbidden-same-path\n```", 1)),
+            ):
+                if not release_route_failures(fixture, expected_name):
+                    failures.append(f"release negative fixture was accepted: {label}")
+            for fragment in ("After payload push", "After tag creation", "After hosted release creation", "After partial asset upload", "Dirty or pre-commit", "Invalid or negative verdict", "Wrong parent or tree", "Committed scope mismatch", "Wrong card path or status", "Divergent remote branch", "stop before mutation; staging, commit and push counters remain zero"):
+                fixture = re.sub(r"\s+".join(map(re.escape, fragment.split())), "controlled fixture removed", text, count=1)
+                if not release_route_failures(fixture, expected_name):
+                    failures.append(f"release controlled fixture was accepted: {fragment}")
 
     status = "fail" if failures else "pass"
     message = "; ".join(failures) if failures else "SKILL.md contract matches and frontmatter parses as YAML"

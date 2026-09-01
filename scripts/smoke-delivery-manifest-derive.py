@@ -67,7 +67,7 @@ def derive_manifest(workspace: Path) -> Path:
     return Path(json.loads(derive.stdout)["manifest"])
 
 
-def scope_check(manifest_path: Path, workspace: Path, target: str) -> subprocess.CompletedProcess[str]:
+def scope_check(manifest_path: Path, workspace: Path, target: str, *extra: str) -> subprocess.CompletedProcess[str]:
     return run(
         [
             sys.executable,
@@ -79,12 +79,13 @@ def scope_check(manifest_path: Path, workspace: Path, target: str) -> subprocess
             "--target",
             target,
             "--json",
+            *extra,
         ]
     )
 
 
-def require_scope_ok(manifest_path: Path, workspace: Path, target: str, label: str) -> None:
-    result = scope_check(manifest_path, workspace, target)
+def require_scope_ok(manifest_path: Path, workspace: Path, target: str, label: str, *extra: str) -> None:
+    result = scope_check(manifest_path, workspace, target, *extra)
     require_ok(result, label)
     payload = json.loads(result.stdout)
     targets = payload.get("targets", {})
@@ -102,8 +103,9 @@ def require_scope_fails(
     bucket: str,
     needle: str,
     label: str,
+    *extra: str,
 ) -> None:
-    result = scope_check(manifest_path, workspace, target)
+    result = scope_check(manifest_path, workspace, target, *extra)
     if result.returncode == 0:
         sys.stderr.write(f"{label} unexpectedly passed\nSTDOUT:\n{result.stdout}\n")
         raise SystemExit(1)
@@ -312,6 +314,48 @@ def check_scope_reconciliation(root: Path) -> None:
         "docs/tracked.md",
         "scope-check staged mismatched",
     )
+
+
+def check_committed_scope_reconciliation(root: Path) -> None:
+    workspace, _ = make_workspace(root / "scope-committed")
+    baseline = git_stdout(["git", "rev-parse", "HEAD"], workspace, "rev-parse baseline")
+    manifest_path = derive_manifest(workspace)
+    stage_manifest_paths(manifest_path, workspace)
+    require_ok(run(["git", "commit", "-q", "-m", "payload"], cwd=workspace), "commit payload")
+    payload = git_stdout(["git", "rev-parse", "HEAD"], workspace, "rev-parse payload")
+    require_scope_ok(manifest_path, workspace, "committed", "scope-check committed exact", "--commit", payload)
+    manifest_bytes = manifest_path.read_bytes()
+    tree = git_stdout(["git", "rev-parse", f"{payload}^{{tree}}"], workspace, "payload tree")
+    replacement = git_stdout(["git", "commit-tree", tree, "-p", baseline, "-m", "replacement"], workspace, "replacement commit")
+    require_ok(run(["git", "replace", payload, replacement], cwd=workspace), "install replacement ref")
+    require_fails(scope_check(manifest_path, workspace, "committed", "--commit", payload), "committed replacement ref", "replacement or graft")
+    require_ok(run(["git", "replace", "-d", payload], cwd=workspace), "remove replacement ref")
+    grafts = workspace / ".git" / "info" / "grafts"
+    write(grafts, f"{payload} {baseline}\n")
+    require_fails(scope_check(manifest_path, workspace, "committed", "--commit", payload), "committed graft", "replacement or graft")
+    grafts.unlink()
+    if manifest_path.read_bytes() != manifest_bytes or git_stdout(["git", "rev-parse", "HEAD"], workspace, "HEAD after override rejection") != payload:
+        raise AssertionError("replacement/graft rejection mutated manifest or HEAD")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    missing = {**manifest, "committable_paths": [*deepcopy(manifest["committable_paths"]), {"path": "docs/manifest-only.md", "kind": "docs", "phase": "do", "operation": "add", "target_path": "docs/manifest-only.md"}]}
+    extra = {**manifest, "committable_paths": [entry for entry in deepcopy(manifest["committable_paths"]) if entry["path"] != "docs/tracked.md"]}
+    mismatched = deepcopy(manifest)
+    entry = next(item for item in mismatched["committable_paths"] if item["path"] == "docs/tracked.md")
+    entry.update(operation="delete", source_path="docs/tracked.md")
+    entry.pop("target_path")
+    for name, fixture, bucket, needle in (("missing", missing, "missing", "manifest-only"), ("extra", extra, "extra", "tracked.md"), ("mismatched", mismatched, "mismatched", "tracked.md")):
+        path = manifest_path.with_name(f"committed-{name}.json")
+        write_json(path, fixture)
+        require_scope_fails(path, workspace, "committed", bucket, needle, f"scope-check committed {name}", "--commit", payload)
+    require_fails(scope_check(manifest_path, workspace, "committed"), "committed missing --commit", "--commit is required")
+    require_fails(scope_check(manifest_path, workspace, "working-tree", "--commit", payload), "working-tree with --commit", "only valid")
+    require_fails(scope_check(manifest_path, workspace, "committed", "--commit", baseline), "committed root", "exactly one parent")
+    require_ok(run(["git", "commit", "--allow-empty", "-q", "-m", "wrong"], cwd=workspace), "commit wrong payload")
+    wrong = git_stdout(["git", "rev-parse", "HEAD"], workspace, "rev-parse wrong")
+    require_scope_fails(manifest_path, workspace, "committed", "missing", "tracked.md", "scope-check wrong commit", "--commit", wrong)
+    side = git_stdout(["git", "commit-tree", tree, "-p", payload, "-m", "side"], workspace, "side commit")
+    merge = git_stdout(["git", "commit-tree", tree, "-p", payload, "-p", side, "-m", "merge"], workspace, "merge commit")
+    require_fails(scope_check(manifest_path, workspace, "committed", "--commit", merge), "committed merge", "exactly one parent")
 
 
 def check_bare_remote_publish_finalization(root: Path) -> None:
@@ -850,6 +894,7 @@ def main() -> int:
             return 1
 
         check_scope_reconciliation(Path(tmp))
+        check_committed_scope_reconciliation(Path(tmp))
         check_bare_remote_publish_finalization(Path(tmp))
 
     print("SMOKE_DELIVERY_MANIFEST_DERIVE_OK")

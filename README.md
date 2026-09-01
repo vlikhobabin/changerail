@@ -6,9 +6,9 @@ toolchain для Codex CLI и Claude Code.
 
 Public source of truth, bootstrap/verification, drift gate, delivery/review/pub
 contracts, runner status, metrics, release CI и release discipline уже
-реализованы. Текущий фокус - подготовить первый stable release из чистого
-reviewed generic core и закрыть release checklist без интеграции локальных
-forensic или явно отложенных payloads.
+реализованы. Текущая версия — `1.0.0`: первый stable contract строится из
+reviewed generic core и публикуется как reproducible source archive без
+интеграции локальных forensic или явно отложенных payloads.
 
 ## Зачем нужен ChangeRail
 
@@ -138,7 +138,8 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
 - `scripts/public-surface-scan.py`, `scripts/run-release-baseline.py`,
   `scripts/compile-python-inventory.py`, `scripts/smoke-contract-schemas.py`,
-  `scripts/smoke-python-runtime.py` и focused smoke checks для
+  `scripts/smoke-python-runtime.py`, generic source distribution builder и
+  focused smoke checks для
   release/public-safety gate;
 - `VERSION`, `CHANGELOG.md`, compatibility notes и migration guide для
   release discipline;
@@ -149,11 +150,11 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 
 Следующие направления:
 
-- первый stable release `1.0.0` после полного green baseline и проверки
-  compatibility на consumer projects;
-- release tag и packaged distribution metadata через отдельный
-  final-certification payload;
-- дальнейшее упрощение adoption и upgrade runbooks по feedback потребителей.
+- сопровождение stable `1.x` через semver, changelog, migration notes и
+  reproducible generic source assets;
+- дальнейшее упрощение adoption и upgrade runbooks по feedback потребителей;
+- сокращение общего технического и операционного долга до нового triage
+  deferred initiatives.
 
 Phase-routed multi-agent delivery и автоматическое управление retention
 runtime artifacts отложены. Они не входят в первый stable release: к ним можно
@@ -294,6 +295,7 @@ python3 scripts/run-release-baseline.py
 - [Release discipline](docs/release-discipline.md)
 - [Compatibility notes](docs/compatibility.md)
 - [Migration guide](docs/migration-guide.md)
+- [Release notes 1.0.0](docs/releases/1.0.0.md)
 - [Security policy](SECURITY.md)
 
 ## Безопасность публичного репозитория
@@ -324,11 +326,9 @@ contracts/helpers, bootstrap/templates, verification и drift gates, release CI,
 
 Ближайшие шаги:
 
-1. Подтвердить полный release baseline в изолированном clone точного candidate
-   от опубликованного `origin/main` без локальных forensic/deferred refs.
-2. Подготовить и опубликовать `1.0.0`: version/changelog, compatibility и
-   migration notes, independent review, release tag и distribution metadata.
-3. Сократить общий технический и операционный долг и упростить consumer
-   upgrade/adoption flow по первым migration циклам.
-4. Только после этих gates повторно triage-ить phase-routed delivery и runtime
+1. Сопровождать stable `1.x` через scoped cards, risk-appropriate review и
+   reproducible generic source releases.
+2. Сократить общий технический и операционный долг и упростить consumer
+   upgrade/adoption flow по первым stable migration циклам.
+3. Только после этих gates повторно triage-ить phase-routed delivery и runtime
    artifact retention как отдельные продуктовые инициативы.

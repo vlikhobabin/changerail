@@ -164,6 +164,21 @@ records:
       - python3 scripts/public-surface-scan.py
     review_after: null
     supersedes: []
+  - path: docs/releases/1.0.0.md
+    status: active
+    type: reference
+    owner: ChangeRail core
+    source_globs:
+      - VERSION
+      - CHANGELOG.md
+      - docs/compatibility.md
+      - docs/migration-guide.md
+      - scripts/build-source-distribution.py
+    verify:
+      - python3 scripts/smoke-source-distribution.py
+      - python3 scripts/public-surface-scan.py
+    review_after: null
+    supersedes: []
   - path: docs/wiring-discovery.md
     status: active
     type: reference

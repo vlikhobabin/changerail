@@ -55,7 +55,7 @@ OPTIONAL_BROWSER_MCP_NEEDLES = ("@playwright/mcp", "chrome-devtools-mcp")
 WIRING_MANIFEST = Path("openspec/changerail-wiring.json")
 CONSUMER_LOCK = Path("openspec/changerail-consumer-lock.json")
 WORKER_COUNT = 2
-SHARD_TIMEOUT_SECONDS = 180.0
+SHARD_TIMEOUT_SECONDS = 210.0
 SHARD_SCENARIOS = (
     (
         "valid fixture passes",

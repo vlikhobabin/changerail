@@ -19,6 +19,47 @@ changes помечаются префиксом `BREAKING:`.
 ### Breaking
 - none
 
+## 1.0.0 - 2026-09-01
+
+### Added
+- Добавлены contracts для declared execution-target identity,
+  verification-coverage plans/ledgers, retained external-blocker resume,
+  recovery-aware delivery episodes и public source classification.
+- Добавлен risk-aware deterministic review preflight с machine/ordinary/
+  critical routing, bounded complexity authorization и fresh independent
+  semantic review gate.
+- Добавлен воспроизводимый generic source distribution: exact Git archive,
+  version/license/source-revision metadata, SHA-256 sidecar, tracked builder и
+  core release smoke.
+
+### Changed
+- Release verification разделена на последовательные exact core и extended
+  suites; public history scan ограничен release-reachable refs и проверяется в
+  isolated clone exact candidate.
+- Delivery runner и manifest gates теперь строже проверяют remote target,
+  scoped paths, staged rename, child authority, bounded discovery, structured
+  progress и fail-closed resume/finalization handoffs.
+- Первый stable release ограничен reviewed generic core; phase-routed delivery
+  и runtime artifact retention остаются deferred до отдельного post-release
+  triage.
+
+### Fixed
+- Исправлены remote-preflight parity, unpublished child outcomes, malformed
+  review handoffs, manifest staged-scope reconciliation и containment
+  parent-owned runtime evidence.
+- Исправлены false-positive/timeout границы reachable-history scan и ownership
+  one-command delivery regression между core/extended suites.
+
+### Breaking
+- BREAKING: declared execution target запрещает неявную замену provider,
+  platform, service или database на delivery/verification/review/publish пути.
+- BREAKING: final publish требует risk-appropriate fresh review; process
+  defects исправляются до semantic review, а bounded rescue exhaustion ведет к
+  linked rescue/investigation вместо исключительного in-place continuation.
+- BREAKING: consumer lock с предыдущей source revision не ремонтируется blind
+  `--refresh-wiring`; принятие новой ChangeRail revision является отдельной
+  reviewed consumer migration.
+
 ## 0.5.0 - 2026-08-11
 
 ### Added
