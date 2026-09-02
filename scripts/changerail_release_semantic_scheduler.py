@@ -192,6 +192,15 @@ def _default_call(task: _Task, stop: Any) -> dict[str, Any]:
     ))
 
 
+def _admitted_call(task: _Task, stop: Any,
+                   admission: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    from changerail_release_admitted_execution import admitted_supervisor
+    return _observe_call(stop, task, lambda: admitted_supervisor(
+        task.command, execution_timeout=task.execution_timeout,
+        cleanup_timeout=task.cleanup_timeout, admission=admission,
+    ))
+
+
 def _injected_call(supervisor: Callable[..., Any], task: _Task,
                    stop: Any) -> Any:
     return _observe_call(stop, task, lambda: supervisor(
@@ -308,8 +317,8 @@ def _future_result(future: Future[Any], task: _Task) -> dict[str, Any]:
         return _synthetic(task.identity, "supervisor_result_error")
 
 
-def _execute(tasks: list[_Task], jobs: int,
-             supervisor: Callable[..., Any] | None) -> list[dict[str, Any]]:
+def _execute(tasks: list[_Task], jobs: int, supervisor: Callable[..., Any] | None,
+             admission: tuple[dict[str, Any], ...] | None = None) -> list[dict[str, Any]]:
     results: list[dict[str, Any] | None] = [None] * len(tasks)
     manager = None
     executor = None
@@ -319,7 +328,10 @@ def _execute(tasks: list[_Task], jobs: int,
             manager = context.Manager()
             stop = manager.Event()
             executor = ProcessPoolExecutor(max_workers=jobs, mp_context=context)
-            submit = lambda item: executor.submit(_default_call, item, stop)  # noqa: E731
+            if admission is None:
+                submit = lambda item: executor.submit(_default_call, item, stop)  # noqa: E731
+            else:
+                submit = lambda item: executor.submit(_admitted_call, item, stop, admission)  # noqa: E731
         else:
             stop = threading.Event()
             executor = ThreadPoolExecutor(max_workers=jobs)
@@ -418,5 +430,20 @@ def run_plan(plan: Any, runtime_root: Any, *, jobs: Any = 4,
     except (TypeError, ValueError) as exc:
         raise SchedulerError("scheduler summary is not canonical JSON") from exc
     if len(raw) > MAX_SUMMARY:
+        raise SchedulerError("scheduler summary exceeds bound")
+    return summary
+
+
+def run_admitted_plan(plan: Any, runtime_root: Any, admission: Any, *,
+                      jobs: Any = 4) -> dict[str, Any]:
+    from changerail_release_admitted_execution import validate_table
+    tasks, checked_jobs = _validate_plan(plan, jobs)
+    checked_admission = validate_table(plan, admission)
+    _reserve_roots(tasks, runtime_root)
+    results = _execute(tasks, checked_jobs, None, checked_admission)
+    summary = {"version": VERSION,
+               "status": "pass" if all(row["status"] == "pass" for row in results) else "fail",
+               "jobs": checked_jobs, "results": results}
+    if len(json.dumps(summary, sort_keys=True, separators=(",", ":")).encode()) > MAX_SUMMARY:
         raise SchedulerError("scheduler summary exceeds bound")
     return summary

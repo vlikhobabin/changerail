@@ -371,7 +371,11 @@ def check_dormancy() -> None:
     token = "changerail_release_semantic_scheduler"
     output = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"],
                             cwd=ROOT, text=True, capture_output=True, check=True)
-    allowed = {"tests/smoke-release-semantic-scheduler-v1.py"}
+    allowed = {
+        "tests/smoke-release-semantic-scheduler-v1.py",
+        "tests/smoke-bounded-affected-release-profile-v22.py",
+        "scripts/changerail_release_profile.py",
+    }
     for relative in output.stdout.splitlines():
         path = ROOT / relative
         if relative in allowed or not path.is_file():

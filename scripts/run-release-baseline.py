@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -102,41 +100,8 @@ def print_output(result: subprocess.CompletedProcess[str]) -> None:
 
 
 def main() -> int:
-    env = baseline_env()
-    for index, step in enumerate(steps(), start=1):
-        print(f"[{index}/{len(steps())}] {step.name}: {command_text(step.command)}")
-        executable = shutil.which(step.command[0], path=env.get("PATH"))
-        if executable is None:
-            print(f"FAIL {step.name}: executable not found: {step.command[0]}", file=sys.stderr)
-            if step.command[0] == "ruff":
-                print(
-                    "Install release dependencies first: "
-                    "python3 -m venv .runtime/changerail/ci-venv && "
-                    ".runtime/changerail/ci-venv/bin/python -m pip install "
-                    "--disable-pip-version-check -r requirements-dev.txt",
-                    file=sys.stderr,
-                )
-            return 1
-        result = subprocess.run(step.command, cwd=ROOT, env=env, capture_output=True, text=True, check=False)
-        print_output(result)
-        if result.returncode != 0:
-            print(
-                json.dumps(
-                    {
-                        "status": "fail",
-                        "step": step.name,
-                        "command": step.command,
-                        "returncode": result.returncode,
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
-                file=sys.stderr,
-            )
-            return result.returncode
-        print(f"PASS {step.name}")
-    print(json.dumps({"status": "pass", "steps": len(steps())}, sort_keys=True))
-    return 0
+    from changerail_release_profile import main as run_profile
+    return run_profile(sys.argv[1:])
 
 
 if __name__ == "__main__":
