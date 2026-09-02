@@ -1,9 +1,0 @@
-{
-  "schema": "changerail.maintenance-proposal-decision.v1",
-  "proposal_id": "proposal-invalid",
-  "finding_fingerprint": "not-a-fingerprint",
-  "transformation_class": "automation",
-  "decision": "accepted",
-  "decided_at": "2026-08-09T00:45:00Z",
-  "evidence_refs": []
-}
