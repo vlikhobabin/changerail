@@ -327,7 +327,7 @@ Local CI contract smoke:
 python3 scripts/smoke-release-ci.py
 ```
 
-`scripts/smoke-release-ci.py` сравнивает оба `--list` с exact ordered 23-item
+`scripts/smoke-release-ci.py` сравнивает оба `--list` с exact ordered 24-item
 core и 12-item extended inventories, требует uniqueness/disjointness, проверяет
 negative missing/extra/duplicate/overlap cases и fail closed при drift любого
 workflow route. Windows diagnostics не входят ни в один inventory.

@@ -60,13 +60,49 @@ test "$(cat changerail-1.0.0/VERSION)" = "1.0.0"
 
 Status: supported through repo-local launcher and skill discovery.
 
-Expected contract:
+Ожидаемый контракт:
 
-- operators should start Codex in this repository through `./bin/codex`;
-- project trust and filesystem scope are defined in `.codex/config.toml`;
-- repo-local skills resolve through `.codex/skills/*` entries;
-- Codex runtime/auth/session files under `.codex/` are not part of the public
-  tracked surface except `.codex/config.toml` and repo-local skill symlinks.
+- операторы запускают Codex в этом репозитории через `./bin/codex`;
+- стабильная consumer-установка остаётся `/opt/changerail`, а development
+  checkout может находиться в любом абсолютном Linux path;
+- launcher вычисляет canonical repository root, принудительно задаёт его в
+  `CODEX_WORKDIR` и Codex `-C`, а также передаёт совпадающие project trust и
+  полный filesystem MCP subtree через documented invocation-level TOML `-c`
+  overrides; для `exec` owned overrides помещаются в effective subcommand
+  layer после user overrides;
+- `.codex/config.toml` остаётся source of truth для MCP argv/pins и стабильного
+  default `/opt/changerail`; undocumented environment interpolation не нужна;
+- launcher fail-closed отклоняет user `-C`/`--cd`, `--ignore-user-config` и
+  `-c`/`--config`, которые могут заменить project trust либо любой ancestor,
+  sibling field или descendant полного `mcp_servers.filesystem` subtree, во всех
+  поддерживаемых global/`exec`, separate, assignment и joined short forms до
+  первого `--`; unrelated overrides и прочие argv сохраняются byte-for-byte в
+  исходном относительном порядке, а профиль проверен как не способный обойти
+  более поздний owned layer;
+- `CHANGERAIL_CODEX_BIN` может явно выбрать dispatcher path или bare name, а
+  обычный поиск по `PATH` сохраняет leading, middle, trailing, полностью empty
+  и relative component semantics, пропускает direct/symlink/hardlink identity
+  самого launcher и завершается до recursion, если внешнего dispatcher нет;
+- Linux launcher использует fixed `/bin/bash`, `/usr/bin/readlink` и
+  `/usr/bin/python3`, открывает regular executable dispatcher и выполняет тот же
+  inode через inherited `/proc/self/fd`; обычные ELF, script и symlink
+  dispatchers поддерживаются, а candidate pathname replacement после открытия
+  не перенаправляет `exec`;
+- canonical root и TOML round-trip сохраняют Unicode, spaces, quotes,
+  backslashes, а также internal и terminal backspace, tab, newline, form-feed и
+  carriage-return; остальные TOML-unsafe control characters отклоняются;
+- repo-local skills разрешаются через `.codex/skills/*` entries;
+- Codex runtime/auth/session files под `.codex/` не входят в public tracked
+  surface, кроме `.codex/config.toml` и repo-local skill symlinks.
+
+Codex документирует `-C`, `-c`/`--config` overrides, TOML value parsing,
+`projects.<path>.trust_level` и `mcp_servers.<id>` в
+[CLI reference](https://developers.openai.com/codex/cli/reference),
+[configuration basics](https://developers.openai.com/codex/config-basic),
+[advanced configuration](https://learn.chatgpt.com/docs/config-file/config-advanced#one-off-overrides-from-the-cli)
+и [configuration reference](https://developers.openai.com/codex/config-reference).
+Формы options и last-wins precedence проверены credential-free командами
+`codex-cli 0.152.1`; при обновлении CLI эту parsing matrix необходимо повторить.
 
 Generated consumers track `project_doc_max_bytes = 32768`. Static verifier
 measurement uses UTF-8 bytes: below 85 percent passes, 85 percent through the
@@ -89,9 +125,16 @@ statuses, role classes, counts and project-relative evidence location.
 Verification:
 
 ```bash
+python3 scripts/smoke-codex-launcher.py
 python3 scripts/smoke-wiring-discovery.py
 python3 scripts/smoke-runtime-diagnostics.py
 ```
+
+Focused launcher smoke обязательно использует fake dispatchers и deterministic
+effective-layer oracle без credentials/network. Если `codex-cli 0.152.1`
+доступен локально, smoke дополнительно выполняет credential-free config/`exec`
+probes на temporary config: проверяет adversarial profile, nested `exec -c`,
+полный filesystem subtree/scope и Node wrapper через тот же descriptor path.
 
 ## MCP npm packages
 

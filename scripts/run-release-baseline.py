@@ -46,6 +46,7 @@ def steps(suite: str) -> list[Step]:
                 "import tomllib; tomllib.load(open('.codex/config.toml', 'rb')); print('TOML_OK')",
             ],
         ),
+        Step("codex launcher smoke", ["python3", "scripts/smoke-codex-launcher.py"]),
         Step("contract schema validation", ["python3", "scripts/smoke-contract-schemas.py"]),
         Step("python syntax inventory", ["python3", "scripts/compile-python-inventory.py"]),
         Step("python runtime smoke", ["python3", "scripts/smoke-python-runtime.py"]),

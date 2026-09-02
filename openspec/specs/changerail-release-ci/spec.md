@@ -94,44 +94,46 @@ on a manually maintained incomplete file list.
 - **AND** a syntax error in that file fails the release workflow
 
 ### Requirement: Release CI focused smoke inventory
-ChangeRail release CI MUST separate Linux-focused stable admission from heavy
-regression coverage. The default push/pull-request workflow MUST own only the
-exact ordered `core` inventory exposed by
-`python3 scripts/run-release-baseline.py --suite core --list`. A separate
-scheduled/manual workflow MUST invoke exactly
-`python3 scripts/run-release-baseline.py --suite extended` and MUST own only the
-exact ordered `extended` inventory. Both inventories MUST reject missing,
-extra, duplicate or overlapping commands, and the one-command delivery
-regression `python3 scripts/smoke-delivery-runner.py` MUST belong only to
+ChangeRail release CI MUST разделять Linux-focused stable admission и тяжёлое
+regression coverage. Default push/pull-request workflow MUST владеть только
+точным упорядоченным `core` inventory, который выводит
+`python3 scripts/run-release-baseline.py --suite core --list`. Отдельный
+scheduled/manual workflow MUST вызывать ровно
+`python3 scripts/run-release-baseline.py --suite extended` и MUST владеть только
+точным упорядоченным `extended` inventory. Оба inventory MUST отклонять
+missing, extra, duplicate или overlapping commands, а one-command delivery
+regression `python3 scripts/smoke-delivery-runner.py` MUST принадлежать только
 `extended`.
 
-Command identity MUST be exact argv, not shell-equivalent prose. The ordered
-`core` inventory MUST be exactly:
+Command identity MUST задаваться как exact argv, а не shell-equivalent prose.
+Упорядоченный `core` inventory MUST быть ровно таким:
 
 1. `["./bin/openspec", "validate", "--all", "--strict"]`
 2. `["python3", "-m", "json.tool", ".mcp.json"]`
 3. `["python3", "-c", "import tomllib; tomllib.load(open('.codex/config.toml', 'rb')); print('TOML_OK')"]`
-4. `["python3", "scripts/smoke-contract-schemas.py"]`
-5. `["python3", "scripts/compile-python-inventory.py"]`
-6. `["python3", "scripts/smoke-python-runtime.py"]`
-7. `["ruff", "check", "bin", "scripts"]`
-8. `["python3", "scripts/smoke-release-ci.py"]`
-9. `["python3", "scripts/public-surface-scan.py", "--self-test"]`
-10. `["python3", "scripts/smoke-public-surface-history.py"]`
-11. `["python3", "scripts/public-surface-scan.py"]`
-12. `["python3", "scripts/public-surface-scan.py", "--history"]`
-13. `["python3", "scripts/smoke-wiring-discovery.py"]`
-14. `["python3", "scripts/smoke-verify-project.py"]`
-15. `["python3", "scripts/smoke-runtime-diagnostics.py"]`
-16. `["python3", "scripts/smoke-bootstrap-project.py"]`
-17. `["python3", "scripts/smoke-consumer-ci.py"]`
-18. `["rm", "-rf", ".runtime/changerail/ci-drift"]`
-19. `["./bin/bootstrap-project", ".runtime/changerail/ci-drift/example-project", "--name", "example-project", "--kind", "generic", "--lock-enforcement", "none"]`
-20. `["python3", "scripts/smoke-drift.py", "--project", ".runtime/changerail/ci-drift/example-project"]`
-21. `["git", "diff", "--check"]`
-22. `["git", "status", "--short", "--ignored"]`
+4. `["python3", "scripts/smoke-codex-launcher.py"]`
+5. `["python3", "scripts/smoke-contract-schemas.py"]`
+6. `["python3", "scripts/compile-python-inventory.py"]`
+7. `["python3", "scripts/smoke-python-runtime.py"]`
+8. `["ruff", "check", "bin", "scripts"]`
+9. `["python3", "scripts/smoke-source-distribution.py"]`
+10. `["python3", "scripts/smoke-release-ci.py"]`
+11. `["python3", "scripts/public-surface-scan.py", "--self-test"]`
+12. `["python3", "scripts/smoke-public-surface-history.py"]`
+13. `["python3", "scripts/public-surface-scan.py"]`
+14. `["python3", "scripts/public-surface-scan.py", "--history"]`
+15. `["python3", "scripts/smoke-wiring-discovery.py"]`
+16. `["python3", "scripts/smoke-verify-project.py"]`
+17. `["python3", "scripts/smoke-runtime-diagnostics.py"]`
+18. `["python3", "scripts/smoke-bootstrap-project.py"]`
+19. `["python3", "scripts/smoke-consumer-ci.py"]`
+20. `["rm", "-rf", ".runtime/changerail/ci-drift"]`
+21. `["./bin/bootstrap-project", ".runtime/changerail/ci-drift/example-project", "--name", "example-project", "--kind", "generic", "--lock-enforcement", "none"]`
+22. `["python3", "scripts/smoke-drift.py", "--project", ".runtime/changerail/ci-drift/example-project"]`
+23. `["git", "diff", "--check"]`
+24. `["git", "status", "--short", "--ignored"]`
 
-The ordered `extended` inventory MUST be exactly:
+Упорядоченный `extended` inventory MUST быть ровно таким:
 
 1. `["python3", "scripts/smoke-review-verdict-validation.py"]`
 2. `["python3", "scripts/smoke-review-fingerprint.py"]`
@@ -146,38 +148,37 @@ The ordered `extended` inventory MUST be exactly:
 11. `["python3", "scripts/smoke-delivery-metrics.py"]`
 12. `["python3", "scripts/smoke-openspec-archive-diagnostics.py"]`
 
-Windows entrypoint, wiring Git-safety and aggregate matrix commands MUST remain
-explicit opt-in diagnostics outside both suites.
+Windows entrypoint, wiring Git-safety и aggregate matrix commands MUST
+оставаться explicit opt-in diagnostics вне обеих suites.
 
 #### Scenario: Core focused smoke coverage regresses
-- **WHEN** the tracked default workflow or runner loses, adds, reorders or
-  duplicates a required core command
-- **THEN** `scripts/smoke-release-ci.py` fails before the workflow change can be
-  accepted
+- **WHEN** tracked default workflow или runner теряет, добавляет, переставляет
+  или дублирует required core command
+- **THEN** `scripts/smoke-release-ci.py` завершается с ошибкой до принятия
+  workflow change
 
 #### Scenario: Default CI invokes core runner
-- **WHEN** the tracked default push/pull-request workflow runs after dependency
-  setup
-- **THEN** it invokes exactly `python3 scripts/run-release-baseline.py`
-- **AND** it does not invoke the extended suite or an extended-owned smoke
-  directly
+- **WHEN** tracked default push/pull-request workflow запускается после
+  dependency setup
+- **THEN** он вызывает ровно `python3 scripts/run-release-baseline.py`
+- **AND** не вызывает extended suite или принадлежащий ей smoke напрямую
 
 #### Scenario: Extended focused smoke coverage regresses
-- **WHEN** the tracked extended workflow is missing, loses its schedule/manual
-  trigger or no longer invokes the exact extended suite command
-- **THEN** `scripts/smoke-release-ci.py` fails
-- **AND** default CI does not silently absorb or duplicate extended coverage
+- **WHEN** tracked extended workflow отсутствует, теряет schedule/manual trigger
+  или больше не вызывает exact extended suite command
+- **THEN** `scripts/smoke-release-ci.py` завершается с ошибкой
+- **AND** default CI не поглощает и не дублирует extended coverage неявно
 
 #### Scenario: Suite command ownership regresses
-- **WHEN** a command is assigned to both inventories, an undeclared command is
-  added, or an expected command is removed
-- **THEN** the CI contract smoke fails closed
+- **WHEN** command назначена обоим inventory, добавлена undeclared command или
+  удалена expected command
+- **THEN** CI contract smoke завершается fail-closed
 
 #### Scenario: One-command delivery ownership regresses
-- **WHEN** `python3 scripts/smoke-delivery-runner.py` is missing from extended
-  or appears in default core
-- **THEN** the exact inventory oracle fails
-- **AND** release evidence cannot claim either suite passed
+- **WHEN** `python3 scripts/smoke-delivery-runner.py` отсутствует в extended или
+  появляется в default core
+- **THEN** exact inventory oracle завершается с ошибкой
+- **AND** release evidence не может утверждать, что какая-либо suite прошла
 
 ### Requirement: Release CI lint gate
 ChangeRail release CI MUST run a pinned lint gate for tracked Python helpers and

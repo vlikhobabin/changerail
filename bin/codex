@@ -1,9 +1,327 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fail() {
+  printf 'changerail codex launcher: %s\n' "$1" >&2
+  exit 1
+}
+
+# Keep the helper-added newline distinguishable from newlines in the physical
+# pathname. The launcher is Linux-focused and uses fixed helper identities.
+if ! launcher_output="$(
+  /usr/bin/readlink -f -- "${BASH_SOURCE[0]}" &&
+    printf '.'
+)"; then
+  fail "cannot resolve launcher path"
+fi
+[[ "$launcher_output" == *$'\n.' ]] || fail "cannot resolve launcher path"
+launcher_path="${launcher_output%$'\n.'}"
+launcher_bin="${launcher_path%/*}"
+repo_root="${launcher_bin%/*}"
+config_path="$repo_root/.codex/config.toml"
+
+[[ -f "$config_path" ]] || fail "missing repository Codex config"
+[[ -r /proc/self/fd ]] || fail "Linux /proc/self/fd is unavailable"
+
+close_dispatcher_fd() {
+  if [[ -n "${dispatcher_fd:-}" ]]; then
+    exec {dispatcher_fd}<&-
+    dispatcher_fd=""
+  fi
+}
+
+open_dispatcher() {
+  local candidate="$1"
+  local descriptor_path
+
+  [[ -f "$candidate" && -x "$candidate" ]] || return 1
+  if ! exec {dispatcher_fd}<"$candidate"; then
+    dispatcher_fd=""
+    return 1
+  fi
+  descriptor_path="/proc/self/fd/$dispatcher_fd"
+  if [[ ! -f "$descriptor_path" || ! -x "$descriptor_path" ]]; then
+    close_dispatcher_fd
+    return 1
+  fi
+  if [[ "$descriptor_path" -ef "$launcher_path" ]]; then
+    close_dispatcher_fd
+    return 2
+  fi
+  dispatcher_path="$descriptor_path"
+}
+
+next_path_candidate() {
+  local name="$1"
+  local entry
+
+  while :; do
+    if [[ "$path_remainder" == *:* ]]; then
+      entry="${path_remainder%%:*}"
+      path_remainder="${path_remainder#*:}"
+      path_last=0
+    else
+      entry="$path_remainder"
+      path_remainder=""
+      path_last=1
+    fi
+    [[ -n "$entry" ]] || entry="."
+    candidate="$entry/$name"
+    return 0
+  done
+}
+
+dispatcher_fd=""
+dispatcher_path=""
+candidate=""
+if [[ -n "${CHANGERAIL_CODEX_BIN:-}" ]]; then
+  if [[ "$CHANGERAIL_CODEX_BIN" == */* ]]; then
+    candidate="$CHANGERAIL_CODEX_BIN"
+  else
+    path_remainder="${PATH-}"
+    while :; do
+      next_path_candidate "$CHANGERAIL_CODEX_BIN"
+      if [[ -f "$candidate" && -x "$candidate" ]]; then
+        break
+      fi
+      [[ "$path_last" -eq 1 ]] && candidate="" && break
+    done
+  fi
+  [[ -n "$candidate" ]] || fail "CHANGERAIL_CODEX_BIN does not resolve to an executable"
+  if open_dispatcher "$candidate"; then
+    :
+  else
+    dispatcher_status=$?
+    if [[ "$dispatcher_status" -eq 2 ]]; then
+      fail "CHANGERAIL_CODEX_BIN resolves to this launcher"
+    fi
+    fail "CHANGERAIL_CODEX_BIN does not resolve to an executable"
+  fi
+else
+  path_remainder="${PATH-}"
+  while :; do
+    next_path_candidate "codex"
+    if open_dispatcher "$candidate"; then
+      break
+    fi
+    [[ "$path_last" -eq 1 ]] && break
+  done
+  [[ -n "$dispatcher_path" ]] || fail "no external codex dispatcher found in PATH"
+fi
+
+# Codex 0.152.1 accepts config/root options globally and in `exec`, including
+# separate, assignment and joined short forms. Reject only launcher-owned keys;
+# preserve unrelated arguments byte-for-byte and stop interpreting after `--`.
+if ! argument_error="$(/usr/bin/python3 - "$repo_root" "$@" 2>&1 <<'PY'
+import sys
+import tomllib
+
+
+ROOT_CONFLICT = "user arguments must not override launcher-managed working root (-C/--cd)"
+FILESYSTEM_CONFLICT = "user config override conflicts with launcher-managed filesystem MCP scope"
+TRUST_CONFLICT = "user config override conflicts with launcher-managed project trust"
+CONFIG_SOURCE_CONFLICT = "user arguments must not bypass launcher-managed Codex config (--ignore-user-config)"
+UNCLASSIFIED_CONFIG = "cannot classify user Codex config override as an unrelated key=value"
+
+
+repo_root = sys.argv[1]
+arguments = sys.argv[2:]
+filesystem_key = ("mcp_servers", "filesystem")
+trust_key = ("projects", repo_root, "trust_level")
+
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+
+def is_related(candidate: tuple[str, ...], protected: tuple[str, ...]) -> bool:
+    common = min(len(candidate), len(protected))
+    return candidate[:common] == protected[:common]
+
+
+def config_key(value: str) -> tuple[str, ...]:
+    if "=" not in value:
+        fail(UNCLASSIFIED_CONFIG)
+    source, _raw_value = value.split("=", 1)
+    try:
+        parsed = tomllib.loads(f"{source}=0")
+    except (tomllib.TOMLDecodeError, ValueError):
+        fail(UNCLASSIFIED_CONFIG)
+    path: list[str] = []
+    node: object = parsed
+    while isinstance(node, dict) and len(node) == 1:
+        key, node = next(iter(node.items()))
+        path.append(key)
+    if node != 0 or not path:
+        fail(UNCLASSIFIED_CONFIG)
+    return tuple(path)
+
+
+index = 0
+exec_index = -1
+terminator_index = -1
+value_options = {
+    "--remote",
+    "--remote-auth-token-env",
+    "-i",
+    "--image",
+    "-m",
+    "--model",
+    "--local-provider",
+    "-p",
+    "--profile",
+    "-s",
+    "--sandbox",
+    "--add-dir",
+    "-a",
+    "--ask-for-approval",
+    "--thread-source",
+    "--output-schema",
+    "--color",
+    "-o",
+    "--output-last-message",
+}
+while index < len(arguments):
+    argument = arguments[index]
+    if argument == "--":
+        terminator_index = index
+        break
+    if argument == "--ignore-user-config":
+        fail(CONFIG_SOURCE_CONFLICT)
+    if (
+        argument in ("-C", "--cd")
+        or argument.startswith("--cd=")
+        or (argument.startswith("-C") and len(argument) > 2)
+    ):
+        fail(ROOT_CONFLICT)
+
+    override = None
+    if argument in ("-c", "--config"):
+        index += 1
+        if index >= len(arguments):
+            fail(UNCLASSIFIED_CONFIG)
+        override = arguments[index]
+    elif argument.startswith("--config="):
+        override = argument[len("--config=") :]
+    elif argument.startswith("-c") and len(argument) > 2:
+        override = argument[3:] if argument.startswith("-c=") else argument[2:]
+
+    if override is not None:
+        key = config_key(override)
+        if is_related(key, filesystem_key):
+            fail(FILESYSTEM_CONFLICT)
+        if is_related(key, trust_key):
+            fail(TRUST_CONFLICT)
+    elif exec_index < 0 and argument in ("exec", "e"):
+        exec_index = index
+    elif argument in value_options:
+        index += 1
+    index += 1
+
+print(f"{exec_index}:{terminator_index}")
+PY
+)"; then
+  close_dispatcher_fd
+  fail "$argument_error"
+fi
+[[ "$argument_error" =~ ^-?[0-9]+:-?[0-9]+$ ]] || {
+  close_dispatcher_fd
+  fail "invalid Codex argument scan result"
+}
+exec_index="${argument_error%%:*}"
+terminator_index="${argument_error#*:}"
+
+# JSON string/array syntax is valid TOML. Reading the pinned MCP argv from the
+# repository config keeps that file as the static source of truth.
+if ! scope_overrides="$(/usr/bin/python3 - "$repo_root" "$config_path" 2>&1 <<'PY'
+import datetime
+import json
+import math
+import sys
+import tomllib
+
+
+repo_root, config_path = sys.argv[1:]
+unsupported = [
+    char
+    for char in repo_root
+    if (ord(char) < 0x20 and char not in "\b\t\n\f\r")
+    or ord(char) == 0x7F
+    or 0xD800 <= ord(char) <= 0xDFFF
+]
+if unsupported:
+    raise SystemExit("repository path contains a TOML-unsafe control character")
+
+with open(config_path, "rb") as stream:
+    config = tomllib.load(stream)
+filesystem_args = config["mcp_servers"]["filesystem"]["args"]
+if not isinstance(filesystem_args, list) or not filesystem_args:
+    raise SystemExit("filesystem MCP args must be a non-empty array")
+if not all(isinstance(value, str) for value in filesystem_args):
+    raise SystemExit("filesystem MCP args must contain only strings")
+
+filesystem_args = [*filesystem_args[:-1], repo_root]
+filesystem = dict(config["mcp_servers"]["filesystem"])
+filesystem["args"] = filesystem_args
+
+
+def toml_value(value: object) -> str:
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and math.isfinite(value):
+        return repr(value)
+    if isinstance(value, list):
+        return "[" + ",".join(toml_value(item) for item in value) + "]"
+    if isinstance(value, dict):
+        return "{" + ",".join(
+            f"{json.dumps(key, ensure_ascii=False)}={toml_value(item)}"
+            for key, item in value.items()
+        ) + "}"
+    if isinstance(value, (datetime.date, datetime.time, datetime.datetime)):
+        return value.isoformat()
+    raise SystemExit("filesystem MCP config contains an unsupported TOML value")
+
+
+root_literal = json.dumps(repo_root, ensure_ascii=False)
+print(f"projects.{root_literal}.trust_level=\"trusted\"")
+print(f"mcp_servers.filesystem={toml_value(filesystem)}")
+PY
+)"; then
+  close_dispatcher_fd
+  fail "$scope_overrides"
+fi
+mapfile -t codex_scope_overrides <<<"$scope_overrides"
+if [[ "${#codex_scope_overrides[@]}" -ne 2 ]]; then
+  close_dispatcher_fd
+  fail "invalid generated Codex scope overrides"
+fi
 
 export CODEX_HOME="${CODEX_HOME:-$repo_root/.codex}"
-export CODEX_WORKDIR="${CODEX_WORKDIR:-$repo_root}"
+export CODEX_WORKDIR="$repo_root"
 
-exec codex -C "$CODEX_WORKDIR" "$@"
+launcher_argv=(
+  -C "$repo_root"
+  -c "${codex_scope_overrides[0]}"
+  -c "${codex_scope_overrides[1]}"
+)
+if [[ "$exec_index" -ge 0 ]]; then
+  insertion_index="$#"
+  if [[ "$terminator_index" -ge 0 ]]; then
+    insertion_index="$terminator_index"
+  fi
+  user_argv=("$@")
+  launcher_argv+=("${user_argv[@]:0:insertion_index}")
+  launcher_argv+=(
+    -c "${codex_scope_overrides[0]}"
+    -c "${codex_scope_overrides[1]}"
+  )
+  launcher_argv+=("${user_argv[@]:insertion_index}")
+else
+  launcher_argv+=("$@")
+fi
+
+exec "$dispatcher_path" "${launcher_argv[@]}"

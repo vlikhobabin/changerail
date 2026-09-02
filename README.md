@@ -138,8 +138,8 @@ changes**, каждый со своими OpenSpec-артефактами в `op
 - `scripts/smoke-drift.py` как workspace-level drift gate с JSON report;
 - `scripts/public-surface-scan.py`, `scripts/run-release-baseline.py`,
   `scripts/compile-python-inventory.py`, `scripts/smoke-contract-schemas.py`,
-  `scripts/smoke-python-runtime.py`, generic source distribution builder и
-  focused smoke checks для
+  `scripts/smoke-python-runtime.py`, `scripts/smoke-codex-launcher.py`, generic
+  source distribution builder и focused smoke checks для
   release/public-safety gate;
 - `VERSION`, `CHANGELOG.md`, compatibility notes и migration guide для
   release discipline;

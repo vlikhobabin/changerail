@@ -44,14 +44,34 @@ Use the repo-scoped launcher:
 ./bin/codex
 ```
 
-The launcher sets:
+Launcher вычисляет canonical root фактического checkout, по умолчанию задаёт
+`CODEX_HOME=<repo-root>/.codex`, принудительно задаёт
+`CODEX_WORKDIR=<repo-root>` и передаёт тот же root через Codex `-C`. Через
+documented invocation-level `-c` overrides он также задаёт trust для
+фактического checkout и полный filesystem MCP subtree с последним scope
+argument, равным checkout root. Для `exec` owned overrides повторяются в
+effective subcommand layer после user overrides. Поэтому
+development checkout может находиться в произвольном абсолютном каталоге, а
+стабильная consumer-установка по-прежнему использует `/opt/changerail`.
 
-- `CODEX_HOME=/opt/changerail/.codex`;
-- `CODEX_WORKDIR=/opt/changerail`.
+`.codex/config.toml` остаётся source of truth для MCP argv/pins, plugins и
+intentional `approval_policy = "never"` с
+`sandbox_mode = "danger-full-access"`; launcher не полагается на env
+interpolation в TOML. Явный `CHANGERAIL_CODEX_BIN` может выбрать global Codex
+dispatcher, иначе launcher ищет первый `codex` в `PATH`, который не совпадает с
+самим launcher. Linux launcher использует fixed system helpers и выполняет
+открытый/проверенный dispatcher через `/proc/self/fd`, поэтому замена candidate
+pathname между validation и `exec` не меняет выбранный inode. Empty components
+в `PATH`, включая полностью пустой `PATH`, означают current directory.
 
-The committed profile scopes Codex/filesystem access to this repository and
-uses `approval_policy = "never"` with `sandbox_mode = "danger-full-access"`.
-Treat `.codex/config.toml` as the source of truth for enabled MCP/plugins.
+Launcher отклоняет user `-C`/`--cd`, config-source bypass
+`--ignore-user-config` и `-c`/`--config`, которые могут изменить его project
+trust либо любой ancestor/field/descendant `mcp_servers.filesystem`, во всех
+поддерживаемых separate, assignment и joined short forms до первого `--`.
+Unrelated config overrides и остальные user argv сохраняются byte-for-byte в
+исходном относительном порядке. Canonical root сохраняет
+Unicode, spaces, quotes, backslashes и supported standard whitespace, включая
+terminal newline; TOML-unsafe control characters отклоняются fail-closed.
 
 The last two settings are intentional for this local development workspace, but
 they make review discipline more important. Do not run unreviewed commands from
