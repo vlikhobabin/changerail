@@ -3,10 +3,10 @@
 Помимо runtime-копии поддержано подключение общего рабочего checkout командами
 `attach-inventory`, `attach`, `detach`. Режим `--development` открывает тесты
 через ссылки. Контракт и восстановление описаны в
-[shared-source.md](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/shared-source.md).
+[shared-source.md](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/shared-source.md).
 Copy-install поверх подключённых ссылок запрещён.
 
-Этот комплект содержит общий native runtime. Версия `2.0.0-rc.2`
+Этот комплект содержит общий native runtime. Версия `2.0.0-rc.3`
 обозначает предварительную версию для испытаний перед стабильным выпуском.
 Поле `provenance.upstream_commit` в `distribution.json` обозначает историческую
 базу исходника, а не Git-коммит этого выпуска. Точные release commit и tree
@@ -17,8 +17,8 @@ Copy-install поверх подключённых ссылок запрещён
 Ядро, адаптеры OpenSpec/Codex/pytest, схемы, навыки и выбранные README вместе
 с этим документом входят в один архив. Каталог `docs/` и корневой README
 остаются в исходном репозитории: для первого запуска используйте
-[quickstart](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/quickstart.md),
-для эксплуатации — [руководство оператора](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/operations.md).
+[quickstart](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/quickstart.md),
+для эксплуатации — [руководство оператора](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/operations.md).
 Тесты ChangeRail/OpenSpec, тестовые launchers и фикстуры также остаются
 в исходном репозитории ChangeRail. Runtime-архив их не устанавливает;
 разработчик может открыть их через `attach --development`.
@@ -76,7 +76,7 @@ Lock `.changerail/distribution-lock.json` содержит версию, про�
 `rolled_back`; поддерживаемой команды автоматического восстановления или очистки
 попытки нет. Не удаляйте audit и не редактируйте lock ради повтора. Сначала
 сохраните backup и фактическое состояние, затем выполните разбор по
-[аварийному runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/operations.md#незавершённая-установка-или-подключение).
+[аварийному runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/operations.md#незавершённая-установка-или-подключение).
 
 Любой неучтённый сохранённый run блокирует замену кода; совпадения только
 `execution_contract` недостаточно для совместимости frozen process. Точное
@@ -103,6 +103,15 @@ python3 "$chrl_source/distribution.py" install /tmp/changerail-next.tar.gz \
 
 Ранее сохранённая история не может исчезнуть или измениться при таком переходе.
 Разрешение истории не обходит delivery lock и не разрешает продолжение старых runs.
+
+Для stopped native run с точным drift принятого Next есть отдельный
+[plan restoration](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/operations.md#восстановление-принятого-next):
+prepare связывает lineage, прежний проверенный payload и точный target archive,
+apply выполняет установку под тем же разрешением и восстанавливает Next.
+Только этот ограниченный переход даёт право продолжить поддержанную installed
+lineage; он не переводит read-only историю обратно в исполняемую. Незавершённый
+restoration intent блокирует обычные installer и shared-source writers до
+согласования того же apply.
 
 ## Первое принятие прежней локальной реализации
 

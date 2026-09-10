@@ -1,7 +1,7 @@
 # Восстановить принятый план после случайной правки карточки исполнителем
 
 ## Status
-2.todo
+4.done
 
 ## Lifecycle
 openspec-v1
@@ -176,7 +176,24 @@ Failed import оставляет child без native-plan; исходная ис
 - Optional local-only evidence in the qa-mcp checkout: `.runtime/qa-roadmap/oss-00/fix-04a-start/blocker.json`, `blocker.md`, `proposed-next-restoration.patch`, `runner.log`, `resume-01.log`. Эти файлы не копировать в ChangeRail и не делать обязательными входами тестов.
 
 ## Result
-accepted native OpenSpec plan; structural admission only
+Реализовано точное восстановление принятого Next: prepare/apply, immutable
+history и failed ancestry, проверенный installed runtime transition, fresh proofs
+и сохранение checkpoint/review accounting. Прерывания apply и создания successor
+обрабатываются отдельными durable receipts без переписывания исходных runs.
+
+Сквозной synthetic installed сценарий прошёл через штатные gates до archive,
+final floor и commit/push в локальный bare remote. Сохранены оба исходных run,
+проверен расход одного независимого review. Production compatibility закреплена
+за точными payload candidate.5/rc.1/rc.2; неизвестный fork отклоняется.
+
+Независимое ревью выявило три дефекта; исправления подтверждены regression/E2E.
+Разработка инструмента выполнена управляющей сессией, без self-modifying runner
+и без изменения или продолжения реального потребителя. Подробные команды,
+границы доказательств и результаты — в
+`openspec/changes/archive/2026-09-10-restore-accepted-plan-after-implementation-drift/verify-notes.md`.
+
+Подготовлен выпуск `v2.0.0-rc.3`. Точный release commit, полный CI и provenance
+фиксируются на странице GitHub Release после прохождения публикационных gates.
 
 ## Next
 - Реализовать принятый план в основном checkout ChangeRail, проверить C1–C4, выполнить независимое ревью и выпустить новый RC по docs/releasing.md. Реальные consumer runs остаются отдельным действием.
@@ -186,3 +203,5 @@ accepted native OpenSpec plan; structural admission only
 - 2026-09-10 Уточнён результат локального workaround и третьего run; воспроизведены два gates и missing-plan child на текущем core; подготовлен один native change без admission.
 - 2026-09-10 Оператор разрешил довести change до завершения и публикации нового релиза; обратимые исправления выполнять без дополнительных остановок.
 - 2026-09-10T10:36:38Z accepted native OpenSpec plan
+- 2026-09-10 Реализованы prepare/apply, installed transition и интеграция resume; выполняются регрессии и synthetic end-to-end. Frozen Next и остальные принятые разделы сохранены.
+- 2026-09-10 Завершены C1–C4, адресные regressions и synthetic E2E, исправлены три находки независимого review; canonical spec синхронизирован, stock archive выполнен управляющей сессией. Подготовлен rc.3; CI/tag остаются отдельными публикационными gates.

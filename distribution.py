@@ -340,6 +340,16 @@ def delivery_lock(root: Path) -> Iterator[None]:
             raise DistributionError(
                 "delivery writer or another installer holds delivery.lock"
             ) from exc
+        restorations = confined(root, ".runtime/changerail/plan-restorations")
+        if restorations.exists():
+            for transition in restorations.iterdir():
+                relative = transition.relative_to(root).as_posix()
+                intent = confined(root, relative + "/apply-intent.json")
+                applied = confined(root, relative + "/applied.json")
+                if intent.exists() and not applied.exists():
+                    raise DistributionError(
+                        "pending plan restoration requires its exact apply reconciliation"
+                    )
         yield
     finally:
         os.close(descriptor)
@@ -559,6 +569,137 @@ def _install_locked(
             "installation failed and previous bytes were restored; inspect retained audit"
         ) from failure
     return report
+
+
+def install_restoration_locked(
+    root: Path, proposal: dict[str, Any], transition_root: Path
+) -> dict[str, Any]:
+    """Resume an exact restoration install; caller owns lock and plan authority.
+
+    Ordinary installation remains closed to frozen runs. An intent allows
+    only old/target file states after interruption, never arbitrary drift.
+    """
+
+    def sync_directory(path: Path) -> None:
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    root = git_root(root)
+    relative = transition_root.relative_to(root).as_posix()
+    if (
+        confined(root, relative) != transition_root
+        or transition_root.parent != root / ".runtime/changerail/plan-restorations"
+        or proposal.get("schema") != "changerail.installed-restoration.v1"
+        or proposal.get("target") != str(root)
+    ):
+        raise DistributionError("unsafe restoration installation owner")
+    # Only the separately authorized plan operation may use this entry point.
+    parent_raw = read_file(transition_root, "proposal.json")[0]
+    parent = json.loads(parent_raw)
+    authority = json.loads(read_file(transition_root, "apply-intent.json")[0])
+    if (
+        parent.get("schema") != "changerail.plan-restoration.v1"
+        or authority.get("schema") != "changerail.plan-restoration.v1"
+        or parent.get("runtime_transition") != proposal
+        or parent.get("project") != str(root)
+        or parent.get("run_id") != proposal.get("run_id")
+        or authority.get("proposal_sha256") != digest(parent_raw)
+        or authority.get("authorized") != digest(parent_raw)
+    ):
+        raise DistributionError("restoration installation lacks exact plan authority")
+    archive = Path(proposal["archive"])
+    manifest, payload = inspect_archive(archive)
+    if (
+        digest(archive.read_bytes()) != proposal["archive_sha256"]
+        or manifest["files"] != proposal["after_lock"]["files"]
+    ):
+        raise DistributionError("restoration target archive changed")
+    before_lock, after_lock = proposal["before_lock"], proposal["after_lock"]
+    if before_lock["retained_read_only_runs"] != after_lock["retained_read_only_runs"]:
+        raise DistributionError("restoration cannot remove read-only history")
+    if run_inventory(root) != proposal["runs"]:
+        raise DistributionError("restoration frozen run inventory changed")
+    for name, expected in {**proposal["history"], **proposal["settings"]}.items():
+        if entry(read_file(root, name)) != expected:
+            raise DistributionError(
+                f"restoration history or project setting changed: {name}"
+            )
+    proof = {
+        "schema": proposal["schema"],
+        "proposal_sha256": digest(encoded(proposal)),
+        "identity": proposal["after_identity"],
+    }
+    intent_path = confined(transition_root, "runtime-intent.json")
+    applied_path = confined(transition_root, "runtime-applied.json")
+    interrupted = intent_path.exists()
+    if interrupted and read_file(transition_root, "runtime-intent.json")[0] != encoded(
+        proof
+    ):
+        raise DistributionError("restoration installation intent changed")
+    if applied_path.exists() and (
+        not interrupted
+        or read_file(transition_root, "runtime-applied.json")[0] != encoded(proof)
+    ):
+        raise DistributionError("restoration installation receipt changed")
+    old, new = before_lock["files"], manifest["files"]
+    all_names = sorted(old.keys() | new.keys())
+    for name in all_names:
+        allowed_payload(name)
+        path = confined(root, name)
+        actual = entry(read_file(root, name)) if path.exists() else None
+        expected = (old.get(name), new.get(name)) if interrupted else (old.get(name),)
+        if actual not in expected:
+            raise DistributionError(f"restoration runtime has unexpected bytes: {name}")
+    actual_lock = read_file(root, LOCK)[0]
+    old_bytes, new_bytes = encoded(before_lock), encoded(after_lock)
+    if digest(old_bytes) != proposal["before_lock_sha256"] or actual_lock not in (
+        (old_bytes, new_bytes) if interrupted else (old_bytes,)
+    ):
+        raise DistributionError("restoration installation lock changed")
+    if applied_path.exists():
+        if (
+            actual_lock != new_bytes
+            or any(
+                entry(read_file(root, name)) != expected
+                for name, expected in new.items()
+            )
+            or any(confined(root, name).exists() for name in old.keys() - new.keys())
+        ):
+            raise DistributionError("applied restoration runtime changed")
+        return proof
+    if not interrupted:
+        for name in all_names:
+            if name in old:
+                data, mode = read_file(root, name)
+                write_atomic(
+                    confined(transition_root, "runtime-before/" + name), data, mode
+                )
+        with intent_path.open("xb") as stream:
+            stream.write(encoded(proof))
+            stream.flush()
+            os.fsync(stream.fileno())
+    sync_directory(transition_root)
+    for name in all_names:
+        target = confined(root, name)
+        if name in payload:
+            data, mode = payload[name]
+            if not target.exists() or entry(read_file(root, name)) != new[name]:
+                write_atomic(target, data, mode)
+        elif target.exists():
+            target.unlink()
+        if target.parent.exists():
+            sync_directory(target.parent)
+    write_atomic(confined(root, LOCK), new_bytes)
+    sync_directory(root / ".changerail")
+    with applied_path.open("xb") as stream:
+        stream.write(encoded(proof))
+        stream.flush()
+        os.fsync(stream.fileno())
+    sync_directory(transition_root)
+    return proof
 
 
 def main(argv: list[str] | None = None) -> int:

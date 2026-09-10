@@ -275,7 +275,7 @@ def test_public_resume_initializes_archived_context(
     monkeypatch.setattr(d, "PROFILE_PATH", root / "profile.toml")
     monkeypatch.setattr(d, "profile", lambda: {})
     monkeypatch.setattr(
-        d, "recovery_source", lambda *_a: (True, "fixture", {"run_id": previous.name})
+        d, "recovery_source", lambda *_a, **_kw: (True, "fixture", {"run_id": previous.name})
     )
     monkeypatch.setattr(
         d, "doctor", lambda *_a, **_k: {"ok": True, "recovery_of": previous.name}

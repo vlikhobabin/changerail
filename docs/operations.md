@@ -98,12 +98,99 @@ payload обязан совпадать с сохранённым manifest. Дл
 [runtime repair](runtime-repair.md), допустимый лишь для остановленного первичного
 native run до первого принятого checkpoint, evidence и поздних этапов.
 Он не распространяется на локальную runtime-копию и исторические runs.
-Если граница ремонта не соблюдена, поддерживаемого перехода на новый код нет:
-сохраните состояние для разбора, не переписывайте `run.json` и receipts.
+Для drift принятого Next предусмотрен отдельный ограниченный переход ниже,
+в том числе с проверяемым обновлением установленного runtime. Вне документированных
+границ сохраните состояние для разбора; не переписывайте `run.json` и receipts.
 
 Исторические `delivery-runs`, `ff-runs`, `offline-finalizations` доступны для
 чтения через `status`; они не получают права на native resume после обновления.
 Порядок сохранения истории при установке — в [DISTRIBUTION.md](../DISTRIBUTION.md).
+
+## Восстановление принятого Next
+
+Если реализация изменила frozen `Next`, возврат текста вручную нарушает точный
+сохранённый payload. Команды `plan-restore-prepare` и `plan-restore-apply`
+восстанавливают принятые байты Next и сохраняют переход отдельно от истории runs.
+Другие frozen sections и OpenSpec artifacts должны соответствовать принятому
+плану; изменения только checkboxes не меняют семантику задач. Текущие Result/Log
+и режим карточки сохраняются.
+
+Выберите точный stopped run по его `run.json`, включая последнюю неудачную
+попытку resume. Предок может содержать принятый план, отсутствующий у failed child;
+добавлять план в старый child не нужно. До prepare должны совпадать Git HEAD,
+пустой index, сохранённый manifest и вся ancestry. Причина остановки должна быть
+drift принятого плана или связанный отказ до импорта.
+
+Для runtime с прежней frozen identity:
+
+```sh
+"$chrl_project/bin/chrl" --project "$chrl_project" plan-restore-prepare "$chrl_run" \
+  --reason 'Восстановление принятого Next после implementation drift' --dry-run
+"$chrl_project/bin/chrl" --project "$chrl_project" plan-restore-prepare "$chrl_run" \
+  --reason 'Восстановление принятого Next после implementation drift'
+```
+
+Dry-run не пишет proposal. Обычный prepare возвращает `proposal` и
+`proposal_sha256`. Просмотрите сохранённый diff, before/after hashes, lineage,
+принятый источник и reason. Apply разрешает только эту точную операцию:
+
+```sh
+"$chrl_project/bin/chrl" --project "$chrl_project" plan-restore-apply "$chrl_run" \
+  --proposal .runtime/changerail/plan-restorations/REPLACE_WITH_ID/proposal.json \
+  --authorize REPLACE_WITH_PROPOSAL_SHA256
+"$chrl_project/bin/chrl" --project "$chrl_project" resume "$chrl_run"
+```
+
+Подставьте значения из prepare; SHA-256 — полномочие на конкретный proposal.
+Prepare/apply выполняются вне implementation/review-сессии и удерживают project
+lock. Apply не запускает runner. После него обычный resume создаёт единственного
+successor с `recovery_of` на выбранную последнюю попытку. Завершённые группы
+не повторяются; focused/observed proofs необходимо обновить перед handoff.
+Старые run.json, manifests, evidence, events и счётчики не переписываются.
+
+Для установленной копии прежней версии запускайте **новый проверенный runtime
+из отдельного каталога** с явным `--project`, пока у потребителя ещё установлен
+старый комплект. Целевой архив обязан содержать точные байты этого нового runtime:
+
+```sh
+chrl_tool=/opt/example-changerail-next
+chrl_archive=/opt/example-releases/changerail-2.0.0-rc.3-runtime.tar.gz
+"$chrl_tool/bin/chrl" --project "$chrl_project" plan-restore-prepare "$chrl_run" \
+  --reason 'Восстановление Next с проверяемым переходом установленного runtime' \
+  --runtime-archive "$chrl_archive"
+"$chrl_tool/bin/chrl" --project "$chrl_project" plan-restore-apply "$chrl_run" \
+  --proposal .runtime/changerail/plan-restorations/REPLACE_WITH_ID/proposal.json \
+  --authorize REPLACE_WITH_PROPOSAL_SHA256
+"$chrl_project/bin/chrl" --project "$chrl_project" resume "$chrl_run"
+```
+
+Совместимость ограничена native predecessor `2.0.0-candidate.5`, `2.0.0-rc.1`
+и `2.0.0-rc.2` с доказанными schemas, identity shape и полным frozen distribution
+lock. Одной строки версии недостаточно. Профиль, launcher и адаптеры потребителя
+не должны изменяться. Неполный старый process identity допускается только там,
+где старый frozen lock доказывает пропущенные tool bytes и точный payload
+входит в поставляемый compatibility descriptor. Самосогласованный неизвестный
+fork с той же строкой версии отклоняется. Несвязанные frozen runs
+блокируют переход; read-only history никогда не получает право resume.
+Обычный install и `--retain-history-read-only` не заменяют эту операцию.
+
+При прерывании apply повторите **тот же apply с тем же proposal и SHA-256**.
+Durable intent позволяет согласовать только доказанные before/after состояния
+карточки и old/target состояния файлов runtime. Любое третье состояние требует
+разбора. Незавершённый intent блокирует обычный run/resume до согласования;
+не удаляйте его и не создавайте новый proposal для обхода. Успешный повтор apply
+не делает второй переход. Создание successor также имеет durable intent: полный набор run/plan/manifest/context
+сначала готовится отдельно и атомарно появляется в каталоге runs. Если resume
+прервался до начала исполнения successor, повторите resume выбранного predecessor:
+он завершит создание того же run. После начала successor используйте его обычный
+status и resume. Архив target сохраняйте доступным до завершения apply.
+
+Не поддерживаются остановка оператором, unresolved verification attempt,
+незавершённый provisional review, archive intent/archive, final floor и публикация.
+Законченный NO-GO допустим при оставшемся бюджете; после двух ревью prepare
+отклоняется. Переход не устраняет посторонние ошибки board и не обходит дальнейшие
+sync, handoff, review, archive, final и publication gates. Если прежний manifest
+уже переписан вручную, нельзя объявлять его исходным сохранённым evidence.
 
 ## Прерванная или неуспешная проверка
 

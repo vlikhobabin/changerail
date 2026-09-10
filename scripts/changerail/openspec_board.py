@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -33,6 +34,78 @@ def _exclusive_json(path: Path, payload: dict[str, Any]) -> None:
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _retain_acceptance(delivery: Any, card: Path, root: Path, identity: dict) -> None:
+    """Publish identity last; reconcile only a durable new-admission intent.
+
+    A receipt without the new marker is historical and never gets backfilled.
+    """
+    receipt = root / "native-plan.json"
+    intent_path = root / "accepted-card-intent.json"
+    if receipt.exists() and not intent_path.exists():
+        return
+    if not intent_path.exists():
+        data = delivery._check_bytes(card)
+        intent = {
+            "schema": "changerail.accepted-card-intent.v1",
+            "plan": identity,
+            "card_hex": data.hex(),
+            "source": delivery.repo_relative(card),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }
+        _exclusive_json(intent_path, intent)
+        _sync_directory(root)
+    intent = delivery._check_json_bytes(delivery._check_bytes(intent_path, 1024 * 1024))
+    try:
+        data = bytes.fromhex(intent["card_hex"])
+    except (ValueError, TypeError, KeyError) as exc:
+        raise DeliveryError("invalid accepted snapshot intent") from exc
+    if (
+        intent.get("schema") != "changerail.accepted-card-intent.v1"
+        or intent.get("plan") != identity
+        or hashlib.sha256(data).hexdigest() != intent.get("sha256")
+    ):
+        raise DeliveryError("accepted snapshot intent changed")
+    if not receipt.exists() and (
+        intent.get("source") != delivery.repo_relative(card)
+        or data != delivery._check_bytes(card)
+    ):
+        raise DeliveryError("interrupted admission card differs from retained intent")
+    snapshot = root / "accepted-card.md"
+    if snapshot.exists():
+        if delivery._check_bytes(snapshot) != data:
+            raise DeliveryError("accepted card snapshot changed")
+    else:
+        with snapshot.open("xb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        _sync_directory(root)
+    descriptor = {
+        "schema": "changerail.accepted-card.v1",
+        "sha256": intent["sha256"],
+        "card_contract_sha256": identity["card_contract_sha256"],
+        "source": intent["source"],
+    }
+    descriptor_path = root / "accepted-card.json"
+    if descriptor_path.exists():
+        if delivery._check_json(descriptor_path) != descriptor:
+            raise DeliveryError("accepted snapshot descriptor changed")
+    else:
+        _exclusive_json(descriptor_path, descriptor)
+        _sync_directory(root)
+    if not receipt.exists():
+        _exclusive_json(receipt, identity)
+        _sync_directory(root)
 
 
 def accept_card(delivery: Any, card: Path, *, dry_run: bool = False) -> dict[str, Any]:
@@ -79,8 +152,7 @@ def accept_card(delivery: Any, card: Path, *, dry_run: bool = False) -> dict[str
             "receipt": delivery.repo_relative(receipt),
             "moved": False,
         }
-    if not receipt.exists():
-        _exclusive_json(receipt, identity)
+    _retain_acceptance(delivery, card, receipt_root, identity)
     target = card.parent.parent / "2.todo" / card.name
     moved = target != card
     if moved:

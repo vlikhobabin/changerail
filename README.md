@@ -1,6 +1,6 @@
 # Единый локальный runtime ChangeRail
 
-Этот репозиторий — общий исходник native runtime. Версия `2.0.0-rc.2`
+Этот репозиторий — общий исходник native runtime. Версия `2.0.0-rc.3`
 объединяет lifecycle OpenSpec, проверяемые доказательства, независимое ревью и
 возобновление доставки. Это предварительная версия для испытаний перед стабильным выпуском 2.0.0.
 
@@ -17,9 +17,9 @@
 - [Разработка](CONTRIBUTING.md) и [выпуск релиза](docs/releasing.md).
 - [Полномочия запуска и безопасность](SECURITY.md).
 
-[Выпуск v2.0.0-rc.2](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.2)
+[Выпуск v2.0.0-rc.3](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.3)
 содержит runtime-архив, `SHA256SUMS` и `release-provenance.json`.
-Изменения описаны в [release notes](docs/releases/2.0.0-rc.2.md).
+Изменения описаны в [release notes](docs/releases/2.0.0-rc.3.md).
 
 ## Контракт
 

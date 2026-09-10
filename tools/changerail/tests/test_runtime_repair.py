@@ -82,7 +82,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         review_budget_usage=lambda run: {"semantic_cycles": 0},
         combined_change_events=lambda run: state["events"],
         resolve_deliverable_card=lambda card: project / card,
-        recovery_source=lambda card, paths: (True, "retained", manifest),
+        recovery_source=lambda card, paths, **kwargs: (True, "retained", manifest),
         changed_paths=lambda: ["product.py"],
         payload_fingerprint=lambda: state["payload"],
         delivery_lock=lock,
@@ -250,7 +250,7 @@ def test_resume_dispatch_uses_applied_repair_and_preserves_original_run(
     monkeypatch.setattr(
         local_delivery,
         "run_delivery",
-        lambda card, *, recovery=False: launched.append((card, recovery)) or 0,
+        lambda card, *, recovery=False, required_run_id=None: launched.append((card, recovery)) or 0,
     )
     original = (run / "run.json").read_bytes()
     assert local_delivery.main(["resume", str(run)]) == 2

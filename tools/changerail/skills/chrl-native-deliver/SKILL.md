@@ -10,6 +10,11 @@ its unchanged stock `workflows.apply` instructions. The card
 owns high-level acceptance, budget and evidence policy. The linked OpenSpec
 change owns proposal, delta specs, design and tasks. Do not duplicate or rewrite
 the accepted plan; only task checkbox progress is allowed during implementation.
+On the card, only Result/Log may be updated at the stages described below;
+Status and board moves belong to the outer runner. Next is frozen, even when
+its wording looks like a completed next step. Never edit Next, Scope, Acceptance
+or any other accepted section. A rejected plan requires the operator-owned
+plan restoration workflow; do not rewrite manifests or accepted receipts.
 
 For `CHRL_DELIVERY_STAGE=change`, implement only `CHRL_CHANGE_NUMBER`. Honor
 `CHRL_CHANGE_NEXT_EVENT`; do not repeat an already started checkpoint. Emit
@@ -53,7 +58,9 @@ the project's runtime authorization, target binding, preflight and recovery rule
 review/final evidence.
 
 Update the card Result/Log only after implementation is complete. Then call
-`./bin/chrl handoff <card>` and stop only when it exits zero. Never invoke review,
+`./bin/chrl handoff <card>` and stop only when it exits zero. If it fails, report
+the exact blocker and retained run; do not claim a successful handoff or overall
+delivery completion. Never invoke review,
 final verification, publication, commit or push: the outer runner owns them.
 
 Timing targets are advisory. Continue accepted in-scope work past a target

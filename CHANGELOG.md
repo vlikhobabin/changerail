@@ -1,5 +1,19 @@
 # Изменения
 
+## 2.0.0-rc.3 — точное восстановление принятого плана
+
+- Prepare/apply для восстановления frozen Next с отдельной неизменяемой
+  транзакцией; история runs и неудачных resume сохраняется полностью.
+- Явный переход поддержанного installed predecessor на точный новый архив,
+  без предоставления права исполнения read-only истории.
+- Продолжение сохраняет completed groups и review budget, требует свежие proofs
+  и проходит обычные handoff, review, archive, final и publication gates.
+- Новые admissions сохраняют accepted-card snapshot; implementing skill явно
+  запрещает менять frozen sections и объявлять успех при отказе handoff.
+- Документированы команды восстановления, прерывания apply и границы миграции.
+
+Подробности — в [release notes](docs/releases/2.0.0-rc.3.md).
+
 ## 2.0.0-rc.2 — документация и эксплуатация
 
 - Quickstart для опубликованного архива и первой native-доставки.

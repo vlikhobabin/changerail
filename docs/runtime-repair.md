@@ -66,3 +66,19 @@ OpenSpec, проверка его установки, `package.json`, lockfile �
 числе через общий исходник. Python repair не разрешает заменять этот контур.
 Старые записи с неполной идентичностью не дополняются автоматически: совпадение
 версии кандидата не доказывает совместимость сохранённого процесса.
+
+
+## Отличие от восстановления плана
+
+`runtime-repair` исправляет Python-ядро раннего shared-source run и сохраняет
+прежние ограничения. Для implementation drift принятого `Next` используйте
+[отдельный plan restoration runbook](operations.md#восстановление-принятого-next).
+Он восстанавливает точные принятые байты, сохраняет completed groups и всю
+цепочку неудачных resume, требует свежие proofs и расходует прежний review budget.
+Для поддержанной installed-копии этот переход может явно включать точный target
+archive; это не разрешение на произвольное обновление frozen run.
+
+Plan restoration хранит proposal, intent, applied/effective manifest и consumption
+в `.runtime/changerail/plan-restorations/`, вне старых runs. Команду `manifest`
+для пересэмплирования predecessor не используют. При прерывании повторяют тот же
+apply; историю и accounting не редактируют.

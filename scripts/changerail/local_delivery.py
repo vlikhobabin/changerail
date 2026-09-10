@@ -165,8 +165,12 @@ def resume_publication(run_dir: Path) -> int:
 def require_frozen_execution(run_dir: Path) -> dict[str, Any]:
     metadata = require_current_execution(run_dir)
     from scripts.changerail.runtime_repair import effective_identity
+    from scripts.changerail import plan_restoration
 
-    if effective_identity(runner_module(), run_dir, metadata) != execution_identity():
+    identity = plan_restoration.effective_identity(runner_module(), run_dir, metadata)
+    if identity is None:
+        identity = effective_identity(runner_module(), run_dir, metadata)
+    if identity != execution_identity():
         raise DeliveryError(
             "frozen execution process changed; ordinary recovery cannot adopt new code or profile"
         )
@@ -2604,7 +2608,13 @@ def recovery_source(
             continue
         try:
             require_current_execution(previous_run)
-            manifest = _load_recovery_manifest(path)
+            from scripts.changerail import plan_restoration
+
+            manifest = plan_restoration.effective_manifest(
+                runner_module(), previous_run
+            )
+            if manifest is None:
+                manifest = _load_recovery_manifest(path)
         except (DeliveryError, UnicodeDecodeError, OSError, ValueError):
             invalid_proof = True
             continue
@@ -2651,7 +2661,11 @@ def recovery_source(
 
 
 def doctor(
-    card_value: str, *, check_remote: bool = True, recovery: bool = False
+    card_value: str,
+    *,
+    check_remote: bool = True,
+    recovery: bool = False,
+    required_run_id: str | None = None,
 ) -> dict[str, Any]:
     card = resolve_deliverable_card(card_value)
     checks: list[dict[str, Any]] = []
@@ -2676,7 +2690,9 @@ def doctor(
     dirty = changed_paths()
     recovery_manifest: dict[str, Any] | None = None
     if recovery:
-        recovery_ok, recovery_detail, recovery_manifest = recovery_source(card, dirty)
+        recovery_ok, recovery_detail, recovery_manifest = recovery_source(
+            card, dirty, required_run_id=required_run_id
+        )
         add("recovery-payload", recovery_ok, recovery_detail)
         objective = os.environ.get("CHRL_RECOVERY_OBJECTIVE", "").strip()
         add(
@@ -4337,6 +4353,17 @@ def build_recovery_context(
         "retained_focused_evidence": retained_evidence,
         "instruction": "Use this summary as the sole index of the previous run. A null previous_completed_review means no completed verdict exists. Only evidence with matches_current_payload=true may be carried forward. Do not repeat complete Change checkpoints; continue from next_change_event. Inspect failed_final_floors command results and retained logs, repair the failed payload and retain current focused/pre-review evidence before using the remaining shared review allowance. An unchanged failed payload cannot spend a new review or repeat the final floor.",
     }
+    restoration = _check_json(run_dir / "run.json").get("plan_restoration")
+    if restoration:
+        context["plan_restoration"] = restoration
+        context["instruction"] += (
+            " The accepted Next bytes were restored through an explicit transition. "
+            "All predecessor evidence is historical; re-execute required checks and "
+            "record current observed proof before handoff. Preserve completed task "
+            "groups, finalize/sync normally, and never edit frozen Next."
+        )
+        for item in retained_evidence:
+            item["matches_current_payload"] = False
     contract = _run_observed_contract(run_dir)
     if contract is not None:
         key = (
@@ -7542,7 +7569,7 @@ def verify_as_outer_dispatch(card_value: str) -> int:
 
 
 @contextmanager
-def delivery_lock():
+def delivery_lock(*, restoration_reconcile: bool = False):
     """Serialize checkout writers; never follow a substituted lock file."""
     RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
     path = RUNTIME_ROOT / "delivery.lock"
@@ -7556,18 +7583,31 @@ def delivery_lock():
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise DeliveryError("another delivery runner holds the checkout") from exc
+        if not restoration_reconcile:
+            from scripts.changerail import plan_restoration
+
+            plan_restoration.ensure_no_pending(runner_module())
         yield
     finally:
         os.close(descriptor)
 
 
-def run_delivery(card_value: str, *, recovery: bool = False) -> int:
+def run_delivery(
+    card_value: str, *, recovery: bool = False, required_run_id: str | None = None
+) -> int:
     with delivery_lock():
-        return _run_delivery(card_value, recovery=recovery)
+        from scripts.changerail import plan_restoration
+
+        plan_restoration.ensure_no_pending(runner_module())
+        return _run_delivery(
+            card_value, recovery=recovery, required_run_id=required_run_id
+        )
 
 
-def _run_delivery(card_value: str, *, recovery: bool = False) -> int:
-    health = doctor(card_value, recovery=recovery)
+def _run_delivery(
+    card_value: str, *, recovery: bool = False, required_run_id: str | None = None
+) -> int:
+    health = doctor(card_value, recovery=recovery, required_run_id=required_run_id)
     print(json.dumps(health, ensure_ascii=False, indent=2))
     if not health["ok"]:
         return 2
@@ -7587,7 +7627,11 @@ def _run_delivery(card_value: str, *, recovery: bool = False) -> int:
                 )
     if recovery and native.is_native(card):
         changes = declared_change_plan(previous_run)
-        retained_plan = _check_json(previous_run / "native-plan.json")
+        from scripts.changerail import plan_restoration
+
+        retained_plan = plan_restoration.accepted_plan(runner_module(), previous_run)
+        if retained_plan is None:
+            retained_plan = _check_json(previous_run / "native-plan.json")
         if not changes or retained_plan.get("groups") != [
             list(group) for group in changes
         ]:
@@ -7596,96 +7640,134 @@ def _run_delivery(card_value: str, *, recovery: bool = False) -> int:
             )
     else:
         changes = planned_changes(card)
-    run_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{card_id(card)}"
-    run_dir = RUNTIME_ROOT / "runs" / run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
-    creation_selection = {
-        "schema": "changerail.observed-proof-selection.v1",
-        "root": repo_relative(run_dir),
-        "owner": {"run_id": run_id, "card": repo_relative(card)},
-        "required_stages": ["implementation", "review", "final"],
-    }
-    creation_path = run_dir / "observed-proof-selection.json"
-    write_json(creation_path, creation_selection)
-    creation_bytes = _check_bytes(creation_path)
-    creation_reference = {
-        "path": repo_relative(creation_path),
-        "sha256": hashlib.sha256(creation_bytes).hexdigest(),
-    }
-    run = {
-        "schema": "changerail.delivery-run.v2",
-        "run_id": run_id,
-        "card": repo_relative(card),
-        "started_at": utc_now(),
-        "baseline_head": git("rev-parse", "HEAD").stdout.strip(),
-        "profile": repo_relative(PROFILE_PATH),
-        "mode": "delivery",
-        "lifecycle_mode": native.lifecycle_mode(card),
-        "change_plan": [{"number": number, "slug": slug} for number, slug in changes],
-    }
-    run["execution_contract"] = "changerail.native.v1"
-    run["process_identity"] = execution_identity()
-    run["observed_proof_contract"] = {
-        "schema": _OBSERVED_PROOF_CONTRACT,
-        "required_stages": ["implementation", "review", "final"],
-        "selection": creation_reference,
-    }
-    resume_thread_id: str | None = None
-    require_first_file_change = True
-    inherited_investigative_commands = 0
-    if recovery:
-        run["recovery_of"] = previous_run_id
-        run["recovery_compatibility"] = recovery_compatibility
-        run["recovery_objective"] = os.environ["CHRL_RECOVERY_OBJECTIVE"].strip()
-        previous_manifest = load_json(previous_run / "manifest.json")
-        (
-            resume_thread_id,
-            require_first_file_change,
-            inherited_investigative_commands,
-        ) = recovery_implementation_state(previous_run, previous_manifest)
-        run["resume_thread_id"] = resume_thread_id
-        run["inherited_investigative_commands"] = inherited_investigative_commands
-    write_json(run_dir / "run.json", run)
-    if recovery and native.is_native(card):
-        carried = native.carry_archive_receipt(runner_module(), previous_run, run_dir)
-        intent = previous_run / "native-archive-intent.json"
-        if carried or intent.exists():
-            from scripts.changerail.native_workflow import inherit_archived_context
+    from scripts.changerail import plan_restoration
 
-            for source in (previous_run / "native-plan.json", intent):
-                if source.exists():
-                    with (run_dir / source.name).open("xb") as stream:
-                        stream.write(_check_bytes(source))
-                        stream.flush()
-                        os.fsync(stream.fileno())
-            inherit_archived_context(runner_module(), previous_run, run_dir)
-            run["native_archive_recovery_source"] = repo_relative(
-                previous_run / "native-archive.json" if carried else intent
-            )
-            write_json(run_dir / "run.json", run)
-    manifest = {
-        "schema": "changerail.delivery-manifest.v1",
-        "run_id": run_id,
-        "baseline_head": run["baseline_head"],
-        "created_at": utc_now(),
-        "card": {"id": card_id(card), "path": repo_relative(card)},
-        "paths": [],
-    }
-    manifest["observed_proof_selection"] = creation_reference
-    write_json(manifest_path(card_id(card)), manifest)
-    write_json(run_dir / "manifest.json", manifest)
-    recovery_context: Path | None = None
-    if recovery:
-        recovery_context = build_recovery_context(
-            run_dir=run_dir,
-            previous_run=previous_run,
-            objective=str(run["recovery_objective"]),
+    prepared = (
+        plan_restoration.create_successor(
+            runner_module(),
+            previous_run,
+            card,
+            changes,
+            os.environ["CHRL_RECOVERY_OBJECTIVE"].strip(),
         )
-        recovery_payload = load_json(recovery_context)
-        run["resume_thread_id"] = resume_thread_id
-        run["recovery_session_strategy"] = recovery_payload.get("resume_strategy")
-        run["inherited_change_events"] = recovery_payload["inherited_change_events"]
+        if recovery
+        else None
+    )
+    if prepared is not None:
+        run_dir = prepared["run_dir"]
+        run = prepared["run"]
+        manifest = prepared["manifest"]
+        recovery_context = prepared["recovery_context"]
+        resume_thread_id = run["resume_thread_id"]
+        inherited_investigative_commands = run["inherited_investigative_commands"]
+        require_first_file_change = run["restoration_require_first_file_change"]
+        write_json(manifest_path(card_id(card)), manifest)
+    else:
+        run_id = (
+            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{card_id(card)}"
+        )
+        run_dir = RUNTIME_ROOT / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=False)
+        creation_selection = {
+            "schema": "changerail.observed-proof-selection.v1",
+            "root": repo_relative(run_dir),
+            "owner": {"run_id": run_id, "card": repo_relative(card)},
+            "required_stages": ["implementation", "review", "final"],
+        }
+        creation_path = run_dir / "observed-proof-selection.json"
+        write_json(creation_path, creation_selection)
+        creation_bytes = _check_bytes(creation_path)
+        creation_reference = {
+            "path": repo_relative(creation_path),
+            "sha256": hashlib.sha256(creation_bytes).hexdigest(),
+        }
+        run = {
+            "schema": "changerail.delivery-run.v2",
+            "run_id": run_id,
+            "card": repo_relative(card),
+            "started_at": utc_now(),
+            "baseline_head": git("rev-parse", "HEAD").stdout.strip(),
+            "profile": repo_relative(PROFILE_PATH),
+            "mode": "delivery",
+            "lifecycle_mode": native.lifecycle_mode(card),
+            "change_plan": [
+                {"number": number, "slug": slug} for number, slug in changes
+            ],
+        }
+        run["execution_contract"] = "changerail.native.v1"
+        run["process_identity"] = execution_identity()
+        run["observed_proof_contract"] = {
+            "schema": _OBSERVED_PROOF_CONTRACT,
+            "required_stages": ["implementation", "review", "final"],
+            "selection": creation_reference,
+        }
+        resume_thread_id: str | None = None
+        require_first_file_change = True
+        inherited_investigative_commands = 0
+        if recovery:
+            run["recovery_of"] = previous_run_id
+            run["recovery_compatibility"] = recovery_compatibility
+            run["recovery_objective"] = os.environ["CHRL_RECOVERY_OBJECTIVE"].strip()
+            previous_manifest = load_json(previous_run / "manifest.json")
+            (
+                resume_thread_id,
+                require_first_file_change,
+                inherited_investigative_commands,
+            ) = recovery_implementation_state(previous_run, previous_manifest)
+            run["resume_thread_id"] = resume_thread_id
+            run["inherited_investigative_commands"] = inherited_investigative_commands
         write_json(run_dir / "run.json", run)
+        if recovery:
+            from scripts.changerail import plan_restoration
+
+            restoration = plan_restoration.consume(
+                runner_module(), previous_run, run_dir
+            )
+            if restoration is not None:
+                run["plan_restoration"] = restoration
+                write_json(run_dir / "run.json", run)
+        if recovery and native.is_native(card):
+            carried = native.carry_archive_receipt(
+                runner_module(), previous_run, run_dir
+            )
+            intent = previous_run / "native-archive-intent.json"
+            if carried or intent.exists():
+                from scripts.changerail.native_workflow import inherit_archived_context
+
+                for source in (previous_run / "native-plan.json", intent):
+                    if source.exists():
+                        with (run_dir / source.name).open("xb") as stream:
+                            stream.write(_check_bytes(source))
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                inherit_archived_context(runner_module(), previous_run, run_dir)
+                run["native_archive_recovery_source"] = repo_relative(
+                    previous_run / "native-archive.json" if carried else intent
+                )
+                write_json(run_dir / "run.json", run)
+        manifest = {
+            "schema": "changerail.delivery-manifest.v1",
+            "run_id": run_id,
+            "baseline_head": run["baseline_head"],
+            "created_at": utc_now(),
+            "card": {"id": card_id(card), "path": repo_relative(card)},
+            "paths": [],
+        }
+        manifest["observed_proof_selection"] = creation_reference
+        write_json(manifest_path(card_id(card)), manifest)
+        write_json(run_dir / "manifest.json", manifest)
+        recovery_context: Path | None = None
+        if recovery:
+            recovery_context = build_recovery_context(
+                run_dir=run_dir,
+                previous_run=previous_run,
+                objective=str(run["recovery_objective"]),
+            )
+            recovery_payload = load_json(recovery_context)
+            run["resume_thread_id"] = resume_thread_id
+            run["recovery_session_strategy"] = recovery_payload.get("resume_strategy")
+            run["inherited_change_events"] = recovery_payload["inherited_change_events"]
+            write_json(run_dir / "run.json", run)
     emit_environment = {"CHRL_RUN_DIR": str(run_dir)}
     original = os.environ.get("CHRL_RUN_DIR")
     os.environ.update(emit_environment)
@@ -7777,6 +7859,15 @@ def build_parser() -> argparse.ArgumentParser:
     repair_apply = subparsers.add_parser("runtime-repair-apply")
     repair_apply.add_argument("run_dir", type=Path)
     repair_apply.add_argument("--proposal", type=Path, required=True)
+    restore_prepare = subparsers.add_parser("plan-restore-prepare")
+    restore_prepare.add_argument("run_dir", type=Path)
+    restore_prepare.add_argument("--reason", required=True)
+    restore_prepare.add_argument("--dry-run", action="store_true")
+    restore_prepare.add_argument("--runtime-archive", type=Path)
+    restore_apply = subparsers.add_parser("plan-restore-apply")
+    restore_apply.add_argument("run_dir", type=Path)
+    restore_apply.add_argument("--proposal", type=Path, required=True)
+    restore_apply.add_argument("--authorize", required=True)
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("run_dir", type=Path)
     resume_parser = subparsers.add_parser("resume")
@@ -7831,6 +7922,43 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        # Session commands share the runner's lock; reject pending restoration
+        # before any child writer dispatch, including stale CHRL_RUN_DIR callers.
+        if args.command not in {
+            "plan-restore-apply",
+            "status",
+            "metrics",
+            "doctor",
+            "wiring",
+            "admission",
+            "verdict",
+            "board-guard",
+        }:
+            from scripts.changerail import plan_restoration
+
+            plan_restoration.ensure_no_pending(runner_module())
+        if args.command in {"plan-restore-prepare", "plan-restore-apply"}:
+            from scripts.changerail import plan_restoration
+            from scripts.changerail.native_workflow import retained_run
+
+            run_dir, _metadata = retained_run(runner_module(), args.run_dir)
+            if args.command == "plan-restore-prepare":
+                result = plan_restoration.prepare(
+                    runner_module(),
+                    run_dir,
+                    reason=args.reason,
+                    dry_run=args.dry_run,
+                    runtime_archive=args.runtime_archive,
+                )
+            else:
+                result = plan_restoration.apply(
+                    runner_module(),
+                    run_dir,
+                    args.proposal,
+                    args.authorize,
+                )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         if args.command in {"runtime-repair-prepare", "runtime-repair-apply"}:
             from scripts.changerail import runtime_repair
             from scripts.changerail.native_workflow import retained_run
@@ -7874,7 +8002,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if (run_dir / "publication.json").is_file():
                 return resume_publication(run_dir)
             card = resolve_deliverable_card(metadata["card"])
-            ok, detail, manifest = recovery_source(card, changed_paths())
+            ok, detail, manifest = recovery_source(
+                card, changed_paths(), required_run_id=run_dir.name
+            )
             if not ok or not manifest or manifest.get("run_id") != run_dir.name:
                 raise DeliveryError(
                     "resume requires the selected exact predecessor: " + detail
@@ -7885,7 +8015,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 or "Continue the remaining accepted native groups, review and finalization."
             )
             try:
-                return run_delivery(str(card), recovery=True)
+                return run_delivery(
+                    str(card), recovery=True, required_run_id=run_dir.name
+                )
             finally:
                 if previous_objective is None:
                     os.environ.pop("CHRL_RECOVERY_OBJECTIVE", None)

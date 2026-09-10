@@ -14,6 +14,7 @@ from scripts.changerail import native_workflow as flow
 from scripts.changerail import openspec_context as native
 from scripts.changerail import openspec_adapter as adapter
 from tools.changerail.tests.test_native_openspec_integration import project as project
+from tools.changerail.tests.test_plan_restoration import stopped as stopped
 
 
 def interrupted_archive(project, monkeypatch):
@@ -170,3 +171,38 @@ def test_missing_path_node_has_actionable_error(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(d.DeliveryError, match="Node.js.*PATH"):
         adapter.OpenSpecAdapter(tmp_path)
+
+
+def test_plan_drift_and_manual_restore_form_two_distinct_recovery_failures(
+    stopped,
+):
+    """Exercise real accepted-plan and exact-payload gates, then authorized repair."""
+    from pathlib import Path
+    from scripts.changerail import openspec_board as board
+    from scripts.changerail import plan_restoration as restore
+
+    _root, card, run, _accepted = stopped
+    historical = restore._inventory(d, run)
+    changed = card.read_bytes()
+    assert d.recovery_source(card, d.changed_paths(), required_run_id=run.name)[0]
+    with pytest.raises(d.DeliveryError, match="plan changed"):
+        native.require_plan(d, card, run / "native-plan.json")
+    child = run.with_name("failed-import")
+    child.mkdir()
+    with pytest.raises(d.DeliveryError, match="plan changed"):
+        board.import_accepted(d, card, child)
+    assert not (child / "native-plan.json").exists()
+
+    card.write_bytes(changed.replace(b"- changed Next", b"- implement"))
+    native.require_plan(d, card, run / "native-plan.json")
+    assert not d.recovery_source(card, d.changed_paths(), required_run_id=run.name)[0]
+    card.write_bytes(changed)
+    with d.delivery_lock():
+        with pytest.raises(d.DeliveryError, match="another delivery runner"):
+            restore.prepare(d, run, reason="competing writer")
+    assert not (d.RUNTIME_ROOT / "plan-restorations").exists()
+    prepared = restore.prepare(d, run, reason="restore accepted Next")
+    restore.apply(d, run, Path(prepared["proposal"]), prepared["proposal_sha256"])
+    native.require_plan(d, card, run / "native-plan.json")
+    assert d.recovery_source(card, d.changed_paths(), required_run_id=run.name)[0]
+    assert restore._inventory(d, run) == historical
