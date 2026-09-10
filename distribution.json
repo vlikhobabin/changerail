@@ -5,7 +5,7 @@
   "provenance": {
     "owner": "ChangeRail",
     "upstream_commit": "051e99be6c696ae07e8eaa596fdb714cc00378e2",
-    "source_state": "unreleased working source candidate; payload hashes identify exact bytes"
+    "source_state": "release candidate source snapshot; payload hashes identify exact bytes"
   },
   "files": [
     "distribution.py",
