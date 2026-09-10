@@ -1,30 +1,10 @@
-# Security Policy
+# Безопасность
 
-## Supported Versions
+Текущая native-ветка — кандидат 2.0.0; старые теги описывают прежние контракты.
+Не прилагайте credentials, private profiles, provider traces или клиентские
+данные к публичным issues. Предоставьте синтетическую репродукцию и версию.
 
-ChangeRail is pre-1.0. Security fixes are supported for the current `main`
-branch and the latest published `0.5.x` release line.
-
-## Reporting A Vulnerability
-
-Use GitHub private vulnerability reporting or a GitHub Security Advisory for
-this repository when available. Include:
-
-- affected ChangeRail version or commit;
-- affected file, command, skill, schema or workflow;
-- minimal reproduction steps;
-- expected impact;
-- whether credentials, private paths or runtime records may be exposed.
-
-Do not include secrets, credentials, exploit payloads, customer data, private
-workspace names or raw runtime logs in public issues, pull requests or commits.
-
-If GitHub private reporting is unavailable, open a public issue that contains
-only a short request for a maintainer-provided private channel. Do not include
-technical exploit details or sensitive data in that public issue.
-
-## Handling Reports
-
-Maintainers should acknowledge the report, reproduce it in a private or ignored
-runtime workspace, and prepare a scoped ChangeRail fix with OpenSpec artifacts,
-public-safety verification and independent review before publication.
+Подключённый исходник — доверенный исполняемый код. Доступ на запись к нему
+позволяет менять инструмент всех подключённых проектов. Проверяется точное
+назначение объявленных ссылок; произвольные ссылки в evidence запрещены.
+Хеш архива доказывает целостность, а не доверие к автору.

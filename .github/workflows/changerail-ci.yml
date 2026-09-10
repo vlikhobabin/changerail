@@ -1,36 +1,25 @@
-name: ChangeRail CI
-
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-
+name: ChangeRail
+on: [push, pull_request]
 permissions:
   contents: read
-
 jobs:
-  verify:
-    name: Verify ChangeRail core release gates
+  native:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        python: ['3.11', '3.12']
     steps:
-      - name: Check out full repository history
-        # actions/checkout v4
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          fetch-depth: 0
-
-      - name: Set up Node.js for OpenSpec wrapper
-        # actions/setup-node v4
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-
-      - name: Install Python release dependencies
-        run: |
-          python3 -m venv .runtime/changerail/ci-venv
-          .runtime/changerail/ci-venv/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
-          echo "$PWD/.runtime/changerail/ci-venv/bin" >> "$GITHUB_PATH"
-
-      - name: Run exact core release suite
-        run: python3 scripts/run-release-baseline.py
+          node-version: '22'
+      - run: python -m pip install -e '.[test]'
+      - run: npm --prefix tools/openspec ci --ignore-scripts --no-audit --no-fund
+      - run: python -m pytest -q tools/changerail/tests
+      - run: node --test tools/openspec/test-wrapper.mjs
+      - run: python -m ruff check scripts tools/changerail/tests distribution.py
+      - run: python scripts/public-surface-scan.py
+      - run: git diff --check

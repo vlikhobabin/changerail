@@ -19,10 +19,11 @@ secrets/
 .runtime/
 .artifacts/
 .ai/
-# CODEX_HOME may point at <repo>/.codex. Keep live runtime/auth/session state
-# out of git, but allow the public project config to be versioned.
+# The consumer profile and local agent configuration remain private.
+.changerail/profile.toml
+# CODEX_HOME may point at <repo>/.codex. Keep local configuration and live
+# runtime/auth/session state out of git; only shared skills may be versioned.
 .codex/*
-!.codex/config.toml
 !.codex/skills/
 !.codex/skills/**
 .codex/skills/.system/
@@ -103,3 +104,4 @@ tmp/
 temp/
 internal/
 customer-data/
+*.egg-info/

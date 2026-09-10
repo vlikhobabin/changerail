@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+chrl_source_root="$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")"
+chrl_project_root="${CHRL_PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}"
+export CHRL_PROJECT_ROOT="$chrl_project_root"
+export PYTHONPATH="$chrl_source_root${PYTHONPATH:+:$PYTHONPATH}"
+chrl_python="$chrl_source_root/.venv/bin/python"
+if [[ ! -x "$chrl_python" ]]; then
+  chrl_python="$chrl_project_root/.venv/bin/python"
+fi
+if [[ ! -x "$chrl_python" ]]; then
+  chrl_python="$(command -v python3)"
+fi
+cd "$chrl_source_root"
+chrl_tests=(tools/changerail/tests)
+if [[ "$chrl_project_root" != "$chrl_source_root" && -d "$chrl_project_root/.changerail/tests" ]]; then
+  chrl_tests+=("$chrl_project_root/.changerail/tests")
+fi
+exec "$chrl_python" -m pytest -q "${chrl_tests[@]}" "$@"
