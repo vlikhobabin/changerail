@@ -8,14 +8,22 @@
 Обычный `resume` проверяет замороженную идентичность кода. Для ограниченного
 продолжения после исправления Python-ядра доступны два явных действия:
 
+Команды ниже выполняются из корня checkout ChangeRail. Явный `--project` выбирает
+потребителя; относительные пути run и proposal считаются от его корня, а `--test`
+обозначает существующую регрессию в общем исходнике.
+
 ```bash
-./bin/chrl runtime-repair-prepare .runtime/changerail/runs/<run-id> \
+./bin/chrl --project /opt/example-project runtime-repair-prepare .runtime/changerail/runs/REPLACE_WITH_RUN_ID \
   --reason 'Исправлена причина остановки реализации' \
   --test tools/changerail/tests/test_regression.py::test_reproduced_failure
-./bin/chrl runtime-repair-apply .runtime/changerail/runs/<run-id> \
-  --proposal .runtime/changerail/runs/<run-id>/runtime-repairs/<id>/proposal.json
-./bin/chrl resume .runtime/changerail/runs/<run-id>
+./bin/chrl --project /opt/example-project runtime-repair-apply .runtime/changerail/runs/REPLACE_WITH_RUN_ID \
+  --proposal .runtime/changerail/runs/REPLACE_WITH_RUN_ID/runtime-repairs/REPLACE_WITH_REPAIR_ID/proposal.json
+./bin/chrl --project /opt/example-project resume .runtime/changerail/runs/REPLACE_WITH_RUN_ID
 ```
+
+Подставьте путь proposal, возвращённый `prepare`, вместо `REPLACE_WITH_REPAIR_ID`.
+Диагностика остановки и остальные способы продолжения описаны в
+[руководстве оператора](operations.md).
 
 `prepare` сам запускает выбранные pytest-проверки в общем репозитории, сохраняет
 лог, исходники и их хеши. Код возврата должен быть нулевым, а pytest должен

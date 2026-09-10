@@ -2,17 +2,24 @@
 
 Помимо runtime-копии поддержано подключение общего рабочего checkout командами
 `attach-inventory`, `attach`, `detach`. Режим `--development` открывает тесты
-через ссылки. Контракт и восстановление описаны в `docs/shared-source.md`
-исходного репозитория. Copy-install поверх подключённых ссылок запрещён.
+через ссылки. Контракт и восстановление описаны в
+[shared-source.md](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/shared-source.md).
+Copy-install поверх подключённых ссылок запрещён.
 
-Этот комплект содержит общий native runtime. Версия `2.0.0-rc.1`
+Этот комплект содержит общий native runtime. Версия `2.0.0-rc.2`
 обозначает предварительную версию для испытаний перед стабильным выпуском.
-Исходный upstream commit записан в `distribution.json`; SHA-256 каждого файла
+Поле `provenance.upstream_commit` в `distribution.json` обозначает историческую
+базу исходника, а не Git-коммит этого выпуска. Точные release commit и tree
+записаны в отдельном asset `release-provenance.json`; SHA-256 каждого файла
 и совокупный hash идентифицируют точные байты кандидата. Публикация и release tag
 не выполняются командами этого комплекта.
 
-Ядро, адаптеры OpenSpec/Codex/pytest, схемы, навыки и документация входят
-в один архив. Тесты ChangeRail/OpenSpec, тестовые launchers и фикстуры остаются
+Ядро, адаптеры OpenSpec/Codex/pytest, схемы, навыки и выбранные README вместе
+с этим документом входят в один архив. Каталог `docs/` и корневой README
+остаются в исходном репозитории: для первого запуска используйте
+[quickstart](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/quickstart.md),
+для эксплуатации — [руководство оператора](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/operations.md).
+Тесты ChangeRail/OpenSpec, тестовые launchers и фикстуры также остаются
 в исходном репозитории ChangeRail. Runtime-архив их не устанавливает;
 разработчик может открыть их через `attach --development`.
 Профиль `.changerail/profile.toml`, продуктовые файлы, локальные
@@ -39,10 +46,14 @@ bootstrap зависимостей, commit или push.
 Цель — корень Git-репозитория с игнорируемым `.runtime/`. В новом проекте сначала
 добавьте `.runtime/` в `.gitignore`; создайте отдельный проектный профиль.
 
+Команды ниже используют доступный checkout инструмента; замените путь своим.
+Текущий каталог не влияет на выбор потребителя, поскольку цель передана явно.
+
 ```sh
-python3 /opt/changerail/distribution.py install \
+chrl_source=/path/to/changerail
+python3 "$chrl_source/distribution.py" install \
   /tmp/changerail-native-candidate.tar.gz /opt/example-project --dry-run
-python3 /opt/changerail/distribution.py install \
+python3 "$chrl_source/distribution.py" install \
   /tmp/changerail-native-candidate.tar.gz /opt/example-project
 ```
 
@@ -61,7 +72,11 @@ Lock `.changerail/distribution-lock.json` содержит версию, про�
 `rolled_back`. Если восстановление невозможно, audit сообщает `rollback_failed`.
 При SIGKILL или отключении питания audit может остаться `prepared`: файловая
 система не предоставляет транзакцию на весь комплект. Автоматический повтор
-такой попытки запрещён; используйте сохранённый backup для восстановления.
+такой попытки запрещён. Audit-каталог сохраняет владельца попытки даже после
+`rolled_back`; поддерживаемой команды автоматического восстановления или очистки
+попытки нет. Не удаляйте audit и не редактируйте lock ради повтора. Сначала
+сохраните backup и фактическое состояние, затем выполните разбор по
+[аварийному runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.2/docs/operations.md#незавершённая-установка-или-подключение).
 
 Любой неучтённый сохранённый run блокирует замену кода; совпадения только
 `execution_contract` недостаточно для совместимости frozen process. Точное
@@ -78,11 +93,11 @@ Lock `.changerail/distribution-lock.json` содержит версию, про�
 всех runs; старые hash установленных исходников остаются обязательными.
 
 ```sh
-python3 distribution.py history /tmp/changerail-next.tar.gz \
+python3 "$chrl_source/distribution.py" history /tmp/changerail-next.tar.gz \
   /opt/example-project --output /tmp/update-history.json
-python3 distribution.py install /tmp/changerail-next.tar.gz \
+python3 "$chrl_source/distribution.py" install /tmp/changerail-next.tar.gz \
   /opt/example-project --history /tmp/update-history.json --dry-run
-python3 distribution.py install /tmp/changerail-next.tar.gz \
+python3 "$chrl_source/distribution.py" install /tmp/changerail-next.tar.gz \
   /opt/example-project --history /tmp/update-history.json
 ```
 
@@ -97,12 +112,12 @@ ChangeRail файлов: по одному относительному пути
 продуктовые файлы, профиль, runtime, `node_modules` или секреты.
 
 ```sh
-python3 distribution.py inventory /tmp/changerail-native-candidate.tar.gz \
+python3 "$chrl_source/distribution.py" inventory /tmp/changerail-native-candidate.tar.gz \
   /opt/example-project --paths-file /tmp/predecessor-paths.txt \
   --retain-history-read-only --output /tmp/adoption.json
-python3 distribution.py install /tmp/changerail-native-candidate.tar.gz \
+python3 "$chrl_source/distribution.py" install /tmp/changerail-native-candidate.tar.gz \
   /opt/example-project --adoption /tmp/adoption.json --dry-run
-python3 distribution.py install /tmp/changerail-native-candidate.tar.gz \
+python3 "$chrl_source/distribution.py" install /tmp/changerail-native-candidate.tar.gz \
   /opt/example-project --adoption /tmp/adoption.json
 ```
 

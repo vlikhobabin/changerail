@@ -61,18 +61,22 @@ Python-код ядра; профиль, схемы, skills и launcher оста�
 Это не снимает защиту поздних этапов, где нужен повторный анализ доказательств.
 
 ```sh
-./bin/chrl runtime-repair-prepare .runtime/changerail/runs/<run> \
+./bin/chrl --project /opt/example-project runtime-repair-prepare .runtime/changerail/runs/REPLACE_WITH_RUN_ID \
   --test tools/changerail/tests/test_example.py::test_regression \
   --reason 'исправление воспроизведённой ошибки инструмента'
-./bin/chrl runtime-repair-apply .runtime/changerail/runs/<run> \
+./bin/chrl --project /opt/example-project runtime-repair-apply .runtime/changerail/runs/REPLACE_WITH_RUN_ID \
   --proposal /absolute/path/from/prepare.json
-./bin/chrl resume .runtime/changerail/runs/<run>
+./bin/chrl --project /opt/example-project resume .runtime/changerail/runs/REPLACE_WITH_RUN_ID
 ```
 
 Prepare реально исполняет указанную регрессию, сохраняет source snapshot,
 вывод и старую/новую идентичность. Apply проверяет неизменность и добавляет
 receipt. Старый run.json не переписывается. История, review accounting и обычные
 gates остаются обязательными; исторические runs таким способом не возобновляются.
+`--project` выбирает потребителя и его `.runtime/`, даже когда команда запущена
+из checkout инструмента. Путь `--test` относится к общему исходнику; подставьте
+существующую регрессию. Подробные ограничения — в [runtime-repair.md](runtime-repair.md),
+выбор способа продолжения — в [руководстве оператора](operations.md).
 
 ## Отключение и восстановление
 
@@ -81,8 +85,16 @@ python3 distribution.py detach /opt/example-project --dry-run
 python3 distribution.py detach /opt/example-project
 ```
 
-Detach восстанавливает прежние файлы из сохранённого backup и отказывается при
-несовместимых новых runs. Восстановление работает и после перемещения или удаления
+Detach восстанавливает прежние файлы из сохранённого backup только при **точном
+совпадении inventory runs с моментом attach**. Добавление, удаление или изменение
+любого учитываемого `run.json`, включая новый успешно завершённый run, блокирует
+операцию сообщением `runs changed since attach; detach requires reconciliation`.
+Проверка учитывает пути, байты и режимы файлов из `runs`, `delivery-runs`, `ff-runs`
+и `offline-finalizations`. Поддерживаемой команды reconciliation пока нет:
+не удаляйте runs и не переписывайте inventory ради прохождения проверки.
+Сохраните состояние и передайте его на разбор по [руководству оператора](operations.md).
+
+При неизменном inventory восстановление работает и после перемещения или удаления
 общего checkout: запускайте команды выше из доступного checkout ChangeRail.
 Отсутствующий исходник не мешает проверке точных адресов ссылок, сохранённого
 inventory, audit и байтов backup. Подменённые ссылки, ссылки в родительских
@@ -91,6 +103,10 @@ inventory, audit и байтов backup. Подменённые ссылки, с
 Исправления общего исходника остаются в ChangeRail.
 Attach, включая `--dry-run`, проверяет Git ignore для `.runtime/` до создания
 lock и backup; сначала добавьте `.runtime/` в ignore потребителя.
-Attach удерживает delivery.lock, сохраняет backup и откатывает перехваченные
-ошибки. Потеря питания не является атомарной транзакцией всей файловой системы;
-для восстановления используйте audit и backup под `.runtime/changerail/source-bindings/`.
+Attach удерживает delivery.lock, сохраняет backup и пытается откатить перехваченные
+ошибки. Успешное подключение записывает audit `attached`, завершённый откат —
+`rolled-back`. Потеря питания или ошибка самого отката могут оставить частичные
+ссылки и backup без завершённого audit. Общей транзакции файловой системы нет;
+`detach` требует корректные binding, inventory и audit успешного attach и не
+является универсальной командой аварийного восстановления. Сохраните содержимое
+`.runtime/changerail/source-bindings/` и текущее состояние проекта перед разбором.

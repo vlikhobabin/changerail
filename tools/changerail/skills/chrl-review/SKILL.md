@@ -27,7 +27,9 @@ Repository startup already supplies the applicable `AGENTS.md`. Read
 `$CHRL_REVIEW_CONTEXT` first. It names the card, fingerprint-bound manifest,
 verdict schema, per-path scoped diffs, compact evidence index, prior-cycle
 artifacts when they exist, and the investigative shell-command budget. Consult
-`openspec/board/README.md` only for a board rule not covered here. Do not scan
+the consumer-owned board instructions named by the project or review
+context only for a board rule not covered here. A board README is optional;
+do not assume `openspec/board/README.md` exists. Do not scan
 the repository or list runtime directories to rediscover any of these paths.
 
 ## Review

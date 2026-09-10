@@ -1,64 +1,100 @@
-# Local upstream OpenSpec dependency
+# Локальная зависимость OpenSpec
 
-This project dependency pins **unmodified OpenSpec 1.3.1** through the manifest
-and npm lockfile. `bin/openspec` uses this installation for canonical validation
-and the explicit native ChangeRail route. Existing frozen runs cannot adopt a
-different installation or process silently.
+Manifest и npm lockfile закрепляют **неизменённый OpenSpec 1.3.1**. `bin/openspec`
+использует эту установку для канонической валидации и native lifecycle ChangeRail.
+Уже зафиксированный run не может незаметно перейти на другую установку или процесс.
 
-From the repository root:
+## Установка в выбранном проекте
+
+Нужны Node.js >=20.19.0 и npm. Установку выполняет оператор отдельно от доставки,
+в корне проекта-потребителя:
 
 ```sh
+cd /opt/example-project
 ./tools/openspec/bootstrap.sh --offline
-./bin/openspec --version
+./bin/openspec --project /opt/example-project --version
 ```
 
-Node.js >=20.19.0 and npm must already exist. Bootstrap explicitly installs the
-locked dependency tree from the existing npm cache, ignores lifecycle scripts,
-and disables audit/funding/update notifications. `npm ci` replaces only this
-installation's `node_modules`; it does not install global dependencies. Missing
-cached tarballs fail the operation. Obtaining dependencies on another machine is
-a separate provisioning action, not an automatic fallback or part of delivery.
+Путь `/opt/example-project` произволен. При подключении общего исходника через
+ссылки запускайте bootstrap по **пути потребителя**: `node_modules` создаётся
+в его `tools/openspec`, а не в checkout инструмента. Установка в ChangeRail
+нужна отдельно при разработке и проверке самого инструмента.
 
-The wrapper preserves the caller's working directory so an adapter can operate
-on an explicit disposable project. It invokes only the installed
-`tools/openspec/node_modules/@fission-ai/openspec/bin/openspec.js`, checks the package
-name/version and entrypoint containment, and fails on a missing or mismatched
-installation. It never calls `npx`, downloads a package, searches a global
-OpenSpec executable or falls back to a developer's npm cache. The lockfile, not
-an editable global install, defines the dependency set; reinstall to restore it.
-The runtime check is not an integrity audit of every installed dependency file.
+Bootstrap явно устанавливает закреплённое дерево из существующего npm cache,
+пропускает lifecycle scripts и отключает audit/funding/update notifications.
+`npm ci` заменяет только `node_modules` этой установки, не устанавливает глобальные
+зависимости и отклоняет symlink в качестве каталога `node_modules`. Если tarballs
+не закешированы, операция завершается ошибкой. Для первоначального сетевого
+получения пакетов оператор может отдельно выполнить:
 
-`OPENSPEC_TELEMETRY=0`, `DO_NOT_TRACK=1` and `CI=true` disable upstream 1.3.1
-telemetry. Completion auto-configuration is disabled and install scripts are
-skipped. The wrapper does not automatically update OpenSpec or generate agent
-instructions; explicit native commands still have their documented effects.
-Environment flags and offline npm installation **are not full network
-isolation**: Node, the OS and the model-provider delivery sessions remain
-separate trust/network boundaries. Registry URLs in the lockfile are package
-provenance, not instructions to contact the registry at runtime.
+```sh
+npm --prefix /opt/example-project/tools/openspec ci \
+  --ignore-scripts --no-audit --no-fund \
+  --logs-dir /opt/example-project/tools/openspec/npm-logs
+/opt/example-project/bin/openspec --project /opt/example-project --version
+```
 
-Wrapper tests remain in the ChangeRail source repository and are not installed
-in consuming projects. Run `node --test tools/openspec/test-wrapper.mjs` only
-from the ChangeRail source root when maintaining the wrapper. Development source
-attachments may expose the same tests through links; runtime archives omit them.
+Это отдельное решение об установке зависимостей; обычная доставка никогда
+не выполняет такую команду автоматически. Сохраняйте `node_modules` и npm logs
+в локальном Git ignore потребителя.
 
-Upgrade the exact manifest pin, regenerate the lockfile in an explicitly
-authorized provisioning step, update the compatibility check, and rerun the
-adapter contract suite before adopting a newer upstream version. Do not fork
-upstream schemas just to change board status handling.
+## Как wrapper выбирает проект
 
-## Initial isolated verification (2026-09-06)
+При первом аргументе `--project <каталог>` wrapper выбирает зависимости
+`<каталог>/tools/openspec`, переходит в этот каталог проекта и передаёт оставшиеся
+аргументы upstream CLI. Например, команда из любого рабочего каталога:
 
-The lockfile was generated using `npm install --package-lock-only --offline
---ignore-scripts --no-audit --no-fund`; no registry download was needed. Explicit
-offline bootstrap then installed 74 packages from the existing cache, and the
-real local CLI returned `1.3.1`. All eight Node contract tests passed: missing
-dependency, wrong version, external package symlink, cwd/argument/env forwarding,
-real version, lock integrity fields, empty-cache failure, and explicit bootstrap
-choice. Shell syntax checks and the launcher JavaScript syntax check passed.
+```sh
+/opt/example-project/bin/openspec --project /opt/example-project \
+  validate --specs --strict --no-interactive
+```
 
-The empty-cache test concretely received npm's offline cache-miss failure. These
-checks do not constitute packet capture, a full installation integrity audit,
-an agent review, or autonomous card-delivery evidence. Temporary test fixture
-directories are removed by test teardown; staged installed dependencies remain
-available for the Python adapter's native-CLI contract tests.
+Без `--project` рабочий каталог вызывающего процесса сохраняется. Зависимости
+выбираются из `CHRL_PROJECT_ROOT`, если он установлен, иначе относительно пути
+запущенного `bin/openspec`. Поэтому запуск wrapper инструмента из другого проекта
+без явного выбора может совместить чужую зависимость и текущий cwd. Для работы
+с определённым потребителем используйте `--project`; не полагайтесь на случайное
+состояние окружения. Сам bootstrap флага `--project` не имеет.
+
+Wrapper запускает только установленный
+`tools/openspec/node_modules/@fission-ai/openspec/bin/openspec.js`, проверяет имя
+и версию пакета и расположение entrypoint внутри локального дерева. При отсутствии
+или несовпадении установки он завершается ошибкой. Он не вызывает `npx`,
+не скачивает пакеты, не ищет глобальный OpenSpec и не использует cache как runtime
+fallback. Набор зависимостей задаётся lockfile; для восстановления выполните
+явную переустановку. Проверка при запуске не является аудитом целостности каждого
+файла установленных зависимостей.
+
+## Сеть и обновления
+
+`OPENSPEC_TELEMETRY=0`, `DO_NOT_TRACK=1` и `CI=true` отключают telemetry upstream
+1.3.1. Автоматическая настройка shell completions отключена, install scripts
+пропускаются. Wrapper не обновляет OpenSpec и не генерирует агентские инструкции
+автоматически; явно вызванные native-команды сохраняют свои штатные эффекты.
+
+Переменные окружения и offline-установка npm не обеспечивают полную сетевую
+изоляцию: Node, ОС и модельные сессии остаются самостоятельными границами доступа.
+Registry URL в lockfile фиксируют происхождение пакетов и не требуют обращения
+к registry при каждом запуске.
+
+Обновление upstream требует изменения точного pin, пересоздания lockfile при явной
+подготовке зависимостей, обновления compatibility check и проверки контрактов
+адаптера. Не создавайте форк upstream schemas ради изменения статусов board.
+
+## Проверка при разработке
+
+Тесты wrapper принадлежат исходному репозиторию ChangeRail и не устанавливаются
+в runtime-копии потребителей. При изменении wrapper запускайте из checkout
+ChangeRail `node --test tools/openspec/test-wrapper.mjs`. Development-подключение
+может открыть эти тесты через ссылки; runtime-архив их исключает.
+
+При первоначальной изолированной проверке **2026-09-06** lockfile был сформирован
+командой `npm install --package-lock-only --offline --ignore-scripts --no-audit
+--no-fund`; registry download не потребовался. Offline-bootstrap установил 74
+пакета из cache, CLI вернул `1.3.1`, прошли восемь Node contract tests и проверки
+синтаксиса shell/JavaScript. Тест пустого cache получил ожидаемую ошибку npm.
+
+Это историческое наблюдение, не результат проверки текущего checkout. Актуальные
+результаты находятся в CI соответствующего commit и release notes. Тесты wrapper
+не доказывают успешную модельную доставку, полную целостность установки или
+отсутствие сетевых пакетов на уровне ОС.

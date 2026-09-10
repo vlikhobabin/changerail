@@ -1,6 +1,6 @@
 {
   "schema": "changerail.distribution-config.v1",
-  "version": "2.0.0-rc.1",
+  "version": "2.0.0-rc.2",
   "execution_contract": "changerail.native.v1",
   "provenance": {
     "owner": "ChangeRail",
