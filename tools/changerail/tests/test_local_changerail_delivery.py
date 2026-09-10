@@ -3447,6 +3447,31 @@ def _singleflight_publication_gate(
     )
 
 
+def _delivery_child_bootstrap(root: Path, run: Path) -> str:
+    """Load shared schemas and the generic profile before selecting fixture state.
+
+    These component fixtures override project globals after import, just like
+    the parent fixture. A fresh interpreter must not infer its import root from
+    the temporary Git checkout or inherit a developer's CHRL environment.
+    Preserve only the explicit fixture switch for the lock mutation probe.
+    """
+    source = MODULE_PATH.parents[2]
+    profile = source / "tools/changerail/templates/profile.toml"
+    return (
+        "import importlib.util, os, sys; from pathlib import Path; "
+        '[os.environ.pop(key) for key in list(os.environ) '
+        'if key.startswith("CHRL_") and key != "CHRL_FIXTURE_EARLY_UNLOCK"]; '
+        f'os.environ["CHRL_PROJECT_ROOT"]={str(source)!r}; '
+        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
+        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
+        'os.environ.pop("CHRL_PROJECT_ROOT"); '
+        f'd.PROFILE_PATH=Path({str(profile)!r}); '
+        f'd.REPO_ROOT=Path({str(root)!r}); d.BOARD_ROOT=d.REPO_ROOT/"openspec/board"; '
+        'd.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; d.FROZEN_BOARD_RECORDS={}; '
+        f'os.environ["CHRL_RUN_DIR"]={str(run)!r}; '
+    )
+
+
 def _singleflight_exact_legacy_identity(run: Path) -> str:
     """Pass a fixture's already-pinned v1 identity into its fresh test process.
 
@@ -3486,14 +3511,8 @@ def _singleflight_verifier(
             f'open({str(release)!r}, "rb", buffering=0).read(1), original_open(run_dir))[-1]; '
         )
     code = (
-        "import importlib.util, os, sys; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.BOARD_ROOT=d.REPO_ROOT/"openspec/board"; '
-        'd.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; '
-        "d.FROZEN_BOARD_RECORDS={}; "
+        _delivery_child_bootstrap(root, run)
         + _singleflight_exact_legacy_identity(run)
-        + f'os.environ["CHRL_RUN_DIR"]={str(run)!r}; '
         + profile
         + gate
         + _singleflight_publication_gate(run, "preverification.json", publication_gate)
@@ -3514,12 +3533,7 @@ def _singleflight_focused_verifier(
 ) -> list[str]:
     """Run the real focused-evidence entry point in an isolated process."""
     code = (
-        "import importlib.util, os, sys; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.BOARD_ROOT=d.REPO_ROOT/"openspec/board"; '
-        'd.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; d.FROZEN_BOARD_RECORDS={}; '
-        f'os.environ["CHRL_RUN_DIR"]={str(run)!r}; '
+        _delivery_child_bootstrap(root, run)
         + _singleflight_publication_gate(run, None, publication_gate)
         + f'sys.exit(d.run_evidence("singleflight", {command!r}))'
     )
@@ -3554,13 +3568,8 @@ def _singleflight_direct_verifier(
             f'open({str(release)!r}, "rb", buffering=0).read(1), original_open(run_dir))[-1]; '
         )
     code = (
-        "import importlib.util, os, sys; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.BOARD_ROOT=d.REPO_ROOT/"openspec/board"; '
-        'd.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; d.FROZEN_BOARD_RECORDS={}; '
+        _delivery_child_bootstrap(root, run)
         + _singleflight_exact_legacy_identity(run)
-        + f'os.environ["CHRL_RUN_DIR"]={str(run)!r}; '
         + profile
         + gate
         + "d.emit_event=lambda phase, stage: None; "
@@ -3603,13 +3612,8 @@ def _singleflight_final_verifier(
             f'open({str(release)!r}, "rb", buffering=0).read(1), original_open(run_dir))[-1]; '
         )
     code = (
-        "import importlib.util, os, sys; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.BOARD_ROOT=d.REPO_ROOT/"openspec/board"; '
-        'd.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; d.FROZEN_BOARD_RECORDS={}; '
+        _delivery_child_bootstrap(root, run)
         + _singleflight_exact_legacy_identity(run)
-        + f'os.environ["CHRL_RUN_DIR"]={str(run)!r}; os.environ.pop("CHRL_SESSION_ROLE", None); '
         + profile
         + gate
         + _singleflight_publication_gate(run, "verification.json", publication_gate)
@@ -5844,10 +5848,8 @@ def test_configured_final_check_real_interruption(tmp_path, monkeypatch):
         tmp_path, monkeypatch, ["sleep 0.4", "true"]
     )
     code = (
-        "import importlib.util, os, signal, sys, threading; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; '
+        _delivery_child_bootstrap(root, run)
+        + "import signal, threading; "
         f'd.profile=lambda: {{"verification": {{"pre_review_commands": ["true"], "final_commands": {commands!r}}}}}; '
         "timer=threading.Timer(0.15, lambda: os.kill(os.getpid(), signal.SIGINT)); timer.start(); "
         f"result=d._run_full_floor(Path({str(card)!r}), commands={commands!r}, "
@@ -6339,10 +6341,8 @@ def test_configured_pre_review_check_real_interruption(tmp_path, monkeypatch):
         tmp_path, monkeypatch, ["sleep 0.4", "true"]
     )
     code = (
-        "import importlib.util, os, signal, sys, threading; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; '
+        _delivery_child_bootstrap(root, run)
+        + "import signal, threading; "
         f'd.profile=lambda: {{"verification": {{"pre_review_commands": {commands!r}, "final_commands": ["true"]}}}}; '
         "timer=threading.Timer(0.15, lambda: os.kill(os.getpid(), signal.SIGINT)); timer.start(); "
         f"result=d._run_full_floor(Path({str(card)!r}), commands={commands!r}, "
@@ -7055,10 +7055,8 @@ def test_focused_check_real_interruption(tmp_path, monkeypatch):
 
     root, card, run = _focused_check_fixture(tmp_path, monkeypatch)
     code = (
-        "import importlib.util, os, signal, sys, threading; from pathlib import Path; "
-        f's=importlib.util.spec_from_file_location("delivery", {str(MODULE_PATH)!r}); '
-        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f'd.REPO_ROOT=Path({str(root)!r}); d.RUNTIME_ROOT=d.REPO_ROOT/".runtime/changerail"; '
+        _delivery_child_bootstrap(root, run)
+        + "import signal, threading; "
         "timer=threading.Timer(0.15, lambda: os.kill(os.getpid(), signal.SIGINT)); timer.start(); "
         'result=d.run_evidence("interrupt", [sys.executable,"-c","import time; time.sleep(0.2)"]); '
         "timer.join(); sys.exit(result)"

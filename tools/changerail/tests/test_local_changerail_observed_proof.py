@@ -2314,6 +2314,34 @@ def test_observed_proof_safe_retention(
     assert len(delivery._check_json(retry_run / "proof-index.json")["records"]) == 1
 
 
+def _proof_child_bootstrap(root: Path) -> str:
+    """Mirror the parent component fixture without inheriting a consumer profile."""
+    source = MODULE_PATH.resolve().parents[2]
+    return (
+        "import importlib.util, os, time; from pathlib import Path; "
+        f"os.environ['CHRL_PROJECT_ROOT']={str(source)!r}; "
+        f"s=importlib.util.spec_from_file_location('proof_child_delivery',{str(MODULE_PATH)!r}); "
+        "d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
+        "os.environ.pop('CHRL_PROJECT_ROOT'); "
+        f"d.PROFILE_PATH=Path({str(source / 'tools/changerail/templates/profile.toml')!r}); "
+        f"root=Path({str(root)!r}); d.REPO_ROOT=root; "
+        "d.BOARD_ROOT=root/'openspec'/'board'; d.RUNTIME_ROOT=root/'.runtime/changerail'; "
+        "d.checked_frozen_records=lambda: {}; d.native.is_native=lambda card: False; "
+    )
+
+
+def _proof_child_env(run_dir: Path) -> dict[str, str]:
+    return {
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("CHRL_")
+        },
+        "CHRL_RUN_DIR": str(run_dir),
+        "CHRL_SESSION_ROLE": "implementation",
+    }
+
+
 def test_observed_proof_serialized_recording(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2321,22 +2349,15 @@ def test_observed_proof_serialized_recording(
     proof = _inspection_proof(root, card, run_dir)
     input_path = run_dir / "proof-input.json"
     input_path.write_text(json.dumps(proof), encoding="utf-8")
-    module = str(MODULE_PATH)
     child = (
-        "import importlib.util, os; from pathlib import Path; "
-        f"s=importlib.util.spec_from_file_location('child_delivery',{module!r}); d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f"root=Path({str(root)!r}); d.REPO_ROOT=root; d.BOARD_ROOT=root/'openspec'/'board'; d.RUNTIME_ROOT=root/'.runtime/changerail'; d.FROZEN_BOARD_RECORDS={{}}; "
-        f"raise SystemExit(d.main(['proof','record',{delivery.repo_relative(input_path)!r}]))"
+        _proof_child_bootstrap(root)
+        + f"raise SystemExit(d.main(['proof','record',{delivery.repo_relative(input_path)!r}]))"
     )
     with delivery.verification_attempt_lock(run_dir, card, "focused"):
         contender = subprocess.run(
             [sys.executable, "-c", child],
             cwd=root,
-            env={
-                **os.environ,
-                "CHRL_RUN_DIR": str(run_dir),
-                "CHRL_SESSION_ROLE": "implementation",
-            },
+            env=_proof_child_env(run_dir),
             capture_output=True,
             text=True,
             check=False,
@@ -2357,13 +2378,15 @@ def test_observed_proof_serialized_recording(
     # A child that leaves a running receipt then dies is an unresolved verifier;
     # recorder re-acquisition refuses rather than certifying it.
     starter = (
-        "import importlib.util; from pathlib import Path; "
-        f"s=importlib.util.spec_from_file_location('start_delivery',{module!r}); d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f"root=Path({str(root)!r}); d.REPO_ROOT=root; d.BOARD_ROOT=root/'openspec'/'board'; d.RUNTIME_ROOT=root/'.runtime/changerail'; d.FROZEN_BOARD_RECORDS={{}}; "
-        f"d.start_check_result(Path({str(run_dir)!r}),'focused','orphan',{{'kind':'argv','argv':['true']}})"
+        _proof_child_bootstrap(root)
+        + f"d.start_check_result(Path({str(run_dir)!r}),'focused','orphan',{{'kind':'argv','argv':['true']}})"
     )
     subprocess.run(
-        [sys.executable, "-c", starter], cwd=root, check=True, capture_output=True
+        [sys.executable, "-c", starter],
+        cwd=root,
+        env=_proof_child_env(run_dir),
+        check=True,
+        capture_output=True,
     )
     monkeypatch.setenv("CHRL_SESSION_ROLE", "implementation")
     assert delivery.main(["proof", "record", delivery.repo_relative(input_path)]) == 2
@@ -2378,21 +2401,14 @@ def test_observed_proof_serialized_recording_post_record_barrier(
     input_path = run_dir / "proof-input.json"
     input_path.write_text(json.dumps(proof), encoding="utf-8")
     ready, release = run_dir / "record-ready", run_dir / "record-release"
-    module = str(MODULE_PATH)
     relative = delivery.repo_relative(input_path)
     child = (
-        "import importlib.util, os, time; from pathlib import Path; "
-        f"s=importlib.util.spec_from_file_location('barrier_delivery',{module!r}); d=importlib.util.module_from_spec(s); s.loader.exec_module(d); "
-        f"root=Path({str(root)!r}); d.REPO_ROOT=root; d.BOARD_ROOT=root/'openspec'/'board'; d.RUNTIME_ROOT=root/'.runtime/changerail'; d.FROZEN_BOARD_RECORDS={{}}; "
-        f"ready=Path({str(ready)!r}); release=Path({str(release)!r})\n"
+        _proof_child_bootstrap(root)
+        + f"ready=Path({str(ready)!r}); release=Path({str(release)!r})\n"
         "def hook():\n ready.write_text('ready');\n while not release.exists(): time.sleep(.01)\n"
         f"d._PROOF_RECORD_POST_RETENTION_HOOK=hook; raise SystemExit(d.main(['proof','record',{relative!r}]))"
     )
-    env = {
-        **os.environ,
-        "CHRL_RUN_DIR": str(run_dir),
-        "CHRL_SESSION_ROLE": "implementation",
-    }
+    env = _proof_child_env(run_dir)
     recorder = subprocess.Popen(
         [sys.executable, "-c", child],
         cwd=root,
