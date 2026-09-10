@@ -354,6 +354,7 @@ def test_frozen_history_stays_exact_while_native_plan_can_be_added(
 
 
 def test_delivery_lock_rejects_a_competing_writer(tmp_path, monkeypatch):
+    monkeypatch.setattr(d, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(d, "RUNTIME_ROOT", tmp_path / "runtime")
     with d.delivery_lock():
         with pytest.raises(d.DeliveryError, match="another delivery"):

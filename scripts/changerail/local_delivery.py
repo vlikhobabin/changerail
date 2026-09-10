@@ -4353,7 +4353,14 @@ def build_recovery_context(
         "retained_focused_evidence": retained_evidence,
         "instruction": "Use this summary as the sole index of the previous run. A null previous_completed_review means no completed verdict exists. Only evidence with matches_current_payload=true may be carried forward. Do not repeat complete Change checkpoints; continue from next_change_event. Inspect failed_final_floors command results and retained logs, repair the failed payload and retain current focused/pre-review evidence before using the remaining shared review allowance. An unchanged failed payload cannot spend a new review or repeat the final floor.",
     }
-    restoration = _check_json(run_dir / "run.json").get("plan_restoration")
+    # Context readers also support historical owner-less unit inputs. Ordinary
+    # native execution still requires its pinned owner in _run_observed_contract.
+    metadata_path = run_dir / "run.json"
+    restoration = (
+        _check_json(metadata_path).get("plan_restoration")
+        if metadata_path.exists()
+        else None
+    )
     if restoration:
         context["plan_restoration"] = restoration
         context["instruction"] += (

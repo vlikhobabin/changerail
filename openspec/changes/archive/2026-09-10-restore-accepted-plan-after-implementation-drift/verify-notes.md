@@ -124,3 +124,17 @@ Canonical delta синхронизирован и прошёл strict validation
 0 failed; `.runtime/plan-restoration-development/archive.log`. Все 22 задачи
 завершены. Frozen contract карточки совпал с исходным admission receipt: изменены
 только Status/Result/Log и колонка доски.
+
+## Исправления после полного CI
+
+CI первого коммита `a4a7eb9` на Python 3.11 и 3.12: 863 passed, 2 failed
+(отчёт `.runtime/plan-restoration-development/ci-failed.log`). Новое чтение
+необязательного restoration-поля делало исторический context reader зависимым
+от отсутствующего current `run.json`; чтение сделано условным, обязательный
+native observed-contract owner gate сохранён. Старый тест project lock задавал
+только временный runtime root; теперь он задаёт согласованный repo root.
+
+`.venv/bin/python -m pytest -q tools/changerail/tests/test_local_changerail_delivery.py::test_focused_check_owner_consumers tools/changerail/tests/test_native_openspec_integration.py::test_delivery_lock_rejects_a_competing_writer tools/changerail/tests/test_plan_restore_writer_guard.py`:
+32 passed, `.runtime/plan-restoration-development/ci-fixes-targeted.log`.
+Ruff и diff-check прошли. Финальный новый commit получает полный CI повторно;
+первый неуспешный запуск не объявляется release gate.
