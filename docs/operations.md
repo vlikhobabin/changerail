@@ -100,7 +100,10 @@ payload обязан совпадать с сохранённым manifest. Дл
 native run до первого принятого checkpoint, evidence и поздних этапов.
 Он не распространяется на локальную runtime-копию и исторические runs.
 Для drift принятого Next предусмотрен отдельный ограниченный переход ниже,
-в том числе с проверяемым обновлением установленного runtime. Вне документированных
+в том числе с проверяемым обновлением установленного runtime. При разработке
+самого ChangeRail после завершения task groups используйте отдельный
+[self-host переход](#разработка-самого-changerail) с immutable engine.
+Вне документированных
 границ сохраните состояние для разбора; не переписывайте `run.json` и receipts.
 
 Исторические `delivery-runs`, `ff-runs`, `offline-finalizations` доступны для
@@ -209,7 +212,7 @@ successor с `recovery_of` на выбранную последнюю попыт
 
 ```sh
 chrl_tool=/opt/example-changerail-next
-chrl_archive=/opt/example-releases/changerail-2.0.0-rc.3-runtime.tar.gz
+chrl_archive=/opt/example-releases/changerail-2.0.0-rc.4-runtime.tar.gz
 "$chrl_tool/bin/chrl" --project "$chrl_project" plan-restore-prepare "$chrl_run" \
   --reason 'Восстановление Next с проверяемым переходом установленного runtime' \
   --runtime-archive "$chrl_archive"
@@ -331,6 +334,98 @@ binding, audit, backup и **неизменном inventory runs с момент�
 
 ## Разработка самого ChangeRail
 
-Self-host delivery использует отдельный проверяемый engine snapshot и локальный
-binding. Переход остановленного run с изменившимся runtime выполняется только
-через self-host receipt; см. [порядок self-host recovery](self-host-recovery.md).
+Разделяйте четыре роли; каталоги могут называться произвольно:
+
+| Роль | Что изменяется и чем подтверждается состояние |
+| --- | --- |
+| Dev-checkout | Исходники, тесты и документация ChangeRail; Git HEAD и diff. Это продукт self-host доставки. |
+| Рабочий checkout | Выбранная опубликованная версия инструмента и собственные локальные данные; release tag/commit и сохранённый inventory. Обновляется отдельно от dev. |
+| Immutable engine | Отдельный read-only snapshot публичного runtime с полным inventory и `engine_identity`; исполняет self-host доставку. Его никогда не обновляют на месте. |
+| Consumer binding | `.changerail/source-link.json` конкретного проекта закрепляет адреса ссылок на общий исходник. Обновление рабочего checkout или engine само по себе эти адреса не переключает. |
+
+Локальный `.changerail/engine-binding.json` выбирает engine для self-host проекта;
+он не заменяет consumer binding. Чистота Git и совпадение строки версии не
+доказывают identity engine. Создайте snapshot из проверенного чистого committed
+source, проверьте его inventory и выполните `engine-bind` по
+[отдельному runbook](self-host-recovery.md#подготовка-engine).
+Все вложенные команды доставки запускайте через выбранный snapshot с явным
+`--project`. Профиль, launcher, Python и локальные зависимости остаются отдельными
+execution inputs: их изменение не покрывается заменой engine.
+
+### Prepare, apply и reconcile
+
+Self-host recovery разрешает переход остановленного native run после завершения
+всех task groups, до review, archive, final verification и publication.
+Принятый план, ancestry и исходный payload должны быть доказуемы. Operator stop,
+незавершённая проверка, неизвестная session state, живые процессы и занятые locks
+не дают права на переход. Ограниченное признание исторического capacity failure
+требует полного связанного technical-recovery evidence; один nonzero exit
+не является основанием.
+
+После сохранения состояния задайте точные пути. `chrl_before` — локальная копия
+исходных байтов и режимов, совпадающая с manifest остановленного run; она нужна,
+если текущий payload изменён. Не собирайте её из предположений.
+
+```sh
+chrl_source=/srv/tools/changerail-dev
+chrl_engine=/srv/engines/changerail/verified-candidate
+chrl_previous=/srv/tools/changerail/.runtime/changerail/runs/REPLACE_WITH_RUN_ID
+chrl_before=/srv/local-evidence/stopped-payload
+"$chrl_engine/bin/chrl" --project "$chrl_source" self-host-recovery-prepare \
+  "$chrl_previous" --payload-snapshot "$chrl_before"
+chrl_proposal="$chrl_source/.runtime/changerail/self-host-recoveries/REPLACE_WITH_RUN_ID/proposal.json"
+"$chrl_engine/bin/chrl" --project "$chrl_source" self-host-recovery-apply \
+  "$chrl_previous" --proposal "$chrl_proposal"
+"$chrl_engine/bin/chrl" --project "$chrl_source" self-host-recovery-reconcile "$chrl_previous"
+```
+
+Подставьте в `chrl_proposal` точный путь из prepare. Prepare сохраняет proposal
+с engine, execution inputs, ancestry, принятым планом, before payload и corrective
+diff; при проверке ancestry история уже может быть атомарно скопирована в целевой
+проект. Apply проверяет proposal, резервирует единственного successor у origin,
+проверяет сохранённую историю и атомарно создаёт полный successor, затем
+фиксирует dispatch и запускает fresh finalize. Completed groups не повторяются,
+общий остаток двух независимых ревью наследуется. Исходные `run.json`, checkpoints,
+evidence и review accounting не переписываются.
+
+Reconcile проверяет тот же переход и при наличии reservation может завершить
+подготовку того же successor, но не запускает writer. Его `state` означает:
+`prepared` — сохранён proposal; `applied` — подготовлен successor;
+`dispatched` — записано разрешение на исполнение. Даже `dispatched` без доказанного
+terminal result не означает завершённую доставку. После прерывания повторите
+тот же apply с тем же proposal либо reconcile. После dispatch повторный apply
+возвращает сохранённое состояние и не исполняет writer повторно. Неоднозначный
+dispatch требует разбора. После доказанной terminal остановки продолжайте
+обычным `resume` именно successor при неизменной identity.
+
+### Доказательства результата и замена engine
+
+В finalize прочитайте `CHRL_RECOVERY_CONTEXT` и его objective, а при repair —
+`CHRL_REPAIR_CONTEXT`. Старые sync и proofs сохраняются как история и не
+подтверждают новый payload. Завершите Result/Log, получите актуальные receipts
+и через `chrl proof record` запишите observed proof для всех назначенных
+implementation conditions. Для test proof требуются вывод выбранных `pytest -v`
+nodes со строками PASSED и реальные assertion fragments из закреплённого Verify.
+Схема — `tools/changerail/schemas/card-proof.schema.json`. После записи proofs
+не меняйте payload до `chrl handoff`; исправимый отказ формата требует исправить
+proof и повторить handoff. Затем обязательны обычные review, archive, final
+verification и publication gates. Проверьте terminal metadata successor,
+результаты проверок и receipt точного опубликованного commit; одного успешного
+prepare, reconcile или `chrl evidence` недостаточно.
+
+Если engine требует исправления, создайте новый snapshot и выполните из него
+`engine-rebind --previous-identity REPLACE_WITH_CURRENT_ENGINE_IDENTITY` вне delivery.
+Intent и applied receipt в `.runtime/changerail/engine-rebind/` связывают точные
+before/after binding. После сбоя повторяется та же команда; обе snapshots и
+receipts обязаны оставаться целыми. Для stopped bound successor следующий
+self-host proposal готовится от этого successor в том же project root;
+rebind сам по себе не меняет frozen identity старых runs.
+
+Обратный выбор сохранённого engine возможен только как отдельный явный
+`engine-rebind` из него с identity текущего engine и при прохождении тех же
+проверок intent, locks и snapshot. Он не отменяет reservation, dispatch, изменения
+payload или публикацию и не возвращает право запуска predecessor. Универсальной
+команды rollback self-host доставки нет. Не восстанавливайте старый binding
+поверх новых receipts вручную, не удаляйте successor и не обнуляйте accounting.
+Откат copy-install и detach имеет собственные, более узкие границы,
+описанные выше; смена Git revision тоже не восстанавливает право resume.

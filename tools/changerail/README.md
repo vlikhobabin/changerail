@@ -1,6 +1,6 @@
 # Единый локальный runtime ChangeRail
 
-Этот комплект содержит общий native runtime. Версия кандидата `2.0.0-rc.3`
+Этот комплект содержит общий native runtime. Версия кандидата `2.0.0-rc.4`
 объединяет lifecycle OpenSpec, проверяемые доказательства, независимое ревью и
 возобновление доставки. Это предварительная версия для испытаний перед стабильным выпуском 2.0.0.
 
@@ -107,11 +107,11 @@ OpenSpec 1.3.1. Установка зависимостей OpenSpec выпол�
 Расширенные runbooks находятся в исходном репозитории; runtime-архив их не
 копирует в потребителя. Для этой версии используйте документы точного тега:
 
-- [Первая установка и доставка](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/quickstart.md).
-- [Эксплуатация и восстановление](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/operations.md).
-- [Общий исходник](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/docs/shared-source.md).
-- [Полномочия запуска](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.3/SECURITY.md).
-- [Архив, контрольные суммы и происхождение](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.3).
+- [Первая установка и доставка](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/quickstart.md).
+- [Эксплуатация и восстановление](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/operations.md).
+- [Общий исходник](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/shared-source.md).
+- [Полномочия запуска](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/SECURITY.md).
+- [Архив, контрольные суммы и происхождение](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.4).
 
 Runner требует `main` с upstream и при успешной доставке выполняет commit и
 push. `require_push=false` пропускает лишь проверку доступности remote в doctor.

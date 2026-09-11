@@ -1,6 +1,6 @@
 # Единый локальный runtime ChangeRail
 
-Этот репозиторий — общий исходник native runtime. Версия `2.0.0-rc.3`
+Этот репозиторий — общий исходник native runtime. Версия `2.0.0-rc.4`
 объединяет lifecycle OpenSpec, проверяемые доказательства, независимое ревью и
 возобновление доставки. Это предварительная версия для испытаний перед стабильным выпуском 2.0.0.
 
@@ -14,12 +14,14 @@
 - [Эксплуатация, диагностика и восстановление](docs/operations.md).
 - [Подключение общего checkout](docs/shared-source.md) и [миграция](docs/migration.md).
 - [Дистрибутив и обновление](DISTRIBUTION.md).
+- [Self-host recovery и immutable engine](docs/self-host-recovery.md).
+- [Обновление рабочего checkout и восстановление](docs/working-checkout.md).
 - [Разработка](CONTRIBUTING.md) и [выпуск релиза](docs/releasing.md).
 - [Полномочия запуска и безопасность](SECURITY.md).
 
-[Выпуск v2.0.0-rc.3](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.3)
+[Выпуск v2.0.0-rc.4](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.4)
 содержит runtime-архив, `SHA256SUMS` и `release-provenance.json`.
-Изменения описаны в [release notes](docs/releases/2.0.0-rc.3.md).
+Изменения описаны в [release notes](docs/releases/2.0.0-rc.4.md).
 
 ## Контракт
 

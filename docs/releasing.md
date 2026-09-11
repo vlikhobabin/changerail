@@ -10,7 +10,7 @@
 
 Обновите согласованно `pyproject.toml`, `uv.lock`, `distribution.json`, README,
 runtime README/ORIGIN, CHANGELOG и `docs/releases/<version>.md`. Для примера
-`2.0.0-rc.3` Python metadata имеет форму `2.0.0rc3`. Исторический
+`2.0.0-rc.4` Python metadata имеет форму `2.0.0rc4`. Исторический
 `distribution.json.provenance.upstream_commit` не заменяют самоссылкой на
 будущий commit; точное происхождение записывают отдельным release asset.
 
@@ -57,15 +57,21 @@ gh run view REPLACE_WITH_RUN_ID --json headSha,status,conclusion,jobs,url
 
 ## 3. Сборка точного коммита
 
-Начните с чистого checkout, совпадающего с `origin/main`, после успешного CI.
+Используйте точный commit, совпадающий с `origin/main`, после успешного CI.
+В основном checkout не должно быть незакоммиченных изменений tracked-файлов
+или staged payload. Посторонние untracked-файлы разрешено сохранить на месте:
+заранее зафиксируйте их inventory и убедитесь, что их нет в индексе. Не удаляйте
+их ради сборки; источником архива служит только экспорт выбранного commit.
 В Bash задайте версию; все результаты ниже остаются локально. Свежий временный
 source snapshot исключает незакоммиченные файлы из архива.
 
 ```bash
-export CHRL_RELEASE_VERSION=2.0.0-rc.3
+export CHRL_RELEASE_VERSION=2.0.0-rc.4
 export CHRL_RELEASE_COMMIT=$(git rev-parse HEAD)
 export CHRL_RELEASE_TREE=$(git rev-parse 'HEAD^{tree}')
-test -z "$(git status --porcelain)"
+git diff --quiet
+git diff --cached --quiet
+git ls-files --others --exclude-standard
 test "$CHRL_RELEASE_COMMIT" = "$(git rev-parse origin/main)"
 git check-ignore -q .runtime/release-probe/audit.json
 mkdir -p .runtime
@@ -169,3 +175,10 @@ cmp "$CHRL_RELEASE_DIR/SHA256SUMS" "$CHRL_RELEASE_DIR/downloaded/SHA256SUMS"
 Сохраните URL и подтверждение публикации в локальной записи выпуска. `git status`
 должен показывать только осознанные новые изменения; пользовательские настройки
 остаются нетронутыми.
+
+## 6. Обновление рабочего checkout
+
+После проверки скачанных assets следуйте [runbook рабочего checkout](working-checkout.md).
+Обновление consumers и engine binding — отдельные операции. Сохранённые результаты
+полного набора применимы к проверенным байтам; документационный релиз не требует
+нового локального полного запуска, но CI точного release commit остаётся gate.

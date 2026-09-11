@@ -1,6 +1,6 @@
 # Первый запуск ChangeRail
 
-Этот сценарий устанавливает опубликованный runtime `v2.0.0-rc.3` в новый
+Этот сценарий устанавливает опубликованный runtime `v2.0.0-rc.4` в новый
 Git-проект на Linux. Для существующего проекта с прежним ChangeRail используйте
 [принятие и обновление](../DISTRIBUTION.md); для разработки общего исходника —
 [подключение checkout](shared-source.md).
@@ -24,8 +24,8 @@ push в его `main`, Git identity (`user.name`, `user.email`) и зависи�
 переменные действуют в одной Bash-сессии.
 
 ```sh
-release_tag=v2.0.0-rc.3
-release_version=2.0.0-rc.3
+release_tag=v2.0.0-rc.4
+release_version=2.0.0-rc.4
 tool_root="$HOME/tools/changerail-$release_version"
 release_dir="$HOME/downloads/changerail-$release_version"
 project_root="$HOME/projects/example-project"

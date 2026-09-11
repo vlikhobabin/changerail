@@ -1,5 +1,20 @@
 # Изменения
 
+## 2.0.0-rc.4 — изолированный engine и self-host recovery
+
+- Отдельный immutable engine с inventory, проверяемой identity и явным binding;
+  rebind меняет engine через сохраняемую транзакцию.
+- Self-host prepare/apply/reconcile создаёт единственный successor атомарно,
+  сохраняет ancestry, evidence, completed groups и общий остаток двух ревью.
+- Поддержано продолжение после технического сбоя модели и проверенной
+  финализации, включая повторный resume bound successor после commit.
+- Recovery/finalize требует прочитать конкретный objective, завершить Result/Log
+  до свежих receipts и записать observed proofs перед handoff.
+- Уточнены роли checkout, consumer binding, повторное применение,
+  границы отката и сохранение рабочего checkout при обновлении.
+
+Подробности — в [release notes](docs/releases/2.0.0-rc.4.md).
+
 ## 2.0.0-rc.3 — точное восстановление принятого плана
 
 - Prepare/apply для восстановления frozen Next с отдельной неизменяемой

@@ -5,6 +5,11 @@ engine остаётся закреплённым. Чистый Git checkout и �
 обеспечивают этот контракт. Для engine нужен отдельный snapshot с полным inventory
 и локальным `.changerail/engine-binding.json`.
 
+Роли dev, рабочего checkout, engine и consumer binding описаны в
+[руководстве оператора](operations.md#разработка-самого-changerail).
+Обновление опубликованной версии рабочего checkout выполняется по
+[отдельному runbook](working-checkout.md), с сохранением локальной истории.
+
 ## Подготовка engine
 
 Сначала проверьте и закоммитьте изменения инструмента. Snapshot создаётся только
@@ -109,3 +114,18 @@ HEAD, manifest и fingerprints; reservation, dispatch и исходная ист
 по [контракту shared source](shared-source.md). Inventory создаётся непосредственно
 перед применением и сохраняется локально. Занятый delivery lock требует дождаться
 его владельца; удалять lock или останавливать чужой run ради установки нельзя.
+
+## Результат и границы отката
+
+Перед handoff завершите Result/Log, получите свежие receipts и запишите observed
+proofs всех назначенных implementation conditions. Прочитайте objective из
+`CHRL_RECOVERY_CONTEXT`; успешный evidence не заменяет proof. Проверяйте terminal
+результат successor, review, archive, финальные проверки и receipt публикации,
+а также неизменность ancestry. Reconcile не является подтверждением доставки.
+
+Snapshot не обновляют на месте. Обратный выбор сохранённого engine — отдельный
+`engine-rebind` из него с текущей previous identity, при прохождении всех guards
+и retained intents. Он не отменяет reservation/dispatch, не возвращает право
+запуска predecessor и не откатывает accounting. Универсальной команды rollback
+нет; [ограничения восстановления](operations.md#доказательства-результата-и-замена-engine)
+относятся и к повторному rebind после уже сохранённого перехода.
