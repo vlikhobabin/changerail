@@ -14,7 +14,8 @@
 ```sh
 chrl_project=/opt/example-project
 chrl_run=.runtime/changerail/runs/REPLACE_WITH_RUN_ID
-chrl_card=openspec/board/2.todo/REPLACE_WITH_CARD.md
+chrl_board=openspec/board
+chrl_card="$chrl_board/2.todo/REPLACE_WITH_CARD.md"
 "$chrl_project/bin/chrl" --project "$chrl_project" wiring
 "$chrl_project/bin/chrl" --project "$chrl_project" doctor "$chrl_card"
 ```
@@ -105,6 +106,60 @@ native run до первого принятого checkpoint, evidence и поз
 Исторические `delivery-runs`, `ff-runs`, `offline-finalizations` доступны для
 чтения через `status`; они не получают права на native resume после обновления.
 Порядок сохранения истории при установке — в [DISTRIBUTION.md](../DISTRIBUTION.md).
+
+## Технический отказ model session между группами
+
+Это отдельный узкий путь, а не обычный `resume` и не runtime repair. Он доступен
+только для исходного native run в `3.inprogress`, когда следующая группа ещё не
+записала `change-N starting`, единственная сохранённая implementation session
+завершилась с nonzero exit и её `stderr` содержит `Selected model is at capacity`.
+Runner должен зафиксировать полное завершение streams и отсутствие процессов
+в группе завершённой сессии. Согласованные streams должны подтверждать отказ до
+исполнения любых команд, инструментов или изменений файлов. Одного отсутствия
+checkpoint недостаточно. Незавершённый capture или старые неполные receipts
+отклоняются.
+Предыдущие checkpoints, evidence, payload, run и review accounting остаются
+побайтно неизменными. Ошибка продукта или теста, неизвестный stderr, живой либо
+interrupted процесс, writer-started группа, drift payload, review/final/archive/
+publication intent и уже recovery run отклоняются до запуска writer.
+
+Оператор **до первоначального запуска** настраивает отличающийся fallback,
+не добавляя его в карточку. Профиль и runtime остаются frozen: добавление route
+после остановки или обновление кода не разрешается этим recovery:
+
+```toml
+[models.technical_recovery]
+model = "REPLACE_WITH_FALLBACK_MODEL"
+reasoning_effort = "high"
+```
+
+Затем вне implementation/review session выполните prepare и ровно тот apply,
+путь proposal вернёт первая команда:
+
+```sh
+"$chrl_project/bin/chrl" --project "$chrl_project" technical-recovery-prepare "$chrl_run"
+"$chrl_project/bin/chrl" --project "$chrl_project" technical-recovery-apply "$chrl_run" \
+  --proposal .runtime/changerail/technical-recoveries/REPLACE_WITH_RUN_ID/proposal.json
+```
+
+`apply` атомарно создаёт единственного successor с `recovery_of`, наследует
+завершённые группы и запускает следующую группу с зафиксированными в receipt
+fallback model и reasoning effort. Затем обычный runner выполняет оставшиеся
+группы с основным implementation route, finalize, review, archive и публикацию.
+Если successor остановится, его точный текущий manifest и terminal metadata
+сохраняются для обычного `resume`; повторный apply не запускает его снова.
+
+Повторите тот же apply или используйте `technical-recovery-reconcile` для
+согласования той же receipt. До dispatch должны совпадать исходный payload,
+модель и predecessor. После dispatch проверяется сохранённый predecessor и
+владелец единственного successor; разрешённая работа successor больше не
+сравнивается с исходным продуктовым payload. Этот путь не создаёт новый review
+allowance и не разрешает recovery после review/final границ.
+
+Установка версии с этими командами сама по себе не делает старые runs пригодными
+для recovery: нужны исходная frozen identity, заранее заданный fallback и полные
+session receipts. Ошибка finalize/handoff и изменение исходников самого ChangeRail
+не являются model capacity failure и не получают исключения через эти команды.
 
 ## Восстановление принятого Next
 

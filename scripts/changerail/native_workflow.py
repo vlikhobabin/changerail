@@ -287,17 +287,23 @@ def launch_groups(
     run_dir: Path,
     current_profile: dict[str, Any],
     recovery_context: Path | None,
+    only_group: int | None = None,
+    model_route_name: str = "implementation",
 ) -> None:
     plan = delivery.declared_change_plan(run_dir)
     if not plan:
         raise DeliveryError("native group sessions require a frozen task plan")
     for number, _slug in plan:
+        if only_group is not None and number != only_group:
+            continue
         states = delivery.change_checkpoint_statuses(
             plan, delivery.combined_change_events(run_dir)
         )
         state = next(row for row in states if row["number"] == number)
         if state["status"] == "complete":
             require_group(delivery, card, number)
+            if only_group is not None:
+                return
             continue
         native.require_plan(delivery, card, run_dir / "native-plan.json")
         before_tasks = (
@@ -305,7 +311,7 @@ def launch_groups(
         )
         context_path = run_dir / "native-context.json"
         delivery.write_json(context_path, native.delivery_context(delivery, card))
-        model, reasoning = delivery.model_route(current_profile, "implementation")
+        model, reasoning = delivery.model_route(current_profile, model_route_name)
         env = {
             "CHRL_NATIVE_CONTEXT": str(context_path),
             "CHRL_DELIVERY_STAGE": "change",
@@ -356,6 +362,10 @@ def launch_groups(
             != "complete"
         ):
             raise DeliveryError(f"native group {number} lacks its completion event")
+        if only_group is not None:
+            return
+    if only_group is not None:
+        raise DeliveryError(f"native task group {only_group} is not in the frozen plan")
 
 
 def checkpoint(

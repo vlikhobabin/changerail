@@ -121,6 +121,11 @@ cp tools/changerail/templates/profile.toml .changerail/profile.toml
 
 Профиль `.changerail/profile.toml` принадлежит проекту. До запуска настройте
 `models.implementation`, `models.review` и обе группы команд `verification`.
+Если проект хочет разрешить строго ограниченное продолжение после доказанного
+отказа capacity модели между группами, добавьте отдельный
+`models.technical_recovery`: это должна быть отличающаяся fallback-модель.
+Без этого явного маршрута такое recovery fail-closed. Этот маршрут не добавляет
+третье ревью и не используется для ошибок продукта, проверки или оператора.
 Замените шаблонные pytest-команды реальными проверками продукта и установите их
 зависимости. Сохраните максимум два независимых ревью: repair и продолжение
 используют общий остаток. Credentials храните в локальном хранилище провайдера,
@@ -194,8 +199,10 @@ npm --prefix "$project_root/tools/openspec" ci \
 Пример slug `first-change` замените осмысленным именем.
 
 ```sh
+chrl_board=openspec/board
+chrl_slug=first-change
 cp tools/changerail/templates/card-template.md \
-  openspec/board/1.backlog/first-change.md
+  "$chrl_board/1.backlog/$chrl_slug.md"
 ./bin/openspec --project "$project_root" new change first-change --schema spec-driven
 ./bin/openspec --project "$project_root" instructions proposal --change first-change
 ```
@@ -224,11 +231,11 @@ cp tools/changerail/templates/card-template.md \
 ```sh
 ./bin/openspec --project "$project_root" status --change first-change --schema spec-driven
 ./bin/openspec --project "$project_root" validate first-change --strict --no-interactive
-./bin/chrl --project "$project_root" admission openspec/board/1.backlog/first-change.md
+./bin/chrl --project "$project_root" admission "$chrl_board/1.backlog/$chrl_slug.md"
 ./bin/chrl --project "$project_root" native-accept \
-  openspec/board/1.backlog/first-change.md --dry-run
+  "$chrl_board/1.backlog/$chrl_slug.md" --dry-run
 ./bin/chrl --project "$project_root" native-accept \
-  openspec/board/1.backlog/first-change.md
+  "$chrl_board/1.backlog/$chrl_slug.md"
 ```
 
 `native-accept` требует complete stock plan и `READY`, сохраняет его identity
@@ -253,7 +260,7 @@ git diff --cached
 git commit -m "Configure ChangeRail and accept first change"
 git push
 git status --short
-./bin/chrl --project "$project_root" doctor openspec/board/2.todo/first-change.md
+./bin/chrl --project "$project_root" doctor "$chrl_board/2.todo/$chrl_slug.md"
 ```
 
 Ожидаются чистое рабочее дерево и `doctor` с `"ok": true`. Не используйте
@@ -264,7 +271,7 @@ git status --short
 Когда проектные команды, модель и полномочия настроены, запустите:
 
 ```sh
-./bin/chrl --project "$project_root" run openspec/board/2.todo/first-change.md
+./bin/chrl --project "$project_root" run "$chrl_board/2.todo/$chrl_slug.md"
 ```
 
 Runner ведёт реализацию, evidence, независимое ревью, sync/archive и финальные

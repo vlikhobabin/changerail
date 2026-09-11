@@ -1,7 +1,7 @@
 # Recovery после технического отказа model session
 
 ## Status
-2.todo
+3.inprogress
 
 ## Lifecycle
 openspec-v1
@@ -59,8 +59,18 @@ artifacts
 
 - 2026-09-10T17:32:17Z accepted native OpenSpec plan
 
+- 2026-09-10T17:56:14Z started native OpenSpec delivery
+
+- 2026-09-10T18:15:09Z change-2: реализованы атомарный successor из технического receipt и запуск только назначенной группы через зафиксированный fallback model; focused pytest proof записан.
+
+- 2026-09-10T18:37:30Z change-3 (время completion event): добавлены fail-closed регрессии и synthetic successor flow, documented opt-in fallback route; strict OpenSpec validation, focused pytest, Ruff и diff check прошли.
+
+- 2026-09-10T18:40:58Z finalize (время окончания сессии; sync выполнен ранее): delta `native-delivery` семантически перенесена в canonical spec; `native-sync` receipt записан для текущего run.
+
+- 2026-09-10T18:54:43Z post-stop audit: временные метки Log уточнены по сохранённым phase/session receipts; первоначальные будущие значения и последующие приблизительные исправления не использованы как доказательство. Выявлены frozen-identity, lifecycle и no-writer дефекты recovery; исправления выполняются вне остановленного run, новые проверки не записываются от имени его worker.
+
 ## Result
-accepted native OpenSpec plan; structural admission only
+Runner остановлен до handoff и независимого review. После остановки исправляются дефекты технического recovery; прежние evidence относятся к прежнему payload. Продолжение требует отдельного self-host transition, а не capacity recovery.
 
 ## Next
 - native-accept после проверки плана

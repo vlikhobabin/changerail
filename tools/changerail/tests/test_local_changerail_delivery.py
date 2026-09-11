@@ -1101,6 +1101,9 @@ def _launch_with_command_count(
 
     def fake_killpg(pid: int, sent_signal: int) -> None:
         assert pid == process.pid
+        if sent_signal == 0:
+            # The observation after wait is not a termination signal.
+            raise ProcessLookupError(pid)
         process.signals.append(sent_signal)
         process.terminated = True
 
@@ -3287,6 +3290,9 @@ def test_codex_session_interrupt_is_finalized_as_delivery_error(
 
     def fake_killpg(pid: int, sent_signal: int) -> None:
         assert pid == process.pid
+        if sent_signal == 0:
+            # The observation after wait is not a termination signal.
+            raise ProcessLookupError(pid)
         process.signals.append(sent_signal)
 
     monkeypatch.setattr(delivery.subprocess, "Popen", fake_popen)

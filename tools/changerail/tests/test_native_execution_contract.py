@@ -29,7 +29,7 @@ def contract_run(tmp_path, monkeypatch):
         ("PROFILE_PATH", profile),
     ]:
         monkeypatch.setattr(d, key, value)
-    card = root / "openspec/board/3.inprogress/change.md"
+    card = root / "openspec" / "board" / "3.inprogress" / "change.md"
     card.parent.mkdir(parents=True)
     card.write_text("# Card\n\n## Lifecycle\nopenspec-v1\n")
     subprocess.run(["git", "add", "."], cwd=root, check=True)
@@ -347,6 +347,16 @@ def test_profile_rejects_retired_or_ambiguous_execution_policy(contract_run, bod
         d.profile()
 
 
+def test_profile_allows_an_explicit_technical_recovery_route(contract_run):
+    d.PROFILE_PATH.write_text(
+        'schema="changerail.local-delivery.v1"\n'
+        "[models.technical_recovery]\n"
+        'model="fallback-model"\n'
+        'reasoning_effort="high"\n'
+    )
+    assert d.profile()["models"]["technical_recovery"]["model"] == "fallback-model"
+
+
 def test_unchanged_failed_floor_cannot_allocate_recovery_review(
     contract_run, monkeypatch
 ):
@@ -448,3 +458,61 @@ def test_targeted_commands_execute_and_new_scope_invalidates_preverification(
     assert d.verification_commands("final") == [baseline]
     with pytest.raises(d.DeliveryError, match="current successful preverification"):
         d.require_current_successful_preverification(card, run, stage="test")
+
+
+def test_native_capacity_session_retains_terminal_stream_and_group_proof(
+    contract_run, monkeypatch
+):
+    import os
+    import sys
+    from scripts.changerail import technical_recovery
+
+    _root, _card, run, _metadata = contract_run
+    monkeypatch.setattr(
+        d,
+        "codex_session_command",
+        lambda **_kwargs: [
+            sys.executable,
+            "-c",
+            "import sys; print('Selected model is at capacity', file=sys.stderr); sys.exit(1)",
+        ],
+    )
+    monkeypatch.setattr(
+        d, "execution_env", lambda extra=None: {**os.environ, **(extra or {})}
+    )
+    assert (
+        d.launch_codex(
+            role="implementation",
+            prompt="fixture",
+            model="fixture-model",
+            reasoning="high",
+            run_dir=run,
+            timeout_minutes=1,
+            session_env={"CHRL_CHANGE_NUMBER": "2"},
+        )
+        == 1
+    )
+    session = run / "sessions/implementation"
+    metadata = d._check_json(session / "session.json")
+    assert metadata["native_change_number"] == 2
+    assert metadata["streams_complete"] is True
+    assert metadata["process_group_quiescent"] is True
+    assert (
+        technical_recovery.classify_session(d, session)["failure_class"]
+        == "model_capacity"
+    )
+
+
+def test_technical_apply_cli_propagates_successor_failure(contract_run, monkeypatch):
+    from scripts.changerail import technical_recovery
+
+    _root, _card, run, _metadata = contract_run
+    monkeypatch.setattr(
+        technical_recovery,
+        "apply",
+        lambda *_args: {"state": "dispatched", "exit_code": 2},
+    )
+    assert (
+        d.main(["technical-recovery-apply", str(run), "--proposal", "proposal.json"])
+        == 2
+    )

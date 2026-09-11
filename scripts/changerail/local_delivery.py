@@ -425,8 +425,14 @@ def profile() -> dict[str, Any]:
             "retired review allowances or offline finalization in profile"
         )
     models = configured.get("models", {})
-    if not isinstance(models, dict) or set(models) - {"implementation", "review"}:
-        raise DeliveryError("profile models permit only implementation and review")
+    if not isinstance(models, dict) or set(models) - {
+        "implementation",
+        "review",
+        "technical_recovery",
+    }:
+        raise DeliveryError(
+            "profile models permit only implementation, review and technical_recovery"
+        )
     if not isinstance(configured.get("budgets", {}), dict):
         raise DeliveryError("profile budgets must be a table")
     budget_limits_enforced(configured)
@@ -3386,6 +3392,15 @@ def launch_codex(
         "started_at": started_at,
         "command": command,
     }
+    native_change_number = (session_env or {}).get("CHRL_CHANGE_NUMBER")
+    if native_change_number is not None:
+        try:
+            number = int(native_change_number)
+        except ValueError as exc:
+            raise DeliveryError("native Change session number must be an integer") from exc
+        if number < 1:
+            raise DeliveryError("native Change session number must be positive")
+        metadata["native_change_number"] = number
     if resume_thread_id:
         metadata["resumed_thread_id"] = resume_thread_id
     if parent_session:
@@ -3534,6 +3549,20 @@ def launch_codex(
             return_code = process.wait()
     stdout_thread.join(timeout=5)
     stderr_thread.join(timeout=5)
+    try:
+        os.killpg(process.pid, 0)
+    except ProcessLookupError:
+        process_group_quiescent = True
+    except PermissionError:
+        process_group_quiescent = False
+    else:
+        process_group_quiescent = False
+    metadata.update(
+        streams_complete=not stdout_thread.is_alive()
+        and not stderr_thread.is_alive()
+        and not stream_errors,
+        process_group_quiescent=process_group_quiescent,
+    )
     if budget_violation is not None:
         stop_reason = "command_safety_stop"
     elif timed_out:
@@ -7775,6 +7804,46 @@ def _run_delivery(
             run["recovery_session_strategy"] = recovery_payload.get("resume_strategy")
             run["inherited_change_events"] = recovery_payload["inherited_change_events"]
             write_json(run_dir / "run.json", run)
+    return execute_prepared_delivery(
+        card=card,
+        run_dir=run_dir,
+        current_profile=current_profile,
+        recovery_context=recovery_context,
+        recovery=recovery,
+        resume_thread_id=resume_thread_id,
+        require_first_file_change=require_first_file_change,
+        inherited_investigative_commands=inherited_investigative_commands,
+        run_started_monotonic=run_started_monotonic,
+    )
+
+
+def execute_prepared_delivery(
+    *,
+    card: Path,
+    run_dir: Path,
+    current_profile: dict[str, Any],
+    recovery_context: Path | None,
+    recovery: bool = True,
+    resume_thread_id: str | None = None,
+    require_first_file_change: bool = False,
+    inherited_investigative_commands: int = 0,
+    run_started_monotonic: float | None = None,
+    before_orchestrate: Callable[[], None] | None = None,
+) -> int:
+    """Execute a prepared run under the caller's delivery lock through publication.
+
+    Both ordinary creation and receipt-based technical recovery use this owner
+    for environment, terminal metadata, recovery manifests and normal gates.
+    """
+    run = require_frozen_execution(run_dir)
+    manifest = _check_json(run_dir / "manifest.json")
+    if manifest.get("run_id") != run_dir.name:
+        raise DeliveryError("prepared manifest belongs to a different run")
+    changes = declared_change_plan(run_dir)
+    if native.is_native(card) and not changes:
+        raise DeliveryError("prepared native run lacks its frozen task plan")
+    if run_started_monotonic is None:
+        run_started_monotonic = time.monotonic()
     emit_environment = {"CHRL_RUN_DIR": str(run_dir)}
     original = os.environ.get("CHRL_RUN_DIR")
     os.environ.update(emit_environment)
@@ -7799,6 +7868,8 @@ def _run_delivery(
                 run["card"] = repo_relative(card)
                 write_json(run_dir / "run.json", run)
                 write_json(run_dir / "manifest.json", manifest)
+            if before_orchestrate is not None:
+                before_orchestrate()
             code = orchestrate_delivery(
                 card=card,
                 run_dir=run_dir,
@@ -7866,6 +7937,13 @@ def build_parser() -> argparse.ArgumentParser:
     repair_apply = subparsers.add_parser("runtime-repair-apply")
     repair_apply.add_argument("run_dir", type=Path)
     repair_apply.add_argument("--proposal", type=Path, required=True)
+    technical_prepare = subparsers.add_parser("technical-recovery-prepare")
+    technical_prepare.add_argument("run_dir", type=Path)
+    technical_apply = subparsers.add_parser("technical-recovery-apply")
+    technical_apply.add_argument("run_dir", type=Path)
+    technical_apply.add_argument("--proposal", type=Path, required=True)
+    technical_reconcile = subparsers.add_parser("technical-recovery-reconcile")
+    technical_reconcile.add_argument("run_dir", type=Path)
     restore_prepare = subparsers.add_parser("plan-restore-prepare")
     restore_prepare.add_argument("run_dir", type=Path)
     restore_prepare.add_argument("--reason", required=True)
@@ -7984,6 +8062,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.command in {
+            "technical-recovery-prepare",
+            "technical-recovery-apply",
+            "technical-recovery-reconcile",
+        }:
+            from scripts.changerail import technical_recovery
+            from scripts.changerail.native_workflow import retained_run
+
+            run_dir, _metadata = retained_run(runner_module(), args.run_dir)
+            if args.command == "technical-recovery-prepare":
+                result = technical_recovery.prepare(runner_module(), run_dir)
+            elif args.command == "technical-recovery-apply":
+                result = technical_recovery.apply(
+                    runner_module(), run_dir, args.proposal
+                )
+            else:
+                result = technical_recovery.reconcile(runner_module(), run_dir)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return int(result.get("exit_code", 0))
         if args.command == "board-guard":
             board_guard(args.card, start=args.start)
             return 0
