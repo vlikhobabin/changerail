@@ -101,6 +101,9 @@ class OpenSpecAdapter:
         return root.resolve()
 
     def _invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
+        from scripts.changerail.engine_runtime import require_run
+
+        require_run(self.root)
         if (self.root / "openspec/schemas").exists():
             raise DeliveryError("project OpenSpec schema overrides are unsupported")
         with tempfile.TemporaryDirectory(prefix="chrl-openspec-") as isolated:
@@ -232,11 +235,21 @@ class OpenSpecAdapter:
         """Read stock methodology from the pinned package, not global skills."""
         if name not in {"apply", "sync", "verify"}:
             raise DeliveryError("unknown stock OpenSpec workflow")
-        loader = self.root / "tools/openspec/workflow-instructions.mjs"
+        from scripts.changerail.engine_runtime import runtime_path, require_run
+
+        require_run(self.root)
+        loader = runtime_path(
+            self.root, self.root / "tools/openspec/workflow-instructions.mjs"
+        )
         result = subprocess.run(
             [str(self.node), str(loader), name],
             cwd=self.root,
-            env={"PATH": "/usr/bin:/bin", "OPENSPEC_TELEMETRY": "0", "CI": "true"},
+            env={
+                "PATH": "/usr/bin:/bin",
+                "OPENSPEC_TELEMETRY": "0",
+                "CI": "true",
+                "CHRL_PROJECT_ROOT": str(self.root),
+            },
             text=True,
             capture_output=True,
             timeout=self.timeout,

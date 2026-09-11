@@ -14,7 +14,9 @@ try {
   if (process.argv.length !== 3 || !Object.hasOwn(workflows, process.argv[2])) {
     throw new Error('expected exactly one workflow: apply, sync, verify');
   }
-  const dependency = dirname(resolve(process.argv[1]));
+  const dependency = process.env.CHRL_PROJECT_ROOT
+    ? resolve(process.env.CHRL_PROJECT_ROOT, 'tools/openspec')
+    : dirname(resolve(process.argv[1]));
   const packageRoot = realpathSync(resolve(dependency, 'node_modules/@fission-ai/openspec'));
   const manifest = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8'));
   if (manifest.version !== '1.3.1') throw new Error('unsupported workflow package');

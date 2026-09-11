@@ -328,3 +328,9 @@ binding, audit, backup и **неизменном inventory runs с момент�
 пока нет. При незавершённом attach или detach сохраняйте сами ссылки и backup
 и выполняйте отдельный разбор, не подменяя audit. Команды и точные ограничения
 приведены в [shared-source.md](shared-source.md).
+
+## Разработка самого ChangeRail
+
+Self-host delivery использует отдельный проверяемый engine snapshot и локальный
+binding. Переход остановленного run с изменившимся runtime выполняется только
+через self-host receipt; см. [порядок self-host recovery](self-host-recovery.md).

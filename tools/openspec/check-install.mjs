@@ -2,7 +2,9 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-const dependencyRoot = dirname(resolve(process.argv[1]));
+const helperRoot = dirname(resolve(process.argv[1]));
+const dependencyRoot = process.env.CHRL_PROJECT_ROOT
+  ? resolve(process.env.CHRL_PROJECT_ROOT, 'tools/openspec') : helperRoot;
 const packageRoot = resolve(dependencyRoot, 'node_modules/@fission-ai/openspec');
 
 function contained(candidate, parent) {
@@ -15,7 +17,7 @@ try {
   if (major < 20 || (major === 20 && minor < 19)) {
     throw new Error('Node.js >=20.19.0 is required');
   }
-  const expected = JSON.parse(readFileSync(resolve(dependencyRoot, 'package.json'), 'utf8'))
+  const expected = JSON.parse(readFileSync(resolve(helperRoot, 'package.json'), 'utf8'))
     .dependencies['@fission-ai/openspec'];
   if (expected !== '1.3.1') {
     throw new Error('adapter compatibility is pinned to OpenSpec 1.3.1');

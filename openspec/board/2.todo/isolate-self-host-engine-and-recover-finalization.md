@@ -1,7 +1,7 @@
 # Изоляция engine и восстановление self-host финализации
 
 ## Status
-1.backlog
+2.todo
 
 ## Lifecycle
 openspec-v1
@@ -163,12 +163,11 @@ ChangeRail при изменении собственного ядра смеш�
 ```
 
 ## Result
-Подготовлен отдельный объём работ. Реализация и принятие плана не начаты.
-Локальный технический проект сохранён в `.runtime/changerail/self-host-recovery-design/proposal.md`;
-он не является recovery receipt.
+accepted native OpenSpec plan; structural admission only
 
 ## Next
 - Подготовить и проверить отдельный native OpenSpec plan, затем принять его перед реализацией.
 
 ## Log
 - 2026-09-10T19:08:24Z Карточка создана по post-stop audit текущей self-host доставки; текущий accepted plan и retained run сохранены.
+- 2026-09-11T06:42:46Z accepted native OpenSpec plan

@@ -21,6 +21,9 @@ secrets/
 .ai/
 # The consumer profile and local agent configuration remain private.
 .changerail/profile.toml
+.changerail/engine
+.changerail/engine-binding.json
+.changerail/.engine-binding.lock
 # CODEX_HOME may point at <repo>/.codex. Keep local configuration and live
 # runtime/auth/session state out of git; only shared skills may be versioned.
 .codex/*

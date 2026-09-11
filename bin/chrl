@@ -21,5 +21,6 @@ fi
 if [[ ! -x "$chrl_python" ]]; then
   chrl_python="$(command -v python3)"
 fi
-export PYTHONPATH="$chrl_source_root${PYTHONPATH:+:$PYTHONPATH}"
-exec "$chrl_python" -m scripts.changerail.local_delivery "$@"
+export PYTHONPATH="$chrl_source_root"
+export PYTHONDONTWRITEBYTECODE=1
+exec "$chrl_python" -P -m scripts.changerail.engine_runtime "$@"

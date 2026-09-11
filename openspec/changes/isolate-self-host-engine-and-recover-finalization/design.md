@@ -22,3 +22,40 @@
 Регрессии должны покрыть identity drift, symlink/foreign engine, profile/launcher drift,
 race/crash, duplicate apply, live processes, unresolved verification, plan/payload drift,
 review/final/archive/publication boundaries и synthetic full lifecycle до publish.
+
+## Engine and project execution inputs
+
+Snapshot создаётся из чистого committed distribution payload, исключает Git,
+профили, журналы и зависимости. Manifest фиксирует все файлы, режимы и хэши;
+read-only permissions защищают от случайной записи, повторная проверка inventory
+обнаруживает изменение даже владельцем. Публикация каталога атомарна и не заменяет
+существующий snapshot. Binding принадлежит локальному проекту и не публикуется.
+
+Python запускается с `-P` и точным `PYTHONPATH` engine: текущий рабочий каталог
+не может затенить пакет `scripts`. Runner читает schemas и skill инструкции из
+snapshot. Проектный профиль, model launcher, adapters, Python executable и
+локальная установленная OpenSpec dependency замораживаются отдельно. Продуктовые
+`bin/chrl`, Python-модули и schemas разрешено менять как payload; вложенные вызовы
+получают путь закреплённого engine. Ссылка `.changerail/engine` не authority.
+
+## Relocated predecessor
+
+При переносе разработки между checkout исходный run находится у прежнего
+владельца. Prepare/apply удерживают оба delivery lock в стабильном порядке,
+проверяют terminal receipts и живые процессы Linux. Receipt фиксирует оба пути,
+Git lineage, полный inventory истории, принятый план, accounting и точный
+корректирующий diff. Хэшей старого manifest недостаточно для реконструкции:
+нужны соответствующие им исходные bytes из сохранённого snapshot или Git.
+
+Резервирование successor также записывается у origin вне старого run, чтобы
+другая копия checkout не создала второго writer. Локальная копия predecessor
+публикуется атомарно и сохраняет исходные bytes; обычные ancestry readers
+продолжают использовать относительные пути. Старое evidence остаётся историей.
+
+## Current delivery ownership
+
+Активная карточка technical recovery сохраняет своё место и accepted plan.
+Инфраструктурное исправление self-host выполняется отдельно в checkout разработки;
+оно не записывает checkpoints или review receipts от имени остановленного run.
+Вторая активная delivery карточка не создаётся. После проверки нового контракта
+допускается explicit переход владельца к одному successor, начинающему finalize.

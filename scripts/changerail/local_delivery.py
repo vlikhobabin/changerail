@@ -33,7 +33,7 @@ from scripts.changerail import openspec_context as native
 from scripts.changerail.adapters.results import validate_selected_nodes, receipt_nodes
 from scripts.changerail.targeted_checks import select_targeted_commands
 
-from scripts.changerail import source_binding
+from scripts.changerail import source_binding, engine_runtime
 
 REPO_ROOT = source_binding.project_root(_SOURCE_REPO_ROOT)
 BOARD_ROOT = REPO_ROOT / "openspec" / "board"
@@ -42,6 +42,9 @@ BOARD_COLUMNS = ("1.backlog", "2.todo", "3.inprogress", "4.done", "5.canceled")
 
 def execution_identity() -> dict[str, str]:
     """Freeze local code, schemas, skills, profile and launcher bytes for execution."""
+    pinned = engine_runtime.identity(runner_module())
+    if pinned is not None:
+        return pinned
     launcher = (
         profile().get("adapters", {}).get("codex", {}).get("launcher", "bin/codex")
     )
@@ -162,7 +165,36 @@ def resume_publication(run_dir: Path) -> int:
     return result.returncode
 
 
+def require_unreserved_run(run_dir: Path) -> None:
+    """A self-host transition owns its predecessor across all execution routes."""
+    claim = RUNTIME_ROOT / "self-host-transitions" / (run_dir.name + ".json")
+    if claim.exists() or claim.is_symlink():
+        raise DeliveryError(
+            "self-host transition owns this predecessor; use its successor"
+        )
+    proposal_path = (
+        RUNTIME_ROOT / "self-host-recoveries" / run_dir.name / "proposal.json"
+    )
+    if proposal_path.exists() or proposal_path.is_symlink():
+        proposal = _check_json_bytes(_check_bytes(proposal_path, 32 * 1024 * 1024))
+        origin = Path(str(proposal.get("source_run", "")))
+        if (
+            origin.name != run_dir.name
+            or not origin.is_absolute()
+            or len(origin.parents) < 2
+        ):
+            raise DeliveryError("invalid self-host predecessor authority")
+        reservation = (
+            origin.parents[1] / "self-host-transitions" / (origin.name + ".json")
+        )
+        if reservation.exists() or reservation.is_symlink():
+            raise DeliveryError(
+                "self-host transition owns the copied predecessor; use its successor"
+            )
+
+
 def require_frozen_execution(run_dir: Path) -> dict[str, Any]:
+    require_unreserved_run(run_dir)
     metadata = require_current_execution(run_dir)
     from scripts.changerail.runtime_repair import effective_identity
     from scripts.changerail import plan_restoration
@@ -397,7 +429,9 @@ def write_json(path: Path, payload: Any) -> None:
 
 def load_json(path: Path) -> dict[str, Any]:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(
+            engine_runtime.runtime_path(REPO_ROOT, path).read_text(encoding="utf-8")
+        )
     except (OSError, json.JSONDecodeError) as exc:
         raise DeliveryError(f"cannot read JSON {path}: {exc}") from exc
     if not isinstance(payload, dict):
@@ -3363,6 +3397,9 @@ def launch_codex(
     session_dir / "events.jsonl"
     session_dir / "stderr.log"
     last_message = session_dir / "last-message.md"
+    if engine_runtime.binding(REPO_ROOT) is not None:
+        require_frozen_execution(run_dir)
+    prompt = engine_runtime.pinned_prompt(REPO_ROOT, role, prompt)
     command = codex_session_command(
         model=model,
         reasoning=reasoning,
@@ -3397,7 +3434,9 @@ def launch_codex(
         try:
             number = int(native_change_number)
         except ValueError as exc:
-            raise DeliveryError("native Change session number must be an integer") from exc
+            raise DeliveryError(
+                "native Change session number must be an integer"
+            ) from exc
         if number < 1:
             raise DeliveryError("native Change session number must be positive")
         metadata["native_change_number"] = number
@@ -7937,6 +7976,21 @@ def build_parser() -> argparse.ArgumentParser:
     repair_apply = subparsers.add_parser("runtime-repair-apply")
     repair_apply.add_argument("run_dir", type=Path)
     repair_apply.add_argument("--proposal", type=Path, required=True)
+    snapshot_create = subparsers.add_parser("engine-snapshot-create")
+    snapshot_create.add_argument("destination", type=Path)
+    snapshot_create.add_argument("--source", type=Path, default=_SOURCE_REPO_ROOT)
+    snapshot_verify = subparsers.add_parser("engine-snapshot-verify")
+    snapshot_verify.add_argument("snapshot", type=Path)
+    engine_bind = subparsers.add_parser("engine-bind")
+    engine_bind.add_argument("snapshot", type=Path)
+    self_prepare = subparsers.add_parser("self-host-recovery-prepare")
+    self_prepare.add_argument("run_dir", type=Path)
+    self_prepare.add_argument("--payload-snapshot", type=Path)
+    self_apply = subparsers.add_parser("self-host-recovery-apply")
+    self_apply.add_argument("run_dir", type=Path)
+    self_apply.add_argument("--proposal", type=Path, required=True)
+    self_reconcile = subparsers.add_parser("self-host-recovery-reconcile")
+    self_reconcile.add_argument("run_dir", type=Path)
     technical_prepare = subparsers.add_parser("technical-recovery-prepare")
     technical_prepare.add_argument("run_dir", type=Path)
     technical_apply = subparsers.add_parser("technical-recovery-apply")
@@ -8007,6 +8061,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if engine_runtime.binding(REPO_ROOT) is not None and os.environ.get(
+            "CHRL_RUN_DIR"
+        ):
+            require_frozen_execution(Path(os.environ["CHRL_RUN_DIR"]))
         # Session commands share the runner's lock; reject pending restoration
         # before any child writer dispatch, including stale CHRL_RUN_DIR callers.
         if args.command not in {
@@ -8022,6 +8080,48 @@ def main(argv: Sequence[str] | None = None) -> int:
             from scripts.changerail import plan_restoration
 
             plan_restoration.ensure_no_pending(runner_module())
+        if args.command in {
+            "engine-snapshot-create",
+            "engine-snapshot-verify",
+            "engine-bind",
+        }:
+            from scripts.changerail import engine_snapshot
+
+            if os.environ.get("CHRL_SESSION_ROLE"):
+                raise DeliveryError(
+                    "engine installation requires an operator outside delivery"
+                )
+            try:
+                if args.command == "engine-snapshot-create":
+                    result = engine_snapshot.create_snapshot(
+                        args.source, args.destination
+                    )
+                elif args.command == "engine-bind":
+                    with delivery_lock():
+                        result = engine_snapshot.bind_engine(REPO_ROOT, args.snapshot)
+                else:
+                    result = engine_snapshot.verify_snapshot(args.snapshot)
+            except engine_snapshot.EngineSnapshotError as exc:
+                raise DeliveryError(str(exc)) from exc
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command.startswith("self-host-recovery-"):
+            from scripts.changerail import self_host_recovery
+
+            if args.command == "self-host-recovery-prepare":
+                result = self_host_recovery.prepare(
+                    runner_module(),
+                    args.run_dir,
+                    payload_snapshot=args.payload_snapshot,
+                )
+            elif args.command == "self-host-recovery-apply":
+                result = self_host_recovery.apply(
+                    runner_module(), args.run_dir, args.proposal
+                )
+            else:
+                result = self_host_recovery.reconcile(runner_module(), args.run_dir)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return result.get("exit_code", 0)
         if args.command in {"plan-restore-prepare", "plan-restore-apply"}:
             from scripts.changerail import plan_restoration
             from scripts.changerail.native_workflow import retained_run

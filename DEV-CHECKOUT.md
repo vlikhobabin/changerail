@@ -1,9 +1,17 @@
-# Рабочий checkout ChangeRail
+# Разработка ChangeRail и закреплённый engine
 
-Авторитетный checkout для разработки и подготовки релизов: `/opt/changerail-dev`.
+Разработка ведётся в основном checkout инструмента. Исполняемый engine должен
+находиться в отдельном snapshot с проверяемым inventory и явным локальным binding.
+Чистый Git checkout или символическая ссылка сами по себе этого не обеспечивают.
 
-- Карточки и OpenSpec changes создаются только здесь.
-- `/opt/changerail` — рабочий runtime и историческая точка подключения consumer-проектов; его board защищён от записи.
-- `.changerail/engine` указывает на `/opt/changerail` как на текущую стабильную копию engine. Эта ссылка не заменяет отдельный self-host recovery receipt.
-- Consumer-проекты не переключаются вручную: для source-link используется поддержанный `distribution.py attach --development` с inventory/adoption.
-- `.runtime`, профили, credentials и локальные Codex state остаются локальными и не переносятся в Git.
+- Карточки и OpenSpec changes принадлежат checkout разработки.
+- Исторические runs, профили и evidence сохраняются у исходного владельца.
+- `.changerail/engine-binding.json` задаёт проверенную привязку к snapshot;
+  receipt self-host recovery отдельно фиксирует переход конкретного run.
+- Consumer-проекты подключаются через `distribution.py attach --development`
+  с inventory/adoption и сохранением локальных данных.
+- Локальные абсолютные ссылки, `.runtime`, credentials и настройки агентов
+  не публикуются в Git.
+
+Например, checkout разработки может находиться в `/srv/tools/changerail-dev`,
+а snapshot — в `/srv/engines/changerail/<identity>`. Эти каталоги произвольны.
