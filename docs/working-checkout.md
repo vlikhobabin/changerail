@@ -91,7 +91,8 @@ receipts сохраняйте без изменения байтов и путе
 
 Сверьте каждый файл и режим runtime-архива с рабочим checkout и manifest,
 а tag/HEAD/tree — с provenance. Проверьте все остальные release-файлы за пределами
-явного project overlay. Выполните `"$chrl_work/bin/chrl" wiring`; зависимости OpenSpec
+явного project overlay. Выполните `"$chrl_work/bin/chrl" --project "$chrl_work" wiring`; явный project
+исключает выбор другого checkout по текущему каталогу. Зависимости OpenSpec
 проверяются существующим wrapper, их установка — отдельное явное действие.
 ChangeRail suite в consumers и при обычном обновлении runtime не запускается.
 
