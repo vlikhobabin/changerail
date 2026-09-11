@@ -175,6 +175,16 @@ def main() -> int:
     """Bootstrap from the selected engine with cwd excluded from Python imports."""
     project = Path(os.environ["CHRL_PROJECT_ROOT"]).resolve(strict=True)
     source = Path(__file__).resolve().parents[2]
+    if sys.argv[1:2] == ["engine-rebind"]:
+        from scripts.changerail.engine_snapshot import rebind_engine, verify_snapshot
+
+        if not (source / "ENGINE-SNAPSHOT.json").is_file():
+            raise DeliveryError("engine-rebind requires a sealed engine snapshot")
+        verify_snapshot(source)
+        if len(sys.argv) != 4 or sys.argv[2] != "--previous-identity":
+            raise DeliveryError("engine-rebind requires --previous-identity ID")
+        print(json.dumps(rebind_engine(project, source, sys.argv[3]), indent=2))
+        return 0
     value = binding(project)
     engine = Path(value["engine_root"]) if value else source
     if sys.argv[1:] == ["--verified-engine-root"]:

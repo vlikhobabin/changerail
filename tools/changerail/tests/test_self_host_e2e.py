@@ -8,6 +8,7 @@ Subprocess engine routing is covered separately by the engine entrypoint tests.
 import json
 import shutil
 import sys
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from scripts.changerail import local_delivery as d
 from scripts.changerail import openspec_board as board
 from scripts.changerail import native_workflow as flow
 from scripts.changerail import self_host_recovery as recovery
+from scripts.changerail import engine_snapshot, engine_runtime
 from tools.changerail.tests.test_native_openspec_integration import project as project
 from tools.changerail.tests.test_plan_restore_e2e import (
     snapshot,
@@ -27,9 +29,9 @@ from tools.changerail.tests.test_plan_restore_e2e import (
 SOURCE = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("resume_after_stop", [False, True])
+@pytest.mark.parametrize("resume_after_stop,empty_payload", [(False, False), (True, False), (True, True)])
 def test_self_host_successor_reaches_real_local_publication(
-    project, tmp_path, monkeypatch, capsys, resume_after_stop
+    project, tmp_path, monkeypatch, capsys, resume_after_stop, empty_payload
 ):
     root, card, _client = project
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
@@ -66,6 +68,28 @@ def test_self_host_successor_reaches_real_local_publication(
             and value.is_relative_to(SOURCE)
         ):
             monkeypatch.setattr(d, name, root / value.relative_to(SOURCE))
+    if empty_payload:
+        # Real sealed inventories and binding; only the in-process import address
+        # is supplied by the fixture. Nested CLI commands load snapshot code.
+        source = tmp_path / "engine-source"
+        for name, (data, mode) in dist.source_payload(SOURCE)[1].items():
+            dist.write_atomic(source / name, data, mode)
+        def source_git(*args):
+            subprocess.run(["git", "-C", str(source), *args], check=True, capture_output=True)
+        source_git("init", "-q")
+        source_git("config", "user.name", "Fixture")
+        source_git("config", "user.email", "fixture@example.invalid")
+        source_git("add", ".")
+        source_git("commit", "-qm", "old engine")
+        old_engine, new_engine = tmp_path / "old-engine", tmp_path / "new-engine"
+        engine_snapshot.create_snapshot(source, old_engine)
+        source_git("commit", "--allow-empty", "-qm", "new engine provenance")
+        engine_snapshot.create_snapshot(source, new_engine)
+        old_binding = engine_snapshot.bind_engine(root, old_engine)
+        monkeypatch.setattr(d, "_SOURCE_REPO_ROOT", old_engine)
+        monkeypatch.setattr(engine_runtime, "__file__", str(old_engine / "scripts/changerail/engine_runtime.py"))
+        with (root / ".gitignore").open("a") as stream:
+            stream.write(".changerail/engine-binding.json\n.changerail/.engine-binding.lock\n")
     (root / "source.py").write_text("def value():\n    return 1\n")
     dist.write_atomic(
         root / "tests/test_behavior.py",
@@ -145,27 +169,37 @@ def test_self_host_successor_reaches_real_local_publication(
             target = old_payload / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
-    history = snapshot(origin)
     # Model behavior is unchanged, but its corrective payload is newly reviewed.
     (root / "source.py").write_text("def value():\n    return 2  # corrected payload\n")
-    monkeypatch.setattr(
-        recovery, "_engine", lambda _d: {"engine": "controlled import address"}
-    )
+    if not empty_payload:
+        monkeypatch.setattr(
+            recovery, "_engine", lambda _d: {"engine": "controlled import address"}
+        )
+    if empty_payload:
+        engine_snapshot.rebind_engine(root, new_engine, old_binding["engine_identity"])
+        monkeypatch.setattr(d, "_SOURCE_REPO_ROOT", new_engine)
+        monkeypatch.setattr(engine_runtime, "__file__", str(new_engine / "scripts/changerail/engine_runtime.py"))
+        d.git("add", ".")
+        d.git("commit", "-m", "committed finalization payload")
+        baseline = d.git("rev-parse", "HEAD").stdout.strip()
+        retained_manifest(origin, card, baseline)
+        assert d._check_json(origin / "manifest.json")["paths"] == []
+    history = snapshot(origin)
     prepared = recovery.prepare(d, origin, payload_snapshot=old_payload)
     # A relocated checkout has the retained native plan in its imported run,
     # but not necessarily the separate original admission directory.
     shutil.rmtree(d.RUNTIME_ROOT / "native-plans/example")
     capsys.readouterr()
     allocations = []
-    stopped_once = False
+    stops = 0
 
     def controlled_session(**kwargs):
-        nonlocal stopped_once
+        nonlocal stops
         role, run = kwargs["role"], kwargs["run_dir"]
         stage = kwargs.get("session_env", {}).get("CHRL_DELIVERY_STAGE")
         assert stage != "change", "completed groups must never be replayed"
-        if resume_after_stop and not stopped_once and stage == "finalize":
-            stopped_once = True
+        if resume_after_stop and stops < (2 if empty_payload else 1) and stage == "finalize":
+            stops += 1
             return 2
         allocations.append((role, stage))
         session = run / "sessions" / f"controlled-{len(allocations)}"
@@ -284,10 +318,19 @@ def test_self_host_successor_reaches_real_local_publication(
     first_successor = next(
         p for p in (d.RUNTIME_ROOT / "runs").iterdir() if p != origin
     )
+    resume_parent = first_successor
     if resume_after_stop:
-        assert result == 2
-        assert d._check_json(first_successor / "run.json")["finished_at"]
-        result = d.main(["resume", str(first_successor)])
+        for attempt in range(2 if empty_payload else 1):
+            assert result == 2
+            assert d._check_json(resume_parent / "run.json")["finished_at"]
+            before_resume = snapshot(resume_parent)
+            result = d.main(["resume", str(resume_parent)])
+            assert snapshot(resume_parent) == before_resume
+            if empty_payload and attempt == 0:
+                resume_parent = next(
+                    p for p in (d.RUNTIME_ROOT / "runs").iterdir()
+                    if d._check_json(p / "run.json").get("recovery_of") == resume_parent.name
+                )
     captured = capsys.readouterr()
     assert result == 0, captured.out + captured.err
     assert allocations == [
@@ -312,7 +355,7 @@ def test_self_host_successor_reaches_real_local_publication(
     assert d._check_json(successor / "publication.json")["state"] == "pushed"
     assert d._check_json(successor / "verification.json")["ok"] is True
     assert d._check_json(successor / "run.json")["recovery_of"] == (
-        first_successor.name if resume_after_stop else origin.name
+        resume_parent.name if resume_after_stop else origin.name
     )
     count = len(allocations)
     assert (

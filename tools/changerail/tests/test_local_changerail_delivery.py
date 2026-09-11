@@ -1066,6 +1066,7 @@ def _launch_with_command_count(
     role: str,
     command_count: int,
 ) -> tuple[Path, _FakeCodexProcess]:
+    monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     run_dir = tmp_path / "run"
     delivery.write_json(
         run_dir / "run.json",
@@ -3276,6 +3277,7 @@ def test_codex_session_terminates_on_next_shell_command_and_records_violation(
 def test_codex_session_interrupt_is_finalized_as_delivery_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     run_dir = tmp_path / "run"
     delivery.write_json(
         run_dir / "run.json",
@@ -5851,13 +5853,19 @@ def test_configured_final_check_real_interruption(tmp_path, monkeypatch):
     import sys
 
     root, card, run, commands = _configured_final_check_fixture(
-        tmp_path, monkeypatch, ["sleep 0.4", "true"]
+        tmp_path, monkeypatch, ["touch .runtime/floor-ready; sleep 5", "true"]
     )
     code = (
         _delivery_child_bootstrap(root, run)
-        + "import signal, threading; "
+        + "import signal, threading, time; "
         f'd.profile=lambda: {{"verification": {{"pre_review_commands": ["true"], "final_commands": {commands!r}}}}}; '
-        "timer=threading.Timer(0.15, lambda: os.kill(os.getpid(), signal.SIGINT)); timer.start(); "
+        "\ndef interrupt_when_ready():\n"
+        "    deadline=time.monotonic()+5\n"
+        "    while not Path('.runtime/floor-ready').exists():\n"
+        "        if time.monotonic()>deadline: return\n"
+        "        time.sleep(0.01)\n"
+        "    os.kill(os.getpid(), signal.SIGINT)\n"
+        "timer=threading.Thread(target=interrupt_when_ready); timer.start()\n"
         f"result=d._run_full_floor(Path({str(card)!r}), commands={commands!r}, "
         'root_name="verification", result_name="verification.json", '
         'schema="changerail.final-verification.v1", event_stage="verification", proof_lane="final"); '
@@ -8062,8 +8070,14 @@ def test_verdict_acceptance_coverage_rejects_empty_evidence(
     verdict["acceptance"][0]["evidence"] = []
     _write_verdict(card, verdict)
 
-    with pytest.raises(delivery.DeliveryError, match="should be non-empty"):
+    from jsonschema.exceptions import ValidationError
+
+    with pytest.raises(delivery.DeliveryError) as failure:
         delivery.validate_verdict(str(card))
+    cause = failure.value.__cause__
+    assert isinstance(cause, ValidationError)
+    assert cause.validator == "minItems"
+    assert list(cause.absolute_path) == ["acceptance", 0, "evidence"]
 
 
 def test_verdict_acceptance_coverage_rejects_missing_criterion(

@@ -10,6 +10,25 @@ from tools.changerail.tests.test_technical_recovery import _origin, _files
 from tools.changerail.tests.test_native_openspec_integration import project as project
 
 
+@pytest.fixture(autouse=True)
+def owned_processes(monkeypatch):
+    """Keep unit fault injection independent of unrelated host process owners.
+
+    Real-owner tests explicitly register their subprocess; opaque/exiting process
+    tests provide their own proc view. The production scanner itself stays real.
+    """
+    owners = []
+    glob = Path.glob
+
+    def proc_view(path, pattern, *args, **kwargs):
+        if path == Path("/proc") and pattern == "[0-9]*":
+            return iter(owners)
+        return glob(path, pattern, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "glob", proc_view)
+    return owners
+
+
 def origin(project, monkeypatch):
     root, card, run = _origin(project, monkeypatch)
     owner = d._check_json(run / "run.json")
@@ -212,7 +231,7 @@ def test_cross_checkout_copies_exact_history_and_reserves_origin(project, monkey
         recovery.reconcile(d, source_run)
 
 
-def test_live_process_and_held_origin_lock_block_apply(project, monkeypatch):
+def test_live_process_and_held_origin_lock_block_apply(project, monkeypatch, owned_processes):
     import fcntl
     import os
     import subprocess
@@ -222,6 +241,7 @@ def test_live_process_and_held_origin_lock_block_apply(project, monkeypatch):
     process = subprocess.Popen(
         ["sleep", "30"], env={**os.environ, "CHRL_RUN_DIR": str(run)}
     )
+    owned_processes.append(Path("/proc") / str(process.pid))
     try:
         with pytest.raises(d.DeliveryError, match="live process"):
             recovery.apply(d, run, Path(prepared["proposal"]))
@@ -487,3 +507,144 @@ def test_completed_technical_successor_retains_classified_capacity_history(
             recovery.prepare(d, run)
     else:
         assert recovery.prepare(d, run)["state"] == "prepared"
+
+
+@pytest.mark.parametrize("drift", [None, "identity", "receipt", "head", "ordinary-child"])
+def test_empty_self_host_resume_requires_exact_retained_authority(
+    project, monkeypatch, drift
+):
+    root, card, run, _snapshot = origin(project, monkeypatch)
+    d.git("add", ".")
+    d.git("commit", "-m", "committed corrective payload")
+    manifest = d._check_json(run / "manifest.json")
+    manifest.update(
+        paths=[],
+        baseline_head=d.git("rev-parse", "HEAD").stdout.strip(),
+        fingerprint=d.payload_fingerprint([]),
+        path_fingerprints={},
+    )
+    d.write_json(run / "manifest.json", manifest)
+    monkeypatch.setattr(d, "execute_prepared_delivery", lambda **kwargs: 2)
+    proposal = recovery.prepare(d, run)
+    applied = recovery.apply(d, run, Path(proposal["proposal"]))
+    child = Path(applied["successor"])
+    value = d._check_json(child / "run.json")
+    value.update(finished_at=d.utc_now(), exit_code=2)
+    d.write_json(child / "run.json", value)
+    if drift == "ordinary-child":
+        previous = child
+        child = previous.parent / "ordinary-child"
+        shutil.copytree(previous, child)
+        value.pop("self_host_recovery")
+        value.update(run_id=child.name, recovery_of=previous.name)
+        d.write_json(child / "run.json", value)
+        manifest = d._check_json(child / "manifest.json")
+        manifest["run_id"] = child.name
+        d.write_json(child / "manifest.json", manifest)
+    if drift == "identity":
+        value["process_identity"] = {"changed": "1"}
+        d.write_json(child / "run.json", value)
+    elif drift == "receipt":
+        (Path(proposal["proposal"]).parent / "dispatch.json").unlink()
+    elif drift == "head":
+        d.git("commit", "--allow-empty", "-m", "unrecorded head change")
+    ok, detail, _manifest = d.recovery_source(card, [], required_run_id=child.name)
+    assert ok is (drift in (None, "ordinary-child")), detail
+    assert d.recovery_source(card, [])[0] is False
+
+
+@pytest.mark.parametrize("drift", [None, "profile", "dependency", "python", "extra"])
+def test_bound_predecessor_preserves_all_project_inputs(project, monkeypatch, drift):
+    _root, _card, run, snapshot = origin(project, monkeypatch)
+    owner = d._check_json(run / "run.json")
+    profile_hash = owner["process_identity"][d.repo_relative(d.PROFILE_PATH)]
+    bound = {
+        "engine/identity": "old-engine",
+        "engine/root": "old-root",
+        "python/executable": "python",
+        "project/.changerail/profile.toml": profile_hash,
+        "project/openspec-dependency-inventory": "dependency",
+        "project/.changerail/engine-binding.json": "old-binding",
+    }
+    owner["process_identity"] = bound
+    d.write_json(run / "run.json", owner)
+    current = {
+        **bound,
+        "engine/identity": "new-engine",
+        "engine/root": "new-root",
+        "project/.changerail/engine-binding.json": "new-binding",
+    }
+    if drift == "profile":
+        current["project/.changerail/profile.toml"] = "drift"
+    if drift == "dependency":
+        current["project/openspec-dependency-inventory"] = "drift"
+    if drift == "python":
+        current["python/executable"] = "drift"
+    if drift == "extra":
+        current["project/.changerail/adapters/extra.py"] = "new"
+    monkeypatch.setattr(d, "execution_identity", lambda: current)
+    with pytest.raises(d.DeliveryError, match="execution inputs" if drift else "binding"):
+        recovery.prepare(d, run, payload_snapshot=snapshot)
+
+
+def test_live_scan_tolerates_owner_exiting_between_proc_reads(tmp_path, monkeypatch):
+    process = tmp_path / '123456789'
+    process.mkdir()
+    glob, read = Path.glob, Path.read_bytes
+    def processes(path, pattern):
+        return iter([process]) if path == Path('/proc') else glob(path, pattern)
+    def read_process(path):
+        if path == process / 'environ':
+            raise PermissionError('process exiting')
+        if path == process / 'cmdline':
+            raise FileNotFoundError('process reaped')
+        return read(path)
+    monkeypatch.setattr(Path, 'glob', processes)
+    monkeypatch.setattr(Path, 'read_bytes', read_process)
+    recovery._live([tmp_path / 'project'])
+
+
+@pytest.mark.parametrize('scanner', ['engine', 'recovery'])
+@pytest.mark.parametrize('state', ['Z', 'X', 'R'])
+def test_opaque_process_requires_proven_terminal_state(tmp_path, monkeypatch, scanner, state):
+    from scripts.changerail import engine_snapshot
+    process = tmp_path / '123456789'
+    process.mkdir()
+    (process / 'status').write_text(f'Name:\ttest\nState:\t{state} (test)\n')
+    glob, read = Path.glob, Path.read_bytes
+    monkeypatch.setattr(Path, 'glob', lambda path, pattern: iter([process]) if path == Path('/proc') else glob(path, pattern))
+    def read_process(path):
+        if path == process / 'environ':
+            raise PermissionError('opaque process')
+        if path == process / 'cmdline':
+            return b''
+        return read(path)
+    monkeypatch.setattr(Path, 'read_bytes', read_process)
+    scan = (lambda: engine_snapshot._no_live_delivery(tmp_path)) if scanner == 'engine' else (lambda: recovery._live([tmp_path]))
+    if state == 'R':
+        with pytest.raises((engine_snapshot.EngineSnapshotError, d.DeliveryError)):
+            scan()
+    else:
+        scan()
+
+
+@pytest.mark.parametrize('scanner', ['engine', 'recovery'])
+def test_process_exits_during_opaque_command_read(tmp_path, monkeypatch, scanner):
+    from scripts.changerail import engine_snapshot
+    process = tmp_path / '123456789'
+    process.mkdir()
+    glob, read, text = Path.glob, Path.read_bytes, Path.read_text
+    states = iter(['State:\tR (running)\n', 'State:\tZ (zombie)\n'])
+    monkeypatch.setattr(Path, 'glob', lambda path, pattern: iter([process]) if path == Path('/proc') else glob(path, pattern))
+    monkeypatch.setattr(Path, 'read_text', lambda path, *a, **kw: next(states) if path == process / 'status' else text(path, *a, **kw))
+    def read_process(path):
+        if path == process / 'environ':
+            raise PermissionError('exiting')
+        if path == process / 'cmdline':
+            return b''
+        return read(path)
+    monkeypatch.setattr(Path, 'read_bytes', read_process)
+    if scanner == 'engine':
+        engine_snapshot._no_live_delivery(tmp_path)
+    else:
+        recovery._live([tmp_path])

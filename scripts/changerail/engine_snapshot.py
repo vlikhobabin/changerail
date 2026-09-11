@@ -353,3 +353,282 @@ def verify_binding(
     if snapshot_identity(verify_snapshot(snapshot)) != binding["engine_identity"]:
         raise EngineSnapshotError("bound engine identity drift")
     return binding
+
+
+def _sync_file(path: Path) -> None:
+    fd = os.open(_path(path), os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _sync_ancestors(directory: Path) -> None:
+    for parent in (directory, *directory.parents):
+        _sync_directory(parent)
+
+
+def _mkdir_durable(path: Path) -> None:
+    missing = []
+    directory = path
+    while not directory.exists():
+        missing.append(directory)
+        directory = directory.parent
+    for directory in reversed(missing):
+        _path(directory).mkdir(exist_ok=True)
+        _sync_directory(directory.parent)
+    _sync_ancestors(path)
+
+
+def _rebind_receipt(path: Path, value: dict[str, Any]) -> None:
+    data = _encoded(value)
+    if path.exists():
+        if _read(path)[0] != data:
+            raise EngineSnapshotError("engine rebind receipt drift")
+        _sync_file(path)
+        _sync_ancestors(path.parent)
+        return
+    _mkdir_durable(path.parent)
+    fd, name = tempfile.mkstemp(prefix=".receipt-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o444)
+            os.fsync(stream.fileno())
+        _publish_directory(temporary, path)
+        _sync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _replace_binding(path: Path, data: bytes) -> None:
+    fd, name = tempfile.mkstemp(prefix=".engine-binding-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o644)
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _sync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def process_exited(process: Path) -> bool:
+    """Only kernel terminal states prove an opaque process cannot write again."""
+    try:
+        for line in (process / "status").read_text().splitlines():
+            if line.startswith("State:"):
+                fields = line.split()
+                return len(fields) >= 2 and fields[1] in {"Z", "X"}
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    except PermissionError:
+        pass
+    return False
+
+
+def _no_live_delivery(project: Path) -> None:
+    for process in Path("/proc").glob("[0-9]*"):
+        try:
+            if int(process.name) == os.getpid() or process.stat().st_uid != os.getuid():
+                continue
+            environment = (process / "environ").read_bytes().split(b"\0")
+            for item in environment:
+                if item.startswith(b"CHRL_RUN_DIR="):
+                    owner = Path(os.fsdecode(item.split(b"=", 1)[1])).resolve()
+                    if owner.is_relative_to(project / ".runtime/changerail"):
+                        raise EngineSnapshotError("live process owns delivery project")
+        except (ProcessLookupError, FileNotFoundError):
+            continue
+        except PermissionError:
+            if process_exited(process):
+                continue
+            try:
+                command = (process / "cmdline").read_bytes().lower()
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            if (not command or any(
+                name in command.split(b"\0", 1)[0]
+                for name in (b"python", b"codex", b"chrl", b"changerail", b"pytest", b"bash", b"/sh")
+            )) and not process_exited(process):
+                raise EngineSnapshotError("cannot prove delivery runner is inactive")
+
+
+def rebind_engine(
+    project: Path, snapshot: Path, previous_identity: str
+) -> dict[str, Any]:
+    """Explicit operator transition; old run execution identity is never rewritten."""
+    project, snapshot = _path(project), _path(snapshot)
+    if os.environ.get("CHRL_RUN_DIR") or os.environ.get("CHRL_SESSION_ROLE"):
+        raise EngineSnapshotError("engine rebind requires an operator outside delivery")
+    if snapshot.is_relative_to(project) or project.is_relative_to(snapshot):
+        raise EngineSnapshotError("engine must be outside mutable project")
+    after = {
+        "schema": BINDING_SCHEMA,
+        "project_root": str(project),
+        "engine_root": str(snapshot),
+        "engine_identity": snapshot_identity(verify_snapshot(snapshot)),
+    }
+    request = {
+        "project": str(project),
+        "previous_identity": previous_identity,
+        "after": after,
+    }
+    runtime = _path(project / ".runtime/changerail")
+    _mkdir_durable(runtime)
+    lock = os.open(
+        runtime / "delivery.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+    )
+    try:
+        info = os.fstat(lock)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise EngineSnapshotError("unsafe delivery lock")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise EngineSnapshotError("delivery lock is held") from exc
+        with _lock(project / ".changerail/.engine-binding.lock"):
+            _no_live_delivery(project)
+            directory = _path(runtime / "engine-rebind" / _digest(_encoded(request)))
+            target = _path(project / BINDING)
+            current = verify_binding(project)
+            raw = _read(target)[0]
+            intent_path = directory / "intent.json"
+            if intent_path.exists():
+                intent = _json(intent_path)
+                if intent.get("request") != request or intent.get("after") != after:
+                    raise EngineSnapshotError("engine rebind intent differs")
+                try:
+                    before = intent["before"]
+                    before_bytes = intent["before_bytes"].encode("utf-8")
+                    valid_intent = (
+                        intent["schema"] == "changerail.engine-rebind.v1"
+                        and json.loads(before_bytes) == before
+                        and before["schema"] == BINDING_SCHEMA
+                        and before["project_root"] == str(project)
+                        and _digest(before_bytes) == intent["before_sha256"]
+                        and _digest(_encoded(after)) == intent["after_sha256"]
+                    )
+                except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                    raise EngineSnapshotError("invalid engine rebind intent") from exc
+                if not valid_intent:
+                    raise EngineSnapshotError("engine rebind intent drift")
+                if before.get("engine_identity") != previous_identity:
+                    raise EngineSnapshotError("previous identity differs")
+                if (
+                    snapshot_identity(verify_snapshot(Path(before["engine_root"])))
+                    != previous_identity
+                ):
+                    raise EngineSnapshotError("previous engine snapshot drift")
+                if raw not in (intent["before_bytes"].encode(), _encoded(after)):
+                    raise EngineSnapshotError("exact engine binding bytes drift")
+                if _digest(intent["before_bytes"].encode()) != intent["before_sha256"]:
+                    raise EngineSnapshotError("engine rebind receipt drift")
+                _rebind_receipt(intent_path, intent)
+            else:
+                if current["engine_identity"] != previous_identity:
+                    raise EngineSnapshotError("previous identity differs")
+                for other in (runtime / "engine-rebind").glob("*/intent.json"):
+                    if (
+                        _json(other).get("before", {}).get("engine_identity")
+                        == previous_identity
+                    ):
+                        raise EngineSnapshotError(
+                            "previous engine already has another rebind intent"
+                        )
+                intent = {
+                    "schema": "changerail.engine-rebind.v1",
+                    "request": request,
+                    "before": current,
+                    "after": after,
+                    "before_bytes": raw.decode("utf-8"),
+                    "before_sha256": _digest(raw),
+                    "after_sha256": _digest(_encoded(after)),
+                }
+                _rebind_receipt(intent_path, intent)
+            applied = {
+                "schema": "changerail.engine-rebind.v1",
+                "intent_sha256": _digest(_read(intent_path)[0]),
+                "binding_sha256": _digest(_encoded(after)),
+            }
+            applied_path = directory / "applied.json"
+            if applied_path.exists():
+                if _json(applied_path) != applied or raw != _encoded(after):
+                    raise EngineSnapshotError(
+                        "engine rebind applied receipt or binding drift"
+                    )
+            elif raw != _encoded(after):
+                if _read(target)[0] != raw:
+                    raise EngineSnapshotError("exact engine binding bytes drift")
+                if verify_binding(project) != intent["before"]:
+                    raise EngineSnapshotError("previous binding drift")
+                if snapshot_identity(verify_snapshot(snapshot)) != after["engine_identity"]:
+                    raise EngineSnapshotError("new engine snapshot drift")
+                _no_live_delivery(project)
+                _replace_binding(target, _encoded(after))
+            _sync_file(target)
+            _sync_ancestors(target.parent)
+            _rebind_receipt(applied_path, applied)
+            return {
+                "binding": verify_binding(project, expected_engine=snapshot),
+                "receipt": str(directory),
+            }
+    finally:
+        os.close(lock)
+
+
+def verify_previous_binding(project: Path, identity: dict[str, str]) -> None:
+    """Bind a predecessor's three engine keys to a completed, intact rebind."""
+    project = _path(project)
+    current = verify_binding(project)
+    raw = _read(project / BINDING)[0]
+
+    def matches(binding: dict, data: bytes) -> bool:
+        return (
+            identity.get("engine/identity") == binding.get("engine_identity")
+            and identity.get("engine/root") == _digest(binding["engine_root"].encode())
+            and identity.get("project/" + BINDING) == _digest(data)
+        )
+
+    if matches(current, raw):
+        return
+    for path in (project / ".runtime/changerail/engine-rebind").glob("*/intent.json"):
+        intent = _json(path)
+        try:
+            before, after = intent["before"], intent["after"]
+            before_bytes = intent["before_bytes"].encode()
+            if not matches(before, before_bytes) or after != current:
+                continue
+            request = {"project": str(project), "previous_identity": before["engine_identity"], "after": after}
+            if (
+                intent["schema"] != "changerail.engine-rebind.v1"
+                or intent["request"] != request
+                or path.parent.name != _digest(_encoded(request))
+                or before["schema"] != BINDING_SCHEMA
+                or before["project_root"] != str(project)
+                or json.loads(before_bytes) != before
+                or intent["before_sha256"] != _digest(before_bytes)
+                or intent["after_sha256"] != _digest(raw)
+                or raw != _encoded(after)
+            ):
+                raise EngineSnapshotError("previous binding receipt drift")
+            old_root = _path(Path(before["engine_root"]))
+            if old_root.is_relative_to(project) or project.is_relative_to(old_root):
+                raise EngineSnapshotError("previous engine overlaps project")
+            if snapshot_identity(verify_snapshot(old_root)) != before["engine_identity"]:
+                raise EngineSnapshotError("previous engine snapshot drift")
+            if _json(path.parent / "applied.json") != {
+                "schema": "changerail.engine-rebind.v1",
+                "intent_sha256": _digest(_read(path)[0]),
+                "binding_sha256": _digest(raw),
+            }:
+                raise EngineSnapshotError("previous binding lacks completed rebind")
+            return
+        except (KeyError, TypeError, AttributeError, UnicodeError) as exc:
+            raise EngineSnapshotError("invalid previous binding receipt") from exc
+    raise EngineSnapshotError("previous binding has no matching completed rebind")

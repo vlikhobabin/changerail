@@ -32,6 +32,30 @@ Binding не разрешает продолжать старый run новым
 обязателен отдельный self-host receipt. Повторный `engine-bind` идемпотентен только
 для того же snapshot; другая identity не подменяется молча.
 
+## Явная замена engine
+
+Если требуется исправить закреплённый engine, создайте новый проверенный snapshot.
+Запускайте замену из него, указав точную прежнюю `engine_identity` из binding:
+
+```sh
+chrl_next_engine=/srv/engines/changerail/verified-correction
+chrl_previous_identity=REPLACE_WITH_PREVIOUS_ENGINE_IDENTITY
+"$chrl_next_engine/bin/chrl" --project "$chrl_source" engine-rebind \
+  --previous-identity "$chrl_previous_identity"
+```
+
+Операция выполняется вне delivery, под delivery lock и после проверки отсутствия
+живых владельцев. Обе snapshots проверяются; intent сохраняет точные before/after
+binding до атомарной замены. Applied receipt связывает intent с новым binding.
+Receipts находятся в `.runtime/changerail/engine-rebind/`. После crash повторите
+ту же команду: она завершит тот же переход. Drift receipts, binding или snapshots
+отклоняется. Старые run.json не изменяются и не получают новую execution identity.
+
+Для остановленного bound successor новый self-host переход готовится именно от
+него. Он разрешён в том же project root при неизменных project execution inputs,
+включая локальные зависимости и Python; исключение составляет явно заменённый
+engine binding. Повторять apply первоначального predecessor не следует.
+
 ## Переход остановленного run
 
 Поддерживается native run, остановленный после завершения всех task groups до
@@ -72,7 +96,10 @@ finalize и проходит обычные review, archive, final verification 
 Прежний sync и proof не становятся актуальными доказательствами нового payload.
 Повторный apply/reconcile согласует прежний successor и не запускает writer снова.
 После зафиксированного dispatch и последующей terminal остановки применяется
-обычный `resume` successor с сохранённой engine identity. Неоднозначный dispatch
+обычный `resume` successor с сохранённой engine identity. Пустой payload после
+коммита допускается только при точном выборе retained self-host run и совпадении
+HEAD, manifest и fingerprints; reservation, dispatch и исходная история должны
+оставаться целыми. Автоматический поиск по пустому payload запрещён. Неоднозначный dispatch
 не является разрешением на повтор исполнения.
 
 ## Подключение потребителей

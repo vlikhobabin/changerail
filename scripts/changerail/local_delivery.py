@@ -2616,8 +2616,8 @@ def recovery_source(
     card: Path, dirty: Sequence[str], *, required_run_id: str | None = None
 ) -> tuple[bool, str, dict[str, Any] | None]:
     require_deliverable_card(card)
-    if not dirty:
-        return (False, "recovery requires a retained product payload", None)
+    if not dirty and required_run_id is None:
+        return (False, "empty recovery requires an exact self-host run", None)
     actual_paths = changed_paths()
     if sorted(dirty) != actual_paths:
         return (False, "recovery dirty paths do not match the current worktree", None)
@@ -2648,6 +2648,10 @@ def recovery_source(
             continue
         try:
             require_current_execution(previous_run)
+            if not actual_paths:
+                from scripts.changerail.self_host_recovery import require_empty_resume
+
+                require_empty_resume(runner_module(), previous_run)
             from scripts.changerail import plan_restoration
 
             manifest = plan_restoration.effective_manifest(
@@ -7828,6 +7832,10 @@ def _run_delivery(
             "card": {"id": card_id(card), "path": repo_relative(card)},
             "paths": [],
         }
+        if recovery and not changed_paths():
+            manifest.update(
+                fingerprint=payload_fingerprint([]), path_fingerprints={}
+            )
         manifest["observed_proof_selection"] = creation_reference
         write_json(manifest_path(card_id(card)), manifest)
         write_json(run_dir / "manifest.json", manifest)

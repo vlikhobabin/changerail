@@ -147,10 +147,17 @@ def _live(roots: list[Path]) -> None:
         except (FileNotFoundError, ProcessLookupError):
             continue
         except PermissionError as exc:
+            from scripts.changerail.engine_snapshot import process_exited
+
+            if process_exited(process):
+                continue
             # Login/service daemons may be nondumpable despite sharing the uid.
             # Their public command line still distinguishes them from execution
             # owners. An opaque runner candidate must remain fail-closed.
-            command = process.joinpath("cmdline").read_bytes()
+            try:
+                command = process.joinpath("cmdline").read_bytes()
+            except (FileNotFoundError, ProcessLookupError):
+                continue
             candidates = (
                 b"python",
                 b"codex",
@@ -160,9 +167,9 @@ def _live(roots: list[Path]) -> None:
                 b"bash",
                 b"/sh",
             )
-            if not command or any(
+            if (not command or any(
                 word in command.split(b"\0", 1)[0] for word in candidates
-            ):
+            )) and not process_exited(process):
                 raise DeliveryError("cannot establish process quiescence") from exc
 
 
@@ -395,6 +402,45 @@ def _handled_capacity(d: Any, source: Path, session: Path, lineage: list[Path]) 
     return {str(receipts): _inventory(d, receipts)}
 
 
+def require_empty_resume(d: Any, run: Path) -> None:
+    """An empty payload needs exact retained transition authority, never inference."""
+    metadata = d.require_frozen_execution(run)
+    authority = run
+    seen = set()
+    while not isinstance(metadata.get("self_host_recovery"), dict):
+        if authority.name in seen or not metadata.get("finished_at"):
+            raise DeliveryError("empty recovery requires terminal retained ancestry")
+        seen.add(authority.name)
+        previous = metadata.get("recovery_of")
+        if not isinstance(previous, str) or Path(previous).name != previous or previous in {".", ".."}:
+            raise DeliveryError("empty recovery requires a retained self-host transition")
+        authority = _run(d.RUNTIME_ROOT / "runs" / previous)
+        metadata = d.require_frozen_execution(authority)
+    reservation = metadata["self_host_recovery"]
+    if reservation.get("successor") != authority.name:
+        raise DeliveryError("empty recovery requires a retained self-host transition")
+    source = _run(Path(reservation["source_run"]))
+    proposal = _proposal(d, source)
+    if _reservation(d, source, proposal, create=False) != reservation:
+        raise DeliveryError("empty recovery reservation differs")
+    if _json(d, _root(d, source) / "dispatch.json") != {
+        "schema": SCHEMA,
+        "reservation": reservation,
+    }:
+        raise DeliveryError("empty recovery dispatch differs")
+    _intact(d, proposal)
+    metadata = d.require_frozen_execution(run)
+    states = d.change_checkpoint_statuses(
+        d.declared_change_plan(run) or [], d.combined_change_events(run)
+    )
+    if (
+        not metadata.get("finished_at")
+        or not states
+        or any(state["status"] != "complete" for state in states)
+    ):
+        raise DeliveryError("empty recovery requires terminal completed groups")
+
+
 def _boundary(d: Any, run: Path) -> dict:
     engine = _engine(d)
     lineage = _lineage(d, run)
@@ -508,22 +554,47 @@ def _boundary(d: Any, run: Path) -> dict:
         raise DeliveryError("self-host predecessor lacks execution identity")
     from scripts.changerail.engine_runtime import project_execution_identity
 
-    inputs = project_execution_identity(d)
-    old_controls = {key for key in identity if key.startswith(".changerail/")}
-    old_controls.discard(".changerail/engine-binding.json")
-    for key in old_controls:
-        path = _safe(d.REPO_ROOT / d._safe_path(key))
-        inputs[key] = hashlib.sha256(_bytes(d, path, LIMIT)).hexdigest()
-    for key in (".changerail/distribution-lock.json", ".changerail/source-link.json"):
-        path = d.REPO_ROOT / key
-        if path.exists() and key not in identity:
-            raise DeliveryError("self-host project binding changed")
-    if any(identity.get(key) != value for key, value in inputs.items()):
-        raise DeliveryError("self-host project execution inputs changed")
-    for key, value in inputs.items():
-        path = _safe(_source(run) / key)
-        if hashlib.sha256(_bytes(d, path, LIMIT)).hexdigest() != value:
-            raise DeliveryError("self-host origin project execution inputs changed")
+    if "engine/identity" in identity:
+        if _source(run) != d.REPO_ROOT:
+            raise DeliveryError("bound predecessor must retain its project root")
+        current_identity = d.execution_identity()
+        stable = lambda values: {
+            key: value
+            for key, value in values.items()
+            if (
+                key.startswith("project/")
+                and key != "project/.changerail/engine-binding.json"
+            )
+            or key == "python/executable"
+        }
+        if stable(identity) != stable(current_identity):
+            raise DeliveryError("self-host project execution inputs changed")
+        from scripts.changerail.engine_snapshot import verify_previous_binding, EngineSnapshotError
+
+        try:
+            verify_previous_binding(d.REPO_ROOT, identity)
+        except (EngineSnapshotError, OSError, ValueError) as exc:
+            raise DeliveryError(f"self-host previous binding is unverified: {exc}") from exc
+    else:
+        inputs = project_execution_identity(d)
+        old_controls = {key for key in identity if key.startswith(".changerail/")}
+        old_controls.discard(".changerail/engine-binding.json")
+        for key in old_controls:
+            path = _safe(d.REPO_ROOT / d._safe_path(key))
+            inputs[key] = hashlib.sha256(_bytes(d, path, LIMIT)).hexdigest()
+        for key in (
+            ".changerail/distribution-lock.json",
+            ".changerail/source-link.json",
+        ):
+            path = d.REPO_ROOT / key
+            if path.exists() and key not in identity:
+                raise DeliveryError("self-host project binding changed")
+        if any(identity.get(key) != value for key, value in inputs.items()):
+            raise DeliveryError("self-host project execution inputs changed")
+        for key, value in inputs.items():
+            path = _safe(_source(run) / key)
+            if hashlib.sha256(_bytes(d, path, LIMIT)).hexdigest() != value:
+                raise DeliveryError("self-host origin project execution inputs changed")
     return {
         "engine": engine,
         "card": d.repo_relative(card),
