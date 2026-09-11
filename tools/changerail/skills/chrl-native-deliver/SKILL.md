@@ -16,6 +16,11 @@ its wording looks like a completed next step. Never edit Next, Scope, Acceptance
 or any other accepted section. A rejected plan requires the operator-owned
 plan restoration workflow; do not rewrite manifests or accepted receipts.
 
+When `CHRL_RECOVERY_CONTEXT` is set, read that file and its concrete objective
+before choosing work, including during `finalize`. Read `CHRL_REPAIR_CONTEXT`
+when supplied. Complete the remaining evidence work named there; repeating sync
+alone does not repair an observed-proof handoff failure.
+
 For `CHRL_DELIVERY_STAGE=change`, implement only `CHRL_CHANGE_NUMBER`. Honor
 `CHRL_CHANGE_NEXT_EVENT`; do not repeat an already started checkpoint. Emit
 `change-<N> starting`, complete the group's product work, mark its actual tasks,
@@ -57,10 +62,23 @@ after observations for the assigned implementation-stage conditions and retain
 the project's runtime authorization, target binding, preflight and recovery rules. Do not invent
 review/final evidence.
 
-Update the card Result/Log only after implementation is complete. Then call
-`./bin/chrl handoff <card>` and stop only when it exits zero. If it fails, report
-the exact blocker and retained run; do not claim a successful handoff or overall
-delivery completion. Never invoke review,
+After implementation, finish Result/Log edits before running the checks that
+will support handoff. `chrl evidence` records a check receipt, not an observed
+proof. For each assigned implementation condition, record a genuine current
+`changerail.card-proof.v1` artifact with `./bin/chrl proof record <input.json>`.
+Use `tools/changerail/schemas/card-proof.schema.json`; test proofs require
+selected-node PASSED lines from `pytest -v`, authentic receipt/log references
+and before/action/after assertion fragments from the declared test source.
+Select tests that actually prove the condition; add missing acceptance coverage
+within the accepted test scope instead of citing unrelated assertions. Do not
+edit the payload after recording proofs without refreshing affected evidence.
+
+Confirm all assigned conditions have current proof coverage, then call
+`./bin/chrl handoff <card>` and stop only when it exits zero. Report a failed
+handoff accurately, but fix routine missing-proof, formatting or staleness errors
+within the authorized scope and retry. Stop for an actual unresolved scope,
+authority, safety or infrastructure blocker; do not claim successful handoff or
+overall delivery completion after a rejection. Never invoke review,
 final verification, publication, commit or push: the outer runner owns them.
 
 Timing targets are advisory. Continue accepted in-scope work past a target

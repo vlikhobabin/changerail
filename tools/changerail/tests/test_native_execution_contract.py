@@ -3,6 +3,7 @@ import hashlib
 import subprocess
 import pytest
 from scripts.changerail import local_delivery as d
+from tools.changerail.tests.test_native_openspec_integration import project as project
 
 
 @pytest.fixture
@@ -516,3 +517,61 @@ def test_technical_apply_cli_propagates_successor_failure(contract_run, monkeypa
         d.main(["technical-recovery-apply", str(run), "--proposal", "proposal.json"])
         == 2
     )
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("unknown", "allowlist"),
+        ("semantic", "unknown failure event"),
+        ("live", "proven terminal"),
+        ("writer", "writer-started"),
+    ],
+)
+def test_technical_recovery_rejects_non_capacity_failures_before_dispatch(
+    project, monkeypatch, failure, message
+):
+    """Session inputs are synthetic; the rejection policy and retained state are real."""
+    import json
+
+    from scripts.changerail import native_workflow as flow
+    from scripts.changerail import technical_recovery as recovery
+    from tools.changerail.tests.test_technical_recovery import _files, _origin
+
+    _root, _card, origin = _origin(project, monkeypatch)
+    session = origin / "sessions/failed-group-2"
+    if failure == "unknown":
+        (session / "stderr.log").write_text("product test failed")
+    elif failure == "semantic":
+        event = {"type": "turn.failed", "error": {"message": "worker failed"}}
+        (session / "stdout.jsonl").write_text(json.dumps(event) + "\n")
+        (session / "events.jsonl").write_text(json.dumps({"event": event}) + "\n")
+    elif failure == "live":
+        metadata = d._check_json(session / "session.json")
+        metadata["process_group_quiescent"] = False
+        d.write_json(session / "session.json", metadata)
+    else:
+        with (origin / "phase-events.jsonl").open("a") as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        "phase": "change-2",
+                        "stage": "starting",
+                        "at": "2026-09-10T00:02:00Z",
+                    }
+                )
+                + "\n"
+            )
+    before = _files(origin)
+    before_budget = d.review_budget_usage(origin)
+    monkeypatch.setattr(flow, "launch_groups", lambda *_args, **_kwargs: pytest.fail("writer"))
+
+    with pytest.raises(d.DeliveryError, match=message):
+        recovery.prepare(d, origin)
+
+    assert _files(origin) == before
+    assert d.review_budget_usage(origin) == before_budget == {"semantic_cycles": 0}
+    assert not (d.RUNTIME_ROOT / "technical-recoveries" / origin.name).exists()
+    assert [path for path in (d.RUNTIME_ROOT / "runs").iterdir() if path.is_dir()] == [
+        origin
+    ]

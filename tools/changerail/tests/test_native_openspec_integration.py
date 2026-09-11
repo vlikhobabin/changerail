@@ -483,3 +483,67 @@ def test_native_review_resumes_same_thread_and_counts_one_cycle(tmp_path, monkey
     assert state["complete"] and state["final"] == d.payload_fingerprint()
     assert d.run_review(str(card)) == 0
     assert len(calls) == 2
+
+
+def test_technical_recovery_reconcile_is_single_successor_and_rejects_drift(
+    project, monkeypatch
+):
+    """Only the group worker is mocked; prepare/apply/reconcile use real locks and state."""
+    from scripts.changerail import technical_recovery as recovery
+    from tools.changerail.tests.test_technical_recovery import _files, _origin
+
+    root, _card, origin = _origin(project, monkeypatch)
+    launches: list[dict[str, object]] = []
+
+    def launch(_delivery, **kwargs) -> None:
+        launches.append(kwargs)
+
+    def execute(**kwargs) -> int:
+        kwargs["before_orchestrate"]()
+        return 0
+
+    monkeypatch.setattr(flow, "launch_groups", launch)
+    monkeypatch.setattr(d, "execute_prepared_delivery", execute)
+    original_profile = d.profile()
+    prepared = recovery.prepare(d, origin)
+    monkeypatch.setattr(
+        d,
+        "profile",
+        lambda: {
+            "models": {
+                "technical_recovery": {
+                    "model": "changed-fallback",
+                    "reasoning_effort": "high",
+                }
+            }
+        },
+    )
+    with pytest.raises(d.DeliveryError, match="drifted"):
+        recovery.apply(d, origin, Path(prepared["proposal"]))
+    monkeypatch.setattr(d, "profile", lambda: original_profile)
+
+    payload_drift = root / "payload-drift.py"
+    payload_drift.write_text("changed\n")
+    with pytest.raises(d.DeliveryError, match="payload differs|predecessor was changed|drifted"):
+        recovery.apply(d, origin, Path(prepared["proposal"]))
+    payload_drift.unlink()
+
+    first = recovery.apply(d, origin, Path(prepared["proposal"]))
+    successor = Path(first["successor"])
+    after_first = _files(origin.parent)
+    review_usage = d.review_budget_usage(successor)
+    repeated = recovery.apply(d, origin, Path(prepared["proposal"]))
+    reconciled = recovery.reconcile(d, origin)
+    assert Path(repeated["successor"]) == successor
+    assert Path(reconciled["successor"]) == successor
+    assert _files(origin.parent) == after_first
+    assert len(launches) == 1
+    assert d.review_budget_usage(successor) == review_usage == {"semantic_cycles": 0}
+
+    before_locked = _files(origin.parent)
+    with d.delivery_lock():
+        with pytest.raises(d.DeliveryError, match="another delivery runner"):
+            recovery.reconcile(d, origin)
+    assert _files(origin.parent) == before_locked
+    assert len([path for path in origin.parent.iterdir() if path.is_dir()]) == 2
+    assert len(launches) == 1

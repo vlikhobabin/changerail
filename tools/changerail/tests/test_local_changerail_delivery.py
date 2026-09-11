@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.changerail.tests.test_native_openspec_integration import project as project
+
 # Synthetic locators belong to isolated test boards, not the checkout board.
 # Keep actual repository references literal so the live-link gate checks them.
 FIXTURE_BOARD = "openspec/board"
@@ -3195,6 +3197,59 @@ def test_recovery_session_does_not_require_a_new_file_change(
     assert not (session_dir / "budget-violation.json").exists()
     monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     assert delivery.build_metrics(run_dir)["budget_observations"] == []
+
+
+def test_technical_capacity_recovery_dispatches_one_pending_successor(
+    project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker is mocked; prepare/apply and retained recovery state are real."""
+    from scripts.changerail import local_delivery as d
+    from scripts.changerail import native_workflow as flow
+    from scripts.changerail import technical_recovery as recovery
+    from tools.changerail.tests.test_technical_recovery import _files, _origin
+
+    _root, card, origin = _origin(project, monkeypatch)
+    before = _files(origin)
+    checkpoints = d.change_checkpoint_statuses(
+        d.declared_change_plan(origin) or [], d.combined_change_events(origin)
+    )
+    session = origin / "sessions/failed-group-2"
+    assert [row["status"] for row in checkpoints] == ["complete", "pending"]
+    assert (origin / "focused-evidence/completed-group.json").is_file()
+    assert recovery.classify_session(d, session)["failure_class"] == "model_capacity"
+    calls: list[dict[str, object]] = []
+
+    def launch(_delivery, **kwargs) -> None:
+        calls.append(kwargs)
+
+    def execute(**kwargs) -> int:
+        kwargs["before_orchestrate"]()
+        return 0
+
+    monkeypatch.setattr(flow, "launch_groups", launch)
+    monkeypatch.setattr(d, "execute_prepared_delivery", execute)
+    prepared = recovery.prepare(d, origin)
+    result = recovery.apply(d, origin, Path(prepared["proposal"]))
+    successor = Path(result["successor"])
+
+    assert result["state"] == "dispatched"
+    assert _files(origin) == before
+    assert d._check_json(successor / "run.json")["recovery_of"] == origin.name
+    technical = d._check_json(successor / "run.json")["technical_recovery"]
+    assert technical["schema"] == recovery.SCHEMA
+    assert technical["proposal_sha256"].startswith("sha256:")
+    assert technical["next_group"] == 2
+    assert technical["fallback"] == {
+        "model": "fallback-model",
+        "reasoning_effort": "high",
+    }
+    assert len(calls) == 1
+    assert calls[0]["only_group"] == 2
+    assert calls[0]["model_route_name"] == "technical-recovery"
+    assert recovery.apply(d, origin, Path(prepared["proposal"]))["successor"] == str(
+        successor
+    )
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize(

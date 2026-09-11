@@ -1,7 +1,7 @@
 # Recovery после технического отказа model session
 
 ## Status
-3.inprogress
+4.done
 
 ## Lifecycle
 openspec-v1
@@ -69,8 +69,25 @@ artifacts
 
 - 2026-09-10T18:54:43Z post-stop audit: временные метки Log уточнены по сохранённым phase/session receipts; первоначальные будущие значения и последующие приблизительные исправления не использованы как доказательство. Выявлены frozen-identity, lifecycle и no-writer дефекты recovery; исправления выполняются вне остановленного run, новые проверки не записываются от имени его worker.
 
+- 2026-09-11T10:41:15Z self-host finalize: delta `native-delivery` сопоставлена с уже семантически эквивалентным canonical requirement без дублирования; `native-sync` receipt и sync report сохранены в successor run. Актуальные strict validation, 580 focused recovery regressions, Ruff из project venv и diff check записаны как evidence для fingerprint successor.
+
+- 2026-09-11T10:52:36Z finalize: повторно подтверждён semantic no-op delta `native-delivery`; mapping report и обновлённый `native-sync` receipt сохранены в текущем successor run. Product code, canonical spec и task checklist не изменялись.
+
+- 2026-09-11T11:05:13Z finalize: в текущем self-host successor сохранены delta-to-canonical mapping с deliberate semantic no-op и свежий `native-sync` receipt; canonical spec, продуктовый код и чеклист задач не изменялись.
+
+- 2026-09-11T11:25:34Z repair после semantic NO-GO: в закреплённых Verify-файлах добавлены recovery-specific регрессии C1–C4. Они вызывают реальные prepare/apply/reconcile, проверяют successor, неизменность predecessor и review budget, fail-closed boundary, idempotency/lock/fallback/payload drift; task-group worker явно изолирован как test seam. Focused receipts и observed proofs будут обновлены для нового payload перед handoff.
+
+- 2026-09-11T11:35:43Z archive-refresh: после provisional GO штатный OpenSpec archive переместил change в `openspec/changes/archive/2026-09-11-recover-after-technical-model-failure`; product code, canonical spec и archived artifacts не изменялись. Archive изменил fingerprint payload, поэтому reuse не заявляется: C1–C4 focused receipts и observed proofs переисполняются перед новым handoff в mandatory continuation independent review.
+
 ## Result
-Runner остановлен до handoff и независимого review. После остановки исправляются дефекты технического recovery; прежние evidence относятся к прежнему payload. Продолжение требует отдельного self-host transition, а не capacity recovery.
+Все три группы завершены и сохранены без replay. Semantic sync остаётся deliberate no-op: canonical requirement уже покрывает delta без дублирования. OpenSpec change штатно архивирован после provisional GO; archive receipt сохраняет exact artifact bytes. Для архивированного payload переисполняются focused C1–C4 receipts и observed proofs перед новым handoff в обязательный independent final review. Final verification и публикация этой карточки ещё не выполнены.
 
 ## Next
-- native-accept после проверки плана
+- continue with the next dependency-ready epic card
+
+## Delivery Receipt
+
+- Independent review: `GO` at `2026-09-11T11:44:08Z`.
+- Final repository verification: `passed` at `2026-09-11T12:25:58Z`; 2/2 configured commands succeeded.
+- Pytest: `1010 passed in 2477.61s (0:41:17)`.
+- Deterministic done transition recorded at `2026-09-11T12:26:11Z` for publish.

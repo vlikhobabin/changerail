@@ -6,6 +6,7 @@ import hashlib
 import json
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -206,3 +207,51 @@ def test_plan_drift_and_manual_restore_form_two_distinct_recovery_failures(
     native.require_plan(d, card, run / "native-plan.json")
     assert d.recovery_source(card, d.changed_paths(), required_run_id=run.name)[0]
     assert restore._inventory(d, run) == historical
+
+
+def test_technical_recovery_preserves_predecessor_history_and_review_budget(
+    project, monkeypatch
+):
+    """The dispatch callback is isolated; recovery receipts and state remain real."""
+    from scripts.changerail import technical_recovery as recovery
+    from tools.changerail.tests.test_technical_recovery import _files, _origin
+
+    _root, _card, origin = _origin(project, monkeypatch)
+    before_files = _files(origin)
+    before_payload = d.payload_fingerprint(d.changed_paths())
+    before_events = d.combined_change_events(origin)
+    before_checkpoints = d.change_checkpoint_statuses(
+        d.declared_change_plan(origin) or [], before_events
+    )
+    before_budget = d.review_budget_usage(origin)
+    launches: list[dict[str, object]] = []
+
+    def launch(_delivery, **kwargs) -> None:
+        launches.append(kwargs)
+
+    def execute(**kwargs) -> int:
+        kwargs["before_orchestrate"]()
+        return 0
+
+    monkeypatch.setattr(flow, "launch_groups", launch)
+    monkeypatch.setattr(d, "execute_prepared_delivery", execute)
+    prepared = recovery.prepare(d, origin)
+    first = recovery.apply(d, origin, Path(prepared["proposal"]))
+    successor = Path(first["successor"])
+    repeated = recovery.apply(d, origin, Path(prepared["proposal"]))
+    reconciled = recovery.reconcile(d, origin)
+
+    assert _files(origin) == before_files
+    assert d.payload_fingerprint(d.changed_paths()) == before_payload
+    assert d.combined_change_events(origin) == before_events
+    assert d.change_checkpoint_statuses(
+        d.declared_change_plan(origin) or [], d.combined_change_events(origin)
+    ) == before_checkpoints
+    assert d.review_budget_usage(origin) == before_budget == {"semantic_cycles": 0}
+    assert d.review_budget_usage(successor) == before_budget
+    assert d._check_json(successor / "recovery-context.json")[
+        "inherited_review_budget"
+    ] == before_budget
+    assert Path(repeated["successor"]) == successor
+    assert Path(reconciled["successor"]) == successor
+    assert len(launches) == 1 and launches[0]["only_group"] == 2

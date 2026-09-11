@@ -32,6 +32,19 @@ git diff --check
 run используйте документированный repair receipt, не меняйте исходный run.json
 и не обнуляйте review/evidence accounting.
 
+В native recovery/finalize сначала прочитайте `CHRL_RECOVERY_CONTEXT`, если он
+задан, включая конкретный objective; при repair прочитайте `CHRL_REPAIR_CONTEXT`.
+Успешный `chrl evidence` ещё не означает наличие observed proof. До проверок
+завершите правки Result/Log, затем получите актуальные receipts и запишите через
+`chrl proof record` доказательства всех назначенных implementation conditions.
+Для test proof используйте `pytest -v` с осмысленными выбранными nodes: нужны
+строки PASSED и реальные assertion fragments из закреплённого Verify-файла.
+Формат — `tools/changerail/schemas/card-proof.schema.json`. Если нужных assertions
+нет, исправьте покрытие тестами в принятом scope; не подменяйте их посторонними.
+После записи proofs не меняйте payload до `chrl handoff`. Отсутствующие proofs
+или исправимая ошибка их формата требуют завершить этот шаг и повторить handoff,
+а не объявлять delivery завершённой или автоматически прекращать работу.
+
 Пишите общую документацию по-русски; wire identifiers и agent skills могут быть
 английскими. Примеры используют произвольный каталог инструмента и generic
 проекты. Не переносите профили продуктов в публичные defaults.
