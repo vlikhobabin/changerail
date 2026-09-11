@@ -23,6 +23,12 @@ def _files(root: Path) -> dict[str, bytes]:
 
 
 def _origin(project, monkeypatch, *, stderr: str = "Selected model is at capacity"):
+    """Build synthetic session/history inputs with mocked plan validation/profile.
+
+    Recovery entrypoints execute classification, receipt and filesystem checks
+    and use real project locks. Callers that replace worker dispatch or outer
+    lifecycle callbacks must describe those additional mocks explicitly.
+    """
     root, card, _client = project
     active = root / "openspec/board/3.inprogress"
     active.mkdir()

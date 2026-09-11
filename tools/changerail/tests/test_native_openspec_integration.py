@@ -488,7 +488,11 @@ def test_native_review_resumes_same_thread_and_counts_one_cycle(tmp_path, monkey
 def test_technical_recovery_reconcile_is_single_successor_and_rejects_drift(
     project, monkeypatch
 ):
-    """Only the group worker is mocked; prepare/apply/reconcile use real locks and state."""
+    """Exercise real technical recovery entrypoints, receipts and locks.
+
+    _origin mocks plan validation and profile; this test also mocks group
+    dispatch and the outer lifecycle, so it does not test full delivery gates.
+    """
     from scripts.changerail import technical_recovery as recovery
     from tools.changerail.tests.test_technical_recovery import _files, _origin
 
