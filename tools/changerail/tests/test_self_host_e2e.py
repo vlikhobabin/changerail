@@ -6,9 +6,11 @@ Subprocess engine routing is covered separately by the engine entrypoint tests.
 """
 
 import json
+import os
 import shutil
 import sys
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,43 @@ from tools.changerail.tests.test_plan_restore_e2e import (
 )
 
 SOURCE = Path(__file__).resolve().parents[3]
+
+
+def wait_for_quiescence(roots, timeout=30):
+    # Publication may return while a descendant with inherited CHRL_RUN_DIR
+    # is still exiting. Keep the real guard and fail if it does not quiesce.
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            recovery._live(roots)
+            return
+        except d.DeliveryError as exc:
+            if str(exc) != "self-host recovery found a live process owner":
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
+def test_quiescence_wait_preserves_live_owner_guard(tmp_path):
+    owner = subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
+        stdin=subprocess.PIPE,
+        env={**os.environ, "CHRL_RUN_DIR": str(tmp_path / ".runtime/changerail/runs/owned")},
+    )
+    try:
+        with pytest.raises(d.DeliveryError, match="live process owner"):
+            wait_for_quiescence([tmp_path], timeout=0)
+        owner.stdin.close()
+        wait_for_quiescence([tmp_path])
+        owner.wait(timeout=5)
+        assert owner.returncode == 0
+    finally:
+        if not owner.stdin.closed:
+            owner.stdin.close()
+        if owner.poll() is None:
+            owner.terminate()
+        owner.wait(timeout=5)
 
 
 @pytest.mark.parametrize("resume_after_stop,empty_payload", [(False, False), (True, False), (True, True)])
@@ -358,6 +397,7 @@ def test_self_host_successor_reaches_real_local_publication(
         resume_parent.name if resume_after_stop else origin.name
     )
     count = len(allocations)
+    wait_for_quiescence([root])
     assert (
         recovery.apply(d, origin, Path(prepared["proposal"]))["state"] == "dispatched"
     )
