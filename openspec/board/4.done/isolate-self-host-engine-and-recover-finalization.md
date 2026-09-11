@@ -1,7 +1,7 @@
 # Изоляция engine и восстановление self-host финализации
 
 ## Status
-2.todo
+4.done
 
 ## Lifecycle
 openspec-v1
@@ -163,7 +163,13 @@ ChangeRail при изменении собственного ядра смеш�
 ```
 
 ## Result
-accepted native OpenSpec plan; structural admission only
+Реализованы immutable engine snapshot, отдельная execution identity и append-only prepare/apply/reconcile с одним successor. История и accounting сохраняются, completed groups не повторяются; новые proof и sync проходят обычные gates.
+
+Инфраструктура разработана управляющей сессией по bootstrap-контракту design, без второй активной delivery и без записи от имени остановленного run. Независимое ревью завершено после исправлений изоляции, session admission и technical ancestry.
+
+Проверки: 953 tests passed на Python 3.11 и 3.12 в CI коммита `6bd300a`; scoped boundaries — 32 passed; subprocess engine — 1 passed; synthetic lifecycle — 2 passed, включая resume после finalize. В synthetic сценариях model sessions контролируются тестом, archive/final и commit/push в локальный remote выполняются штатно. Исправление изоляции test harness опубликовано отдельно в `0ae7f45`, адресная проверка под bound engine — 50 passed.
+
+Canonical spec синхронизирован; stock archive: `openspec/changes/archive/2026-09-11-isolate-self-host-engine-and-recover-finalization/`. Реальный переход сохранённого run и consumer attach выполняются отдельными операционными шагами после инфраструктуры.
 
 ## Next
 - Подготовить и проверить отдельный native OpenSpec plan, затем принять его перед реализацией.
@@ -171,3 +177,4 @@ accepted native OpenSpec plan; structural admission only
 ## Log
 - 2026-09-10T19:08:24Z Карточка создана по post-stop audit текущей self-host доставки; текущий accepted plan и retained run сохранены.
 - 2026-09-11T06:42:46Z accepted native OpenSpec plan
+- 2026-09-11 Реализация и регрессии завершены, независимое review GO, полный CI прошёл; выполнены semantic sync и stock archive. Frozen Next сохранён.
