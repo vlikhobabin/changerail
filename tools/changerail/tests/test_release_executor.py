@@ -1,19 +1,52 @@
 """Focused receipt/lease tests; only generic temporary release checkouts mutate."""
 
 import fcntl
+import importlib.metadata
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from types import SimpleNamespace
 
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 import pytest
 
 from scripts.changerail import engine_runtime as runtime
 from scripts.changerail import release_executor as release
 
 SOURCE = Path(release.__file__).resolve().parents[2]
+FIXTURE_PYTHON = Path(sys.executable).resolve()
+
+
+def copy_runtime_dependencies(site):
+    """Copy the active jsonschema dependency closure for this fixture's Python."""
+    pending = ["jsonschema"]
+    copied = set()
+    while pending:
+        name = canonicalize_name(pending.pop())
+        if name in copied:
+            continue
+        installed = importlib.metadata.distribution(name)
+        copied.add(name)
+        for declaration in installed.requires or ():
+            requirement = Requirement(declaration)
+            if requirement.marker is None or requirement.marker.evaluate({"extra": ""}):
+                pending.append(requirement.name)
+        for relative in installed.files or ():
+            if (
+                ".." in relative.parts
+                or "__pycache__" in relative.parts
+                or relative.name == "direct_url.json"
+            ):
+                continue
+            source = Path(installed.locate_file(relative))
+            if source.is_file():
+                target = site / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
 
 
 def put(root, name, data):
@@ -150,7 +183,7 @@ if (JSON.parse(readFileSync(p)).version !== '1.3.1') throw Error('wrong dependen
     git(engine, "tag", "v1")
     version = subprocess.check_output(
         [
-            "/usr/bin/python3",
+            str(FIXTURE_PYTHON),
             "-I",
             "-S",
             "-c",
@@ -172,10 +205,10 @@ if (JSON.parse(readFileSync(p)).version !== '1.3.1') throw Error('wrong dependen
     put(
         engine,
         ".venv/pyvenv.cfg",
-        "home = /usr/bin\ninclude-system-site-packages = false\n",
+        f"home = {FIXTURE_PYTHON.parent}\ninclude-system-site-packages = false\n",
     )
     (engine / ".venv/bin").mkdir()
-    (engine / ".venv/bin/python").symlink_to("/usr/bin/python3")
+    (engine / ".venv/bin/python").symlink_to(FIXTURE_PYTHON)
     (engine / ".venv/lib64").symlink_to("lib", target_is_directory=True)
     put(
         engine,
@@ -215,7 +248,7 @@ def test_receipt_accepts_overlays_and_standard_dependency_links(release_pair):
     assert value["release_receipt"]["release"]["tag"] == "v1"
     assert (
         value["release_receipt"]["dependencies"]["files"][".venv"]["bin/python"]["link"]
-        == "/usr/bin/python3"
+        == str(FIXTURE_PYTHON)
     )
     assert release.read_binding(project) == release.binding_document(project, engine)
     assert "engine_identity" not in release.read_binding(project)
@@ -453,7 +486,7 @@ engine, work, surface = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 spec = importlib.util.spec_from_file_location("permission_release", engine / "scripts/changerail/release_executor.py")
 release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(release)
-node = Path(shutil.which("node"))
+node = Path(sys.argv[4])
 accepted = release.inspect_release(engine, tag="v1", node=node)
 if surface == "stdlib":
     stdlib = work / "stdlib"
@@ -553,6 +586,7 @@ print(json.dumps({"uid": os.geteuid(), "surface": surface, "refused": True,
                 str(engine),
                 str(work),
                 surface,
+                str(Path(shutil.which("node")).resolve()),
             ],
             cwd=work,
             env={"PATH": "/usr/bin:/bin"},

@@ -209,7 +209,9 @@ def release_identity(delivery: Any, value: dict[str, Any]) -> dict[str, str]:
     return result
 
 
-def openspec_process(project: Path) -> tuple[Path, dict[str, str], dict[str, Any]]:
+def openspec_process(
+    project: Path, *, selected_node: Path | None = None
+) -> tuple[Path, dict[str, str], dict[str, Any]]:
     """Verified Node plus helper dependency selector; cwd stays the project.
 
     Existing helpers use CHRL_PROJECT_ROOT to locate dependencies. Give only the
@@ -232,6 +234,10 @@ def openspec_process(project: Path) -> tuple[Path, dict[str, str], dict[str, Any
             },
             kwargs,
         )
+    # Legacy adapters resolve PATH once at construction. Release bindings always
+    # select their verified executable above, regardless of this cached value.
+    if selected_node is not None:
+        return selected_node, {"CHRL_PROJECT_ROOT": str(project)}, {}
     node = shutil.which("node")
     if node is None:
         raise DeliveryError("Node.js executable missing from PATH")

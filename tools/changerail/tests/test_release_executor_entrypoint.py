@@ -9,7 +9,7 @@ import subprocess
 import pytest
 
 from scripts.changerail import release_executor as release
-from test_release_executor import SOURCE, accept, git, put
+from test_release_executor import SOURCE, accept, copy_runtime_dependencies, git, put
 from test_release_executor import release_pair as fixture_release_pair
 
 release_pair = fixture_release_pair
@@ -353,7 +353,6 @@ def test_full_git_source_checkout_acceptance_and_real_cli(release_pair, tmp_path
     import io
     from pathlib import Path
     import shutil
-    import sys
     import tarfile
 
     project, dependency_fixture = release_pair
@@ -387,20 +386,9 @@ def test_full_git_source_checkout_acceptance_and_real_cli(release_pair, tmp_path
     git(engine, "commit", "-m", "full source with candidate overlay")
     git(engine, "tag", "v1")
     shutil.copytree(dependency_fixture / ".venv", engine / ".venv", symlinks=True)
-    version = f"{sys.version_info.major}.{sys.version_info.minor}"
-    installed = Path(sys.prefix) / f"lib/python{version}/site-packages"
-    site = engine / f".venv/lib/python{version}/site-packages"
-    for package in (
-        "jsonschema",
-        "jsonschema_specifications",
-        "referencing",
-        "rpds",
-        "attrs",
-        "attr",
-    ):
-        shutil.copytree(installed / package, site / package, symlinks=True)
-        for metadata in installed.glob(package + "-*.dist-info"):
-            shutil.copytree(metadata, site / metadata.name)
+    dependency_python = release.verify_release(dependency_fixture)["dependencies"]["python"]
+    site = Path(dependency_python["site_packages"])
+    copy_runtime_dependencies(engine / site.relative_to(dependency_fixture))
     shutil.copytree(
         repository / "tools/openspec/node_modules",
         engine / "tools/openspec/node_modules",

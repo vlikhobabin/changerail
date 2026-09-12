@@ -14,6 +14,7 @@ from scripts.changerail import release_executor as release
 from scripts.changerail import engine_runtime as runtime
 from scripts.changerail import local_delivery as d
 from scripts.changerail import engine_snapshot as snapshot
+from test_release_executor import FIXTURE_PYTHON, copy_runtime_dependencies
 
 SOURCE = Path(d.__file__).resolve().parents[2]
 
@@ -113,7 +114,7 @@ def full_release(tmp_path, monkeypatch):
     git(engine, "tag", "fixture-v1")
     version = subprocess.check_output(
         [
-            "/usr/bin/python3",
+            str(FIXTURE_PYTHON),
             "-I",
             "-S",
             "-c",
@@ -129,10 +130,10 @@ def full_release(tmp_path, monkeypatch):
     put(
         engine,
         ".venv/pyvenv.cfg",
-        "home = /usr/bin\ninclude-system-site-packages = false\n",
+        f"home = {FIXTURE_PYTHON.parent}\ninclude-system-site-packages = false\n",
     )
     (engine / ".venv/bin").mkdir()
-    (engine / ".venv/bin/python").symlink_to("/usr/bin/python3")
+    (engine / ".venv/bin/python").symlink_to(FIXTURE_PYTHON)
     put(
         engine,
         "tools/openspec/node_modules/@fission-ai/openspec/package.json",
@@ -405,29 +406,13 @@ def test_release_update_cli_excludes_use_lease_and_selects_next_release(
 
 
 def test_isolated_executor_python_verifies_new_dev_feature(full_release):
-    import importlib.metadata
     import shlex
 
     project, engine, old = full_release
     site = Path(old["dependencies"]["python"]["site_packages"])
     # Provision only existing runtime packages into the temporary closed executor.
     # No installer/network call and no access to the real project's credentials.
-    for package in (
-        "jsonschema",
-        "jsonschema-specifications",
-        "referencing",
-        "rpds-py",
-        "attrs",
-    ):
-        installed = importlib.metadata.distribution(package)
-        for relative in installed.files:
-            if ".." in relative.parts or "__pycache__" in relative.parts:
-                continue
-            source = Path(installed.locate_file(relative))
-            if source.is_file():
-                target = site / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
+    copy_runtime_dependencies(site)
     receipt = release.inspect_release(
         engine, tag="fixture-v1", node=Path(shutil.which("node"))
     )
@@ -485,30 +470,9 @@ def test_isolated_executor_python_verifies_new_dev_feature(full_release):
 
 def closed_executor(full_release):
     """Accepted real runtime packages and a fresh subprocess (no pytest lease leak)."""
-    import importlib.metadata
-
     project, engine, before = full_release
     site = Path(before["dependencies"]["python"]["site_packages"])
-    for name in (
-        "jsonschema",
-        "jsonschema-specifications",
-        "referencing",
-        "rpds-py",
-        "attrs",
-    ):
-        installed = importlib.metadata.distribution(name)
-        for relative in installed.files:
-            if (
-                ".." in relative.parts
-                or "__pycache__" in relative.parts
-                or relative.name == "direct_url.json"
-            ):
-                continue
-            source = Path(installed.locate_file(relative))
-            if source.is_file():
-                target = site / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
+    copy_runtime_dependencies(site)
     receipt = release.inspect_release(
         engine, tag="fixture-v1", node=Path(shutil.which("node"))
     )

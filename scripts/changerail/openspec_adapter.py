@@ -102,7 +102,7 @@ class OpenSpecAdapter:
         from scripts.changerail.engine_runtime import require_run, openspec_process
 
         require_run(self.root)
-        node, extra, kwargs = openspec_process(self.root)
+        node, extra, kwargs = openspec_process(self.root, selected_node=self.node)
         if node != self.node:
             raise DeliveryError("OpenSpec Node executable changed")
         if (self.root / "openspec/schemas").exists():
@@ -245,7 +245,7 @@ class OpenSpecAdapter:
         )
 
         require_run(self.root)
-        node, extra, kwargs = openspec_process(self.root)
+        node, extra, kwargs = openspec_process(self.root, selected_node=self.node)
         if node != self.node:
             raise DeliveryError("OpenSpec Node executable changed")
         loader = runtime_path(
