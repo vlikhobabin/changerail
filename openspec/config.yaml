@@ -1,7 +1,8 @@
 schema: spec-driven
 context: |
   ChangeRail is a public Linux-native delivery tool. The current route is
-  openspec-v1, one native change per card and at most two independent reviews.
+  openspec-v1, one native change per card, two autonomous independent reviews
+  and an explicit operator +1 for each later review once the remainder is spent.
   Core, shared adapters and tests belong here. Consumers own product profiles,
   board, artifacts and evidence. Source links and installed copies use one core.
   Runtime changes through consumer links belong to this Git repository.
