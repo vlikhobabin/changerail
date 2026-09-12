@@ -18,7 +18,10 @@ the retained preliminary verdict and archive paths, and assess the exact move
 plus refreshed evidence. Do not look up the removed active change or repeat
 the broad audit. Return a new verdict bound to the actual current fingerprint.
 The initial fresh context establishes independence; continuation never gives
-this reviewer implementation authority or resets accumulated usage.
+this reviewer implementation authority or resets accumulated usage. Provisional
+and final continuation share one lineage review number and one slot, including
+an operator-granted slot. A new independent review after exhaustion requires a
+new operator decision; this reviewer cannot issue it.
 
 Never change tracked files, sync specs, archive, perform the product floor,
 stage, commit or push. A substantive remaining defect is NO-GO with concrete

@@ -24,7 +24,8 @@ reasoning_effort = "high"
 launcher = "bin/codex"
 
 [budgets]
-# Numerical observations never replenish the two-review execution allowance.
+# Two autonomous reviews; each later review needs a separate operator +1.
+# Numerical observations and profile overrides never replenish the allowance.
 enforce_limits = false
 first_edit_discovery_commands = 8
 first_edit_hard_stop_commands = 12

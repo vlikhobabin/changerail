@@ -488,7 +488,7 @@ def status(delivery: Any, value: Path) -> dict[str, Any]:
     run_dir, metadata = retained_run(delivery, value, read_only=True)
     plan = delivery.declared_change_plan(run_dir) or []
     events = delivery.combined_change_events(run_dir)
-    return {
+    result = {
         "schema": "changerail.native-run-status.v1",
         "run": delivery.repo_relative(run_dir),
         "card": metadata.get("card"),
@@ -498,3 +498,6 @@ def status(delivery: Any, value: Path) -> dict[str, Any]:
         "archived": (run_dir / "native-archive.json").is_file(),
         "note": "Retained history only; status does not authorize or prove recovery.",
     }
+    if metadata.get("execution_contract") == "changerail.native.v1":
+        result["review_allowance"] = delivery.review_allowance_status(run_dir, read_only=True)
+    return result

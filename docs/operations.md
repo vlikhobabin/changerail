@@ -40,8 +40,9 @@ git -C "$chrl_project" remote -v
 ```
 
 `run` начинает одну доставку: одна карточка, один OpenSpec change, реализация,
-не более двух независимых ревью с общим остатком на repair, archive и финальные
-проверки. Время — наблюдение. Runner удерживает локальную блокировку проекта.
+два автономных независимых ревью с общим остатком на repair, archive и финальные
+проверки. Каждое последующее требует отдельного операторского +1 при исчерпании
+остатка. Время — наблюдение. Runner удерживает локальную блокировку проекта.
 
 Успешная доставка **сама выполняет commit и push**. После GO и проверок runner
 переносит карточку в `4.done`, обновляет ссылки board и добавляет в index точную
@@ -109,6 +110,75 @@ native run до первого принятого checkpoint, evidence и поз
 Исторические `delivery-runs`, `ff-runs`, `offline-finalizations` доступны для
 чтения через `status`; они не получают права на native resume после обновления.
 Порядок сохранения истории при установке — в [DISTRIBUTION.md](../DISTRIBUTION.md).
+
+## Операторское +1 на следующее ревью
+
+В runtime с поддержкой `review-allow` первые два независимых ревью автономны.
+`max_review_cycles` остаётся строго 2. Когда общий остаток исчерпан, оператор
+может разрешить ровно одно следующее ревью. После третьего NO-GO runner снова
+останавливается; четвёртое требует нового решения для нового terminal run.
+Пожизненного предела в три ревью нет; накопить разрешения заранее или включить
+unlimited через профиль нельзя.
+
+Выполните preview вне worker session, проверьте выбранный run, findings,
+принятый scope и конкретную причину следующего repair/review. Затем передайте
+возвращённый digest с тем же reason:
+
+```sh
+chrl_reason='Исправить конкретное оставшееся замечание в принятом scope'
+"$chrl_project/bin/chrl" --project "$chrl_project" review-allow "$chrl_run" \
+  --reason "$chrl_reason"
+chrl_authorization=REPLACE_WITH_PREVIEW_SHA256
+"$chrl_project/bin/chrl" --project "$chrl_project" review-allow "$chrl_run" \
+  --reason "$chrl_reason" --authorize "$chrl_authorization"
+"$chrl_project/bin/chrl" --project "$chrl_project" resume "$chrl_run"
+```
+
+Preview не выдаёт slot. Authorize повторно проверяет запрос под блокировкой
+проекта и атомарно добавляет неизменяемую запись вне старых runs, в
+`.runtime/changerail/review-authorizations/ROOT/NNNN.json`. Повтор того же
+подтверждения не добавляет slot. Новое решение возможно только при exhausted
+allowance у текущего terminal leaf: без живого или неизвестного владельца,
+незавершённых review/verification и конфликтующего recovery. Старый ancestor,
+чужой проект, повреждённые records и устаревший preview отклоняются.
+
+Запись связывает проект, точную ancestry и историю, принятый план, frozen
+execution, начальный payload, HEAD, пустой index и следующий review ordinal.
+`resume` проверяет начальное состояние до writer и использует единственный
+детерминированный successor; ссылка на grant записывается в его первоначальный
+recovery context до dispatch. Локальный `cycle-01` такого child может быть
+ревью №3 или №4 всей lineage. После claim разрешённый repair меняет payload;
+чтение allowance продолжает проверять неизменяемые authorization/context/history,
+а свежие manifest, proofs и handoff подтверждают уже исправленные байты.
+
+Учёт показывает отдельно `autonomous_allowance = 2`, `operator_granted_slots`,
+`spent_reviews`, `remaining = 2 + operator_granted_slots - spent_reviews` и
+`in_flight`. Начатое незавершённое ревью занимает slot, недоступный для другого
+запуска. Provisional и post-archive продолжение одного reviewer thread расходуют
+один independent slot; технические попытки не стирают расход. Неоднозначное
+прерывание claim/dispatch требует разбора сохранённого child, а не нового grant
+или удаления context ради повторного запуска.
+
+CLI и callable API отвергают worker environment, включая session role/run и
+native/recovery contexts. Это cooperative protocol процессов одного UID:
+переменные среды, локальный JSON и digest не удостоверяют оператора средствами
+ОС. Digest связывает проверенный запрос с его bytes; worker не вправе очищать
+окружение и выдавать себе разрешение.
+Обычная shared-use lease release launcher (`CHRL_ENGINE_USE_FD`) не является
+worker context: выбранный `.changerail/chrl` проверяет её штатным runtime
+протоколом и поддерживает те же preview/authorize команды.
+
+Grant даёт только review budget внутри уже поддержанного recovery. Остановка
+оператором, unresolved verification, неизменённый failed final payload,
+неподдержанная frozen identity и drift принятого scope сохраняют прежние отказы.
+Свежие proofs, handoff, sync/archive, final verification и publication gates
+обязательны. `review-allow` не меняет старые verdicts, runs, receipts и profile,
+не мигрирует engine и не разрешает parked restoration. Старые installed
+checkpoint descriptors/pins и ограниченное восстановление Next сохраняют свои
+границы; установка нового runtime не делает старый frozen run совместимым.
+Завершённый technical recovery в ancestry допустим, если его applied/dispatch
+receipts закрепляют именно выбранного потомка и сохранённую исходную историю.
+Неразрешённый или чужой переход продолжает блокировать выдачу разрешения.
 
 ## Технический отказ model session между группами
 
@@ -246,7 +316,8 @@ status и resume. Архив target сохраняйте доступным до
 Не поддерживаются остановка оператором, unresolved verification attempt,
 незавершённый provisional review, archive intent/archive, final floor и публикация.
 Законченный NO-GO допустим при оставшемся бюджете; после двух ревью prepare
-отклоняется. Переход не устраняет посторонние ошибки board и не обходит дальнейшие
+отклоняется. Операторское +1 не расширяет этот переход восстановления Next.
+Переход не устраняет посторонние ошибки board и не обходит дальнейшие
 sync, handoff, review, archive, final и publication gates. Если прежний manifest
 уже переписан вручную, нельзя объявлять его исходным сохранённым evidence.
 
@@ -407,7 +478,8 @@ diff; при проверке ancestry история уже может быть
 проект. Apply проверяет proposal, резервирует единственного successor у origin,
 проверяет сохранённую историю и атомарно создаёт полный successor, затем
 фиксирует dispatch и запускает fresh finalize. Completed groups не повторяются,
-общий остаток двух независимых ревью наследуется. Исходные `run.json`, checkpoints,
+израсходованные ревью и проверенный остаток allowance наследуются.
+Self-host recovery само не выдаёт операторское +1. Исходные `run.json`, checkpoints,
 evidence и review accounting не переписываются.
 
 Reconcile проверяет тот же переход и при наличии reservation может завершить
@@ -458,9 +530,10 @@ prepare, reconcile или `chrl evidence` недостаточно.
 реализацией; правки dev-checkout не обновляют installed runtime. Сначала обеспечьте
 поддерживающий engine для нового плана. Старый frozen engine нельзя смешивать с
 новыми полями принятого плана. Новый reader сохраняет корректные singleton v1
-proofs, но не даёт ретроспективного acceptance: NO-GO после исчерпания общего
-лимита двух ревью остаётся terminal, без третьего ревью, сброса allowance или
-изменения старых runs и receipts.
+proofs, но не даёт ретроспективного acceptance: NO-GO после исчерпания allowance
+остаётся terminal. Только отдельное операторское +1 может разрешить следующее
+ревью внутри уже поддержанного recovery. Оно не сбрасывает расход, не меняет
+старые runs и receipts и не позволяет возобновить несовместимый frozen run.
 
 Если engine требует исправления, создайте новый snapshot и выполните из него
 `engine-rebind --previous-identity REPLACE_WITH_CURRENT_ENGINE_IDENTITY` вне delivery.

@@ -230,6 +230,11 @@ def test_installer_retained_history_cannot_execute_current_marker(contract_run):
     before = (run / "run.json").read_bytes()
     with pytest.raises(d.DeliveryError, match="adopted run is read-only"):
         d.require_current_execution(run)
+    assert d.main(["status", str(run)]) == 0
+    assert d.main(["metrics", str(run)]) == 0
+    assert d.review_allowance_status(run, read_only=True)["state"] == "retained-read-only"
+    with pytest.raises(d.DeliveryError, match="adopted run is read-only"):
+        d.review_allowance_status(run)
     assert (run / "run.json").read_bytes() == before
 
 

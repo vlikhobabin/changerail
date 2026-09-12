@@ -2822,7 +2822,7 @@ def doctor(
         _SessionCommandBudget("implementation", current_profile.get("budgets", {}))
         _SessionCommandBudget("review", current_profile.get("budgets", {}))
         profile_ok = True
-        profile_detail = "native-only; shared review limit=2; time is advisory"
+        profile_detail = "native-only; autonomous reviews=2; each later review requires operator +1; time is advisory"
     except (DeliveryError, KeyError, TypeError, ValueError) as exc:
         profile_ok = False
         profile_detail = str(exc)
@@ -2834,6 +2834,18 @@ def doctor(
             card, dirty, required_run_id=required_run_id
         )
         add("recovery-payload", recovery_ok, recovery_detail)
+        if recovery_ok and recovery_manifest is not None:
+            try:
+                previous = RUNTIME_ROOT / "runs" / recovery_manifest["run_id"]
+                allowance = review_allowance_status(previous)
+                from scripts.changerail.review_allowance import recovery_authorization
+
+                recovery_authorization(runner_module(), previous, check_live=False)
+                add("review-allowance", allowance["remaining"] > 0,
+                    json.dumps(allowance) if allowance["remaining"] > 0 else
+                    "shared two-review budget exhausted; operator review-allow +1 required")
+            except (DeliveryError, OSError, ValueError) as exc:
+                add("review-allowance", False, str(exc))
         objective = os.environ.get("CHRL_RECOVERY_OBJECTIVE", "").strip()
         add(
             "recovery-objective",
@@ -3548,6 +3560,10 @@ def launch_codex(
     review_reason = (session_env or {}).get("CHRL_REVIEW_REASON")
     if role == "review" and review_reason:
         metadata["review_reason"] = review_reason
+    if role == "review" and (session_env or {}).get("CHRL_LINEAGE_REVIEW_NUMBER"):
+        metadata["lineage_review_number"] = int(session_env["CHRL_LINEAGE_REVIEW_NUMBER"])
+        metadata["review_cycle"] = int(session_env["CHRL_REVIEW_CYCLE"])
+        metadata["review_context"] = session_env["CHRL_REVIEW_CONTEXT"]
     retain_session_json("session.json", metadata)
     if on_session_started is not None:
         on_session_started(session_dir)
@@ -4353,6 +4369,19 @@ def _empty_review_budget_usage() -> dict[str, int]:
     return {key: 0 for key in REVIEW_BUDGET_KEYS}
 
 
+def review_allowance_status(run_dir: Path, *, read_only: bool = False) -> dict[str, Any]:
+    from scripts.changerail.review_allowance import allowance
+
+    if read_only:
+        lock_path = REPO_ROOT / ".changerail/distribution-lock.json"
+        if lock_path.exists() or lock_path.is_symlink():
+            lock = _check_json(lock_path)
+            if (lock.get("schema") == "changerail.installation.v1"
+                    and repo_relative(run_dir / "run.json") in lock.get("retained_read_only_runs", {})):
+                return {"state": "retained-read-only", "note": "Historical installation grants no executable review allowance."}
+    return allowance(runner_module(), run_dir)
+
+
 def _review_budget_key(review_reason: str) -> str:
     return "semantic_cycles"
 
@@ -4379,7 +4408,7 @@ def review_budget_usage(run_dir: Path) -> dict[str, int]:
             raise DeliveryError("inherited review budget must be an object")
         for key in REVIEW_BUDGET_KEYS:
             value = inherited.get(key, 0)
-            if not isinstance(value, int) or value < 0:
+            if type(value) is not int or value < 0:
                 raise DeliveryError(f"inherited review budget {key} is invalid")
             usage[key] = value
     history = run_dir / "reviews"
@@ -4425,7 +4454,8 @@ def require_repaired_final_payload(run_dir: Path) -> None:
 
 
 def build_recovery_context(
-    *, run_dir: Path, previous_run: Path, objective: str
+    *, run_dir: Path, previous_run: Path, objective: str,
+    review_authorization: dict[str, Any] | None = None,
 ) -> Path:
     current_fingerprint = payload_fingerprint()
     plan = declared_change_plan(run_dir) or []
@@ -4524,6 +4554,12 @@ def build_recovery_context(
         "retained_focused_evidence": retained_evidence,
         "instruction": "Use this summary as the sole index of the previous run. A null previous_completed_review means no completed verdict exists. Only evidence with matches_current_payload=true may be carried forward. Do not repeat complete Change checkpoints; continue from next_change_event. Inspect failed_final_floors command results and retained logs, repair the failed payload and retain current focused/pre-review evidence before using the remaining shared review allowance. An unchanged failed payload cannot spend a new review or repeat the final floor.",
     }
+    if review_authorization is not None:
+        context["review_authorization"] = review_authorization
+        context["instruction"] += (
+            " The operator authorized one additional independent review only. "
+            "Repair within the accepted scope; all proof, handoff and final gates remain required."
+        )
     # Context readers also support historical owner-less unit inputs. Ordinary
     # native execution still requires its pinned owner in _run_observed_contract.
     metadata_path = run_dir / "run.json"
@@ -4551,7 +4587,12 @@ def build_recovery_context(
         )
         context[key] = contract["selection"]
     path = run_dir / "recovery-context.json"
-    write_json(path, context)
+    if review_authorization is not None:
+        from scripts.changerail.plan_restoration import _write
+
+        _write(path, context)
+    else:
+        write_json(path, context)
     return path
 
 
@@ -4771,6 +4812,10 @@ def build_review_context(
         "shell_command_hard_stop": review_hard_stop,
         "budget_limits_enforced": budget_limits_enforced(),
     }
+    from scripts.changerail.review_allowance import review_slot
+
+    # A native final-phase context retains the preliminary review's ordinal.
+    context.update(review_slot(runner_module(), run_dir, continuation=True))
     if inventory is not None:
         context["proof_inventory"] = inventory
         context["observed_proof_selection"] = _run_observed_contract(run_dir)[
@@ -5166,6 +5211,9 @@ def run_review(card_value: str) -> int:
             require_sync(runner_module(), card, run_dir)
             continuation = pending_review(runner_module(), card, run_dir)
             if continuation and (not (run_dir / "native-archive.json").exists()):
+                from scripts.changerail.review_allowance import review_slot
+
+                review_slot(runner_module(), run_dir, continuation=True)
                 if continuation["before"] != payload_fingerprint():
                     raise DeliveryError(
                         "native provisional review payload changed before archive"
@@ -5184,7 +5232,6 @@ def run_review(card_value: str) -> int:
         completed_cycles = _completed_review_verdicts(history)
         cycle = continuation["cycle"] if continuation else len(completed_cycles) + 1
         previous_verdict = load_json(completed_cycles[-1]) if completed_cycles else None
-        budget_usage = review_budget_usage(run_dir)
         review_reason = (
             "post_verification_repair"
             if _is_post_verification_repair(
@@ -5192,8 +5239,9 @@ def run_review(card_value: str) -> int:
             )
             else "semantic"
         )
-        if not continuation and budget_usage["semantic_cycles"] >= 2:
-            raise DeliveryError("shared two-review budget exhausted")
+        from scripts.changerail.review_allowance import review_slot
+
+        slot = review_slot(runner_module(), run_dir, continuation=bool(continuation))
         before = payload_fingerprint()
         existing = verdict_path(card_id(card))
         if existing.is_file():
@@ -5238,6 +5286,7 @@ def run_review(card_value: str) -> int:
                 "CHRL_REVIEW_CYCLE": str(cycle),
                 "CHRL_REVIEW_CONTEXT": str(review_context),
                 "CHRL_REVIEW_REASON": review_reason,
+                "CHRL_LINEAGE_REVIEW_NUMBER": str(slot["lineage_review_number"]),
                 **native_env,
             },
             resume_thread_id=continuation["thread_id"] if continuation else None,
@@ -5286,7 +5335,8 @@ def run_review(card_value: str) -> int:
                 write_json(state_path, completed)
         print(
             json.dumps(
-                {"cycle": cycle, "result": verdict["result"], "reused": False},
+                {"cycle": cycle, "result": verdict["result"], "reused": False,
+                 "lineage_review_number": slot["lineage_review_number"]},
                 ensure_ascii=False,
             )
         )
@@ -7448,6 +7498,9 @@ def _calculate_metrics(run_dir: Path) -> dict[str, Any]:
 def build_metrics(run_dir: Path, *, persist: bool = False) -> dict[str, Any]:
     """Read retained history without modifying receipts; only the runner persists."""
     payload = _calculate_metrics(run_dir)
+    owner = _check_json(run_dir / "run.json")
+    if owner.get("execution_contract") == "changerail.native.v1":
+        payload["review_allowance"] = review_allowance_status(run_dir, read_only=True)
     if persist:
         require_current_execution(run_dir)
         write_json(run_dir / "metrics.json", payload)
@@ -7654,6 +7707,8 @@ def orchestrate_delivery(
     inherited_investigative_commands: int,
 ) -> int:
     """Own review, repair, verification, and publish outside the LLM."""
+    from scripts.changerail.review_allowance import require_remaining
+
     if native.is_native(card) and (not (run_dir / "native-archive.json").exists()):
         from scripts.changerail.native_workflow import launch_groups
 
@@ -7680,8 +7735,7 @@ def orchestrate_delivery(
         emit_event("review", "waiting")
         review_code = run_review(str(card))
         if review_code == 3:
-            if review_budget_usage(run_dir)["semantic_cycles"] >= 2:
-                raise DeliveryError("shared two-review budget exhausted after NO-GO")
+            require_remaining(runner_module(), run_dir, after=" after NO-GO")
             repair_reason = "semantic_review"
             repair_thread_id = thread_id
             repair = build_repair_context(
@@ -7732,10 +7786,7 @@ def orchestrate_delivery(
         if verification_code == 0:
             emit_event("publish", "finalizing")
             return publish(str(card))
-        if review_budget_usage(run_dir)["semantic_cycles"] >= 2:
-            raise DeliveryError(
-                "shared two-review budget exhausted after failed final verification"
-            )
+        require_remaining(runner_module(), run_dir, after=" after failed final verification")
         repair = build_repair_context(
             card=card, run_dir=run_dir, reason="final_verification"
         )
@@ -7820,6 +7871,7 @@ def _run_delivery(
     previous_run_id = str(health.get("recovery_of") or "")
     previous_run = RUNTIME_ROOT / "runs" / previous_run_id
     recovery_compatibility: str | None = None
+    review_claim = None
     if recovery:
         require_frozen_execution(previous_run)
         _run_observed_contract(previous_run)
@@ -7828,6 +7880,9 @@ def _run_delivery(
                 raise DeliveryError(
                     "interrupted verification attempt cannot restart through ordinary recovery"
                 )
+        from scripts.changerail.review_allowance import recovery_authorization
+
+        review_claim = recovery_authorization(runner_module(), previous_run)
     if recovery and native.is_native(card):
         changes = declared_change_plan(previous_run)
         from scripts.changerail import plan_restoration
@@ -7869,6 +7924,8 @@ def _run_delivery(
         run_id = (
             f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{card_id(card)}"
         )
+        if review_claim is not None:
+            run_id = review_claim[0]
         run_dir = RUNTIME_ROOT / "runs" / run_id
         run_dir.mkdir(parents=True, exist_ok=False)
         creation_selection = {
@@ -7969,6 +8026,7 @@ def _run_delivery(
                 run_dir=run_dir,
                 previous_run=previous_run,
                 objective=str(run["recovery_objective"]),
+                review_authorization=review_claim[1] if review_claim else None,
             )
             recovery_payload = load_json(recovery_context)
             run["resume_thread_id"] = resume_thread_id
@@ -8095,6 +8153,10 @@ def execute_prepared_delivery(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    allow_parser = subparsers.add_parser("review-allow")
+    allow_parser.add_argument("run_dir", type=Path)
+    allow_parser.add_argument("--reason", required=True)
+    allow_parser.add_argument("--authorize")
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("card")
     doctor_parser.add_argument("--no-remote", action="store_true")
@@ -8193,6 +8255,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "review-allow":
+            from scripts.changerail.review_allowance import _operator
+
+            _operator()
         from scripts.changerail import executor_binding
 
         try:
@@ -8331,6 +8397,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = wiring_report()
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 0 if payload["ok"] else 1
+        if args.command == "review-allow":
+            from scripts.changerail.review_allowance import review_allow
+
+            run_dir = args.run_dir if args.run_dir.is_absolute() else REPO_ROOT / args.run_dir
+            result = review_allow(runner_module(), run_dir, reason=args.reason, authorize=args.authorize)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         if args.command == "status":
             from scripts.changerail.native_workflow import status
 

@@ -43,6 +43,14 @@ context only for a board rule not covered here. A board README is optional;
 do not assume `openspec/board/README.md` exists. Do not scan
 the repository or list runtime directories to rediscover any of these paths.
 
+The first two independent reviews are autonomous. Each later independent
+review needs a new explicit operator +1 at exhaustion; the outer runner binds
+that authorization and `lineage_review_number` in the review context. Local
+`cycle-01` in a recovery run may be lineage review 3 or 4. Assess the current
+payload normally: authorization supplies budget, never a favorable verdict or
+weaker evidence requirements. Never invoke `review-allow`, clear worker context
+to authorize yourself, or rewrite retained history/accounting.
+
 ## Review
 
 1. Run `./bin/chrl verdict fingerprint <card>`, then read the context, card,

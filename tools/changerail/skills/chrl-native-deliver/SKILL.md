@@ -98,6 +98,13 @@ Timing targets are advisory. Continue accepted in-scope work past a target
 without weakening tests or skipping stages. Stop only for a concrete scope,
 authority, evidence, safety or infrastructure blocker.
 
-At most two independent review cycles cover the whole run and its ordinary
-continuations. Repair after NO-GO or a failed final floor consumes the same
-remaining allowance. No terminal or post-floor exception grants another cycle.
+The first two independent reviews are autonomous across the lineage. Repair
+after NO-GO or a failed final floor uses the same remaining allowance. Every
+later review requires a fresh operator +1 at exhaustion; a third NO-GO stops
+until another decision. The profile remains `max_review_cycles = 2`.
+Never invoke `review-allow` from this worker or clear worker context to authorize
+yourself. The outer recovery context carries any granted slot and lineage review
+number. A grant permits only review budget inside otherwise supported recovery;
+it cannot change the accepted scope, frozen identity, proof/handoff/final gates,
+old history, or parked plan-restoration eligibility. After claim, perform the
+accepted repair and refresh its evidence normally; do not reset spent reviews.
