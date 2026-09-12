@@ -18,7 +18,6 @@
     "scripts/__init__.py",
     "tools/changerail/LICENSE",
     "tools/changerail/ORIGIN.md",
-    "tools/openspec/.gitignore",
     "tools/openspec/bootstrap.sh",
     "tools/openspec/check-install.mjs",
     "tools/openspec/workflow-instructions.mjs",

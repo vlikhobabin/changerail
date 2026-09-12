@@ -30,7 +30,6 @@ RUNTIME_LINKS = frozenset(
         "tools/changerail/schemas",
         "tools/changerail/skills",
         "tools/changerail/templates",
-        "tools/openspec/.gitignore",
         "tools/openspec/README.md",
         "tools/openspec/bootstrap.sh",
         "tools/openspec/check-install.mjs",

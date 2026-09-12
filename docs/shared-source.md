@@ -59,6 +59,12 @@ evidence не копируются из общего checkout. Потребит�
 При запуске из вложенного каталога используется Git-корень проекта. При явном
 выборе: `bin/chrl --project /opt/example-project wiring`.
 
+`tools/openspec/.gitignore` намеренно не входит в payload и в shared-source
+ссылки: Git не читает ignore-файл через симлинк и предупреждает о таком объекте
+при push. Потребитель держит исключения зависимостей в своём корневом
+`.gitignore` или в `.git/info/exclude`; copy-install этот файл также не
+устанавливает.
+
 ## Разработка из проекта
 
 Откройте `scripts/changerail/<module>.py` через путь подключённого проекта.
