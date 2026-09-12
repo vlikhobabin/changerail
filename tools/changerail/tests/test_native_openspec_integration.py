@@ -24,7 +24,8 @@ FIXTURE_BOARD = "openspec/" + "board"
 def project(tmp_path, monkeypatch, request):
     root = tmp_path / "repo"
     root.mkdir()
-    # Independent copies: writable hardlinks could corrupt the real installation.
+    # Independent byte copies: the runtime rejects hardlinked payload files
+    # (`st_nlink == 1`), so a link-clone would break real invariants.
     dependency = root / "tools/openspec"
     shutil.copytree(
         PROJECT / "tools/openspec",
@@ -66,9 +67,15 @@ def project(tmp_path, monkeypatch, request):
     monkeypatch.delenv("CHRL_SESSION_ROLE", raising=False)
     monkeypatch.delenv("CHRL_RUN_DIR", raising=False)
     client = native.adapter(d)
-    created = client._invoke("new", "change", "example-change")
-    assert created.returncode == 0, created.stderr
+    # The stock `new change` scaffold writes only this metadata file, and the
+    # fixture overwrites every artifact afterwards. Write it directly instead of
+    # paying a Node CLI spawn per test; stock validation of the resulting change
+    # still runs through the real pinned CLI.
     change = root / "openspec/changes/example-change"
+    change.mkdir(parents=True)
+    (change / ".openspec.yaml").write_text(
+        "schema: spec-driven\ncreated: 2026-01-01\n", encoding="utf-8"
+    )
     (change / "proposal.md").write_text(
         "## Why\nAdd fixture behavior.\n\n## What Changes\n- Add new behavior.\n\n## Capabilities\n### New Capabilities\n### Modified Capabilities\n- `example`: add behavior.\n\n## Impact\nFixture only.\n"
     )

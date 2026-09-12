@@ -100,7 +100,7 @@ def change_id(card: Path) -> str:
 
 
 def adapter(delivery: Any) -> OpenSpecAdapter:
-    return OpenSpecAdapter(Path(delivery.REPO_ROOT))
+    return OpenSpecAdapter.create(Path(delivery.REPO_ROOT))
 
 
 def _archive_receipt(delivery: Any) -> tuple[Path, dict[str, Any]] | None:

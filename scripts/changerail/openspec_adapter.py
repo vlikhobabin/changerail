@@ -7,11 +7,14 @@ back to a user-global schema/configuration directory.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
 import subprocess
 import tempfile
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +50,56 @@ class ApplyContext:
         )
 
 
+_LOCK = threading.Lock()
+_INSTANCES: "OrderedDict[tuple, OpenSpecAdapter]" = OrderedDict()
+_PROBES: "OrderedDict[tuple, None]" = OrderedDict()
+_READONLY: "OrderedDict[tuple, subprocess.CompletedProcess[str]]" = OrderedDict()
+_INSTANCE_LIMIT = 64
+_PROBE_LIMIT = 512
+_READONLY_LIMIT = 512
+
+
+def _digest_file(path: Path) -> str:
+    """Content identity of one pinned dependency file; '-' when absent."""
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "-"
+
+
+def _digest_tree(root: Path) -> str:
+    """Content identity of the stock OpenSpec artifacts that CLI reads depend on."""
+    base = root / "openspec"
+    paths = []
+    for directory in ("changes", "specs"):
+        top = base / directory
+        if top.is_dir():
+            paths.extend(
+                path
+                for path in top.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            )
+    config = base / "config.yaml"
+    if config.is_file() and not config.is_symlink():
+        paths.append(config)
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        digest.update(str(path.relative_to(root)).encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"?")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _remember(cache: OrderedDict, key: tuple, value: Any, limit: int) -> None:
+    cache[key] = value
+    while len(cache) > limit:
+        cache.popitem(last=False)
+
+
 class OpenSpecAdapter:
     """Read and validate stock OpenSpec artifacts through the pinned CLI."""
 
@@ -79,9 +132,76 @@ class OpenSpecAdapter:
             or metadata.get("version") != self.VERSION
         ):
             raise DeliveryError("only project-local OpenSpec 1.3.1 is supported")
+        self._verify_cli()
+
+    @classmethod
+    def create(cls, root: Path, *, timeout: float = 40.0) -> "OpenSpecAdapter":
+        """Return the process-local adapter for an unchanged pinned dependency.
+
+        The adapter is immutable apart from its timeout, so one verified
+        instance per (root, node, package bytes) is reused. Any change to the
+        pinned manifest or CLI yields a different key and is re-validated.
+        """
+        from scripts.changerail.engine_runtime import dependency_root, openspec_process
+
+        resolved = root.resolve(strict=True)
+        dependency = dependency_root(resolved)
+        package = dependency / "node_modules/@fission-ai/openspec"
+        node, _env, _kwargs = openspec_process(resolved)
+        key = (
+            str(resolved),
+            str(node),
+            str(package),
+            _digest_file(package / "package.json"),
+            _digest_file(package / "bin/openspec.js"),
+            timeout,
+        )
+        with _LOCK:
+            cached = _INSTANCES.get(key)
+        if cached is not None:
+            return cached
+        instance = cls(resolved, timeout=timeout)
+        with _LOCK:
+            _remember(_INSTANCES, key, instance, _INSTANCE_LIMIT)
+        return instance
+
+    def _dependency_identity(self) -> tuple:
+        """Byte identity of the pinned dependency, independent of project path.
+
+        A verified CLI proves ``node`` runs these exact package bytes; the same
+        bytes under another project root give the same result, so the probe is
+        shared across isolated project copies instead of repeated per project.
+        The path is deliberately excluded: only bytes and the Node executable
+        decide the verified outcome.
+        """
+        return (
+            str(self.node),
+            _digest_file(self.package / "package.json"),
+            _digest_file(self.cli),
+        )
+
+    def _verify_cli(self) -> None:
+        """Prove the pinned CLI reports the supported version, once per identity.
+
+        The probe is deterministic for fixed dependency bytes, so its result is
+        memoized. A changed manifest or CLI changes the key, so drift is still
+        rejected. The running ``subprocess.run`` object is part of the key so a
+        substituted runner is never answered from another runner's cache, and an
+        unsupported project schema override keeps its own key.
+        """
+        key = (
+            *self._dependency_identity(),
+            (self.root / "openspec/schemas").exists(),
+            id(subprocess.run),
+        )
+        with _LOCK:
+            if key in _PROBES:
+                return
         version = self._invoke("--version")
         if version.returncode or version.stdout.strip() != self.VERSION:
             raise DeliveryError("installed OpenSpec CLI does not match version 1.3.1")
+        with _LOCK:
+            _remember(_PROBES, key, None, _PROBE_LIMIT)
 
     def _change_id(self, change_id: str) -> str:
         if not self.CHANGE_ID.fullmatch(change_id) or change_id == "archive":
@@ -138,8 +258,36 @@ class OpenSpecAdapter:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise DeliveryError(f"local OpenSpec command failed: {args}") from exc
 
+    def _readonly_invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
+        """Run one non-mutating stock command, reusing the answer for fixed inputs.
+
+        Stock validation/status answers depend only on the pinned dependency and
+        the OpenSpec artifact bytes of one project. Memoizing them removes the
+        repeated CLI spawns that dominated the suite; any change to the
+        change/spec tree, the project, the pinned dependency or the running
+        ``subprocess.run`` object misses the cache, so drift and substituted
+        runners are still observed. The project root is part of the key because
+        stock output embeds absolute context-file paths.
+        """
+        key = (
+            str(self.root),
+            *self._dependency_identity(),
+            args,
+            _digest_tree(self.root),
+            id(subprocess.run),
+        )
+        with _LOCK:
+            cached = _READONLY.get(key)
+        if cached is not None:
+            return cached
+        result = self._invoke(*args)
+        with _LOCK:
+            _remember(_READONLY, key, result, _READONLY_LIMIT)
+        return result
+
     def _json(self, *args: str) -> dict[str, Any]:
-        result = self._invoke(*args, "--json")
+        """Run one stock JSON query through the non-mutating cache."""
+        result = self._readonly_invoke(*args, "--json")
         if result.returncode:
             raise DeliveryError(
                 f"OpenSpec exited {result.returncode}: {result.stderr.strip()}"
@@ -150,7 +298,7 @@ class OpenSpecAdapter:
             raise DeliveryError("OpenSpec returned invalid JSON") from exc
         if not isinstance(value, dict):
             raise DeliveryError("OpenSpec JSON result must be an object")
-        return value
+        return copy.deepcopy(value)
 
     def inspect_complete_plan(self, change_id: str) -> None:
         root = self.change_root(change_id)
@@ -221,14 +369,18 @@ class OpenSpecAdapter:
 
     def validate_change(self, change_id: str) -> None:
         self.change_root(change_id)
-        result = self._invoke("validate", change_id, "--strict", "--no-interactive")
+        result = self._readonly_invoke(
+            "validate", change_id, "--strict", "--no-interactive"
+        )
         if result.returncode:
             raise DeliveryError(
                 "strict OpenSpec change validation failed: " + result.stderr.strip()
             )
 
     def validate_specs(self) -> None:
-        result = self._invoke("validate", "--specs", "--strict", "--no-interactive")
+        result = self._readonly_invoke(
+            "validate", "--specs", "--strict", "--no-interactive"
+        )
         if result.returncode:
             raise DeliveryError(
                 "strict canonical OpenSpec validation failed: " + result.stderr.strip()

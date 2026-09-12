@@ -12,6 +12,20 @@ import pytest
 
 from scripts.changerail import engine_snapshot as engine
 
+_REAL_NO_LIVE_DELIVERY = engine._no_live_delivery
+
+
+@pytest.fixture(autouse=True)
+def _isolate_machine_live_process_scan(monkeypatch):
+    """Detach snapshot tests from unrelated machine processes.
+
+    The real scan fails closed on any same-uid process whose ``/proc`` environ is
+    unreadable (systemd, ssh-agent, gpg-agent, sshd workers), so it makes these
+    tests depend on unrelated machine state. Tests that assert the live-owner
+    guard restore the real scan explicitly.
+    """
+    monkeypatch.setattr(engine, "_no_live_delivery", lambda _root: None)
+
 
 @pytest.fixture
 def source(tmp_path):
@@ -335,8 +349,10 @@ def test_rebind_rejects_held_delivery_lock(rebind_pair):
     assert engine.verify_binding(project) == original
 
 
-def test_rebind_rejects_live_run_owner(rebind_pair):
+def test_rebind_rejects_live_run_owner(rebind_pair, monkeypatch):
     project, _old, new, original = rebind_pair
+    # This is the test that owns the machine-wide live-owner guard.
+    monkeypatch.setattr(engine, "_no_live_delivery", _REAL_NO_LIVE_DELIVERY)
     env = dict(os.environ, CHRL_RUN_DIR=str(project / ".runtime/changerail/runs/live"))
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"], env=env
