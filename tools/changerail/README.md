@@ -1,14 +1,38 @@
 # Единый локальный runtime ChangeRail
 
-Этот комплект содержит общий native runtime. Версия кандидата `2.0.0-rc.4`
-объединяет lifecycle OpenSpec, проверяемые доказательства, независимое ревью и
-возобновление доставки. Это предварительная версия для испытаний перед стабильным выпуском 2.0.0.
+Этот комплект содержит общий native runtime. Версия кандидата `2.0.0-rc.5`
+добавляет executor из отдельного релиза для будущих запусков и совокупные
+тестовые доказательства с поддержкой вызываемых helpers. Это предварительная версия
+для испытаний перед стабильным выпуском 2.0.0.
 
 Проекты используют установленную runtime-копию или явно подключённый общий
 checkout через симлинки. В режиме разработки доступны также общие тесты.
 Настройки находятся отдельно в `.changerail/profile.toml`; установщик их не
 перезаписывает. Project root определяет Git, board и evidence, source root —
 общий код. Каждая доставка сохраняет фактическую идентичность кода.
+
+## Executor из отдельного релиза
+
+`chrl-dist release-update` обслуживает отдельный полный Git checkout релиза;
+`chrl-dist executor-bind` выбирает принятый executor для будущих запусков проекта.
+Применение и восстановление обновления выполняют внешним coordinator. Локальные
+настройки и сохранённая история остаются у проекта; переключение не создаёт
+successor и не расширяет право продолжать старые frozen runs. Порядок действий —
+в [runbook двух каталогов](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/working-checkout.md).
+
+## Тестовые доказательства
+
+Test method сохраняет основной `target` и допускает необязательный список
+`additional_targets`. Если список задан, все его targets обязательны: условие
+подтверждается совокупностью отдельных singleton proof records. Одно реальное
+исполнение может поддерживать несколько релевантных условий отдельными records;
+повторять тест ради номера условия не требуется. Assertions могут оставаться
+во внешнем вызываемом helper с hash-bound ссылкой на вызов и точными fragments.
+Проверки identity, freshness и выбранных PASSED nodes сохраняются.
+
+Новый формат требует совместимого engine до принятия плана. Прежние singleton
+proofs поддерживаются; старый frozen engine не получает новые возможности или
+полномочия resume от обновления общего исходника.
 
 ## Контракт
 
@@ -107,11 +131,11 @@ OpenSpec 1.3.1. Установка зависимостей OpenSpec выпол�
 Расширенные runbooks находятся в исходном репозитории; runtime-архив их не
 копирует в потребителя. Для этой версии используйте документы точного тега:
 
-- [Первая установка и доставка](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/quickstart.md).
-- [Эксплуатация и восстановление](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/operations.md).
-- [Общий исходник](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/shared-source.md).
-- [Полномочия запуска](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/SECURITY.md).
-- [Архив, контрольные суммы и происхождение](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.4).
+- [Первая установка и доставка](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/quickstart.md).
+- [Эксплуатация и восстановление](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/operations.md).
+- [Общий исходник](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/shared-source.md).
+- [Полномочия запуска](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/SECURITY.md).
+- [Архив, контрольные суммы и происхождение](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.5).
 
 Runner требует `main` с upstream и при успешной доставке выполняет commit и
 push. `require_push=false` пропускает лишь проверку доступности remote в doctor.

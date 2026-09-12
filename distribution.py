@@ -18,6 +18,10 @@ from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
+# Direct Python invocation must also leave an accepted source inventory unchanged.
+# Keep this local to the coordinator; product subprocess environments are untouched.
+sys.dont_write_bytecode = True
+
 SCHEMA = "changerail.distribution.v1"
 LOCK = ".changerail/distribution-lock.json"
 MANIFEST = "DISTRIBUTION-MANIFEST.json"
@@ -702,7 +706,89 @@ def install_restoration_locked(
     return proof
 
 
+def release_update_command(argv: list[str]) -> int:
+    """Forward exact updater API; preview prepares an ephemeral external receipt."""
+    from scripts.changerail import release_update
+
+    if argv[:1] and argv[0] in {"apply", "reconcile", "provision-lease"}:
+        parser = argparse.ArgumentParser(
+            prog=f"chrl-dist release-update {argv[0]}",
+            description="Release mutation requires a coordinator outside target checkout",
+        )
+        parser.add_argument("proposal", type=Path)
+        mutation = parser.parse_args(argv[1:])
+        try:
+            target, _, _ = release_update._load(mutation.proposal)
+            if ROOT.is_relative_to(target):
+                raise DistributionError(
+                    "release mutation requires a coordinator outside target checkout"
+                )
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            print(f"ChangeRail release update: {exc}", file=sys.stderr)
+            return 2
+    if "--dry-run" not in argv and not (
+        argv[:1] == ["prepare"] and any(flag in argv for flag in ("--help", "-h"))
+    ):
+        return release_update.main(argv)
+    parser = argparse.ArgumentParser(
+        description="Preview release preparation without retaining a proposal or updating the checkout"
+    )
+    parser.add_argument("command", choices=("prepare",))
+    for field in ("root", "archive", "provenance", "proposal", "node"):
+        parser.add_argument("--" + field, type=Path, required=True)
+    parser.add_argument("--tag", required=True)
+    parser.add_argument("--bootstrap", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    args = vars(parser.parse_args(argv))
+    args.pop("command")
+    args.pop("dry_run")
+    intended = args.pop("proposal")
+    try:
+        # Actual stage-2 API writes a proposal directory. Prepare it in a private
+        # temporary directory, show its exact review summary, then discard it.
+        # No updater apply/provision call is made by preview.
+        args["root"] = release_update.engine.canonical_root(args["root"])
+        intended = release_update._external(intended, args["root"])
+        if intended.parent.stat().st_dev != args["root"].stat().st_dev:
+            raise DistributionError(
+                "proposal must share target filesystem for atomic source publication"
+            )
+        if intended.exists():
+            raise DistributionError("proposal already exists; use its reconciliation")
+        with tempfile.TemporaryDirectory(
+            prefix=".changerail-update-preview-", dir=intended.parent
+        ) as directory:
+            result = release_update.prepare(
+                **args, proposal=Path(directory) / "proposal"
+            )
+            result.update(proposal=str(intended), dry_run=True)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        print(f"ChangeRail release preview: {exc}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
+    # Maintenance must run outside bin/chrl's lifetime shared lease. Mutations
+    # additionally require coordinator code outside the target checkout.
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] in (["release-update"], ["executor-bind"]):
+        if (
+            os.environ.get("CHRL_ENGINE_USE_FD")
+            or os.environ.get("CHRL_RUN_DIR")
+            or os.environ.get("CHRL_SESSION_ROLE")
+        ):
+            print(
+                "ChangeRail maintenance requires a separate operator shell outside runtime",
+                file=sys.stderr,
+            )
+            return 2
+        if argv[0] == "release-update":
+            return release_update_command(argv[1:])
+        from scripts.changerail import executor_binding
+
+        return executor_binding.main(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     export = commands.add_parser("build")
@@ -744,8 +830,22 @@ def main(argv: list[str] | None = None) -> int:
     unlink = commands.add_parser("detach")
     unlink.add_argument("target", type=Path)
     unlink.add_argument("--dry-run", action="store_true")
+    commands.add_parser(
+        "release-update",
+        help="accepted release maintenance (use release-update --help)",
+    )
+    commands.add_parser(
+        "executor-bind",
+        help="future-run executor transition (use executor-bind --help)",
+    )
     args = parser.parse_args(argv)
     try:
+        if args.command in {"attach", "attach-inventory"} and os.path.lexists(
+            args.target / ".changerail/engine-binding.json"
+        ):
+            raise DistributionError(
+                "executor-bound project cannot also attach shared-source runtime"
+            )
         if args.command in {"attach", "detach", "attach-inventory"}:
             from scripts.changerail import source_install
 

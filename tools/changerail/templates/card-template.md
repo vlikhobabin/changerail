@@ -56,6 +56,15 @@ budgets.enforce_limits=false. Preserve one invariant and authorized scope. -->
 
 ## Verify
 - <focused command; this is a planned check, not completed evidence>
+
+Начните с одного test target. Если нужны несколько различных проверок, добавьте
+в method, например, `"additional_targets": ["tests/test_guards.py::test_rejects_invalid_input"]`.
+Основной target и все объявленные дополнительные обязательны и не повторяются.
+Выбирайте релевантные тесты, включая существующие проверки общих границ. Одно
+исполнение может поддерживать несколько условий отдельными proof records без
+повторного запуска или общего wrapper. Дополнительные targets требуют
+поддерживающего runtime до принятия плана; каждый proof содержит один `{kind, target}`.
+
 ```json
 {
   "schema": "changerail.card-evidence.v1",
@@ -73,7 +82,7 @@ budgets.enforce_limits=false. Preserve one invariant and authorized scope. -->
 }
 ```
 - `git diff --check`
-- `python3 -m pytest -v`
+- `python3 -m pytest -v tests/test_example.py::test_case`
 - `uv run python -m compileall -q src tests`
 - `./bin/openspec validate --specs --strict --no-interactive`
 

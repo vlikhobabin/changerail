@@ -10,9 +10,20 @@ specs, design and tasks named by the retained manifest/context in addition to
 the board acceptance and evidence. Task checkboxes and completion events do
 not substitute for code/evidence, and structural OpenSpec validation is not GO.
 
-Review the `[C<number>]` Verify plan as a coverage map: assess meaningful
-before/action/after observations and N/A credibility. Structural validity does
-not replace semantic review or create another review cycle.
+Assess Verify as combined coverage of conditions and risks: `method.target`
+and every declared `additional_targets` selector are required. Every record
+must be valid; a valid proof cannot compensate for a stale or invalid one.
+Several test proofs may support one condition, and one genuine execution may
+support several relevant conditions through distinct condition-bound records.
+Do not demand a rerun or monolithic wrapper merely for a condition number;
+existing common-boundary tests are useful when they check the required behavior.
+Structural validity does not replace meaningful before/action/after observations
+or credible N/A reasoning. For external assertions, trace the selected PASSED
+node through `assertion_support.invocation` to the helper's reached assertions.
+`source` anchors the entry test file; external fragment hashes authenticate
+source bytes, but the validator proves neither callgraph nor assertion adequacy.
+`assert helper(...) is None` alone does not establish state. Negative cases need
+a specific rejection reason and evidence that no unauthorized writes occurred.
 Require the payload to identify mocked pieces versus real policy/state checks:
 a call-order-only stub does not establish a before/action/after invariant.
 For a v2 observed-proof verdict every generated stage decision is mandatory:
@@ -44,8 +55,10 @@ the repository or list runtime directories to rediscover any of these paths.
    read only the exact prior verdict and manifest paths named there, including
    when `cross_run=true`; `selected_paths` already contains only added, removed,
    or hash-changed paths. Concentrate on the prior findings and failing
-   acceptance surface and carry forward acceptance evidence for unchanged path
-   hashes.
+   acceptance surface. Carry forward prior semantic conclusions only when all
+   relevant inputs are unchanged and applicability to the changed path is clear.
+   This does not make old receipts current; existing freshness rules and
+   explicitly authorized dependency-based reuse still apply.
 3. Map every verdict acceptance entry to observable code and focused evidence
    under the current run directory. For structured OpenSpec acceptance, each
    entry identifies one complete Requirement/Scenario pair: evaluate all of its

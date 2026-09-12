@@ -9,6 +9,34 @@ if [ "${1:-}" = --project ]; then
 fi
 openspec_project_root=${CHRL_PROJECT_ROOT:-$(CDPATH= cd -P "$(dirname -- "$0")/.." && pwd)}
 openspec_dependency_root="$openspec_project_root/tools/openspec"
+openspec_source_root=$(dirname "$(dirname "$(readlink -f "$0")")")
+
+# Release mode remains in one process chain through verified Python and Node.
+# The legacy snapshot path below retains project dependencies and wire identity.
+openspec_binding_schema=$(CHRL_PROJECT_ROOT="$openspec_project_root" /usr/bin/python3 -I -S -B -c '
+import json, os, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+if os.path.lexists(root.parent / ("." + root.name + ".release-maintenance.json")):
+    raise SystemExit("executor is fenced by release maintenance")
+project = Path(os.environ["CHRL_PROJECT_ROOT"])
+transitions = project / ".runtime/changerail/executor-bindings"
+if transitions.is_symlink(): raise SystemExit("linked executor binding history")
+for intent in transitions.glob("*/intent.json"):
+    if intent.is_symlink() or not (intent.parent / "applied.json").is_file():
+        raise SystemExit("pending executor binding requires reconcile")
+p = project / ".changerail/engine-binding.json"
+if p.exists() or p.is_symlink():
+    value = json.loads(p.read_bytes())
+    if not isinstance(value, dict): raise SystemExit("invalid engine binding")
+    print(value.get("schema", ""))
+' "$openspec_source_root")
+if [ "$openspec_binding_schema" = changerail.engine-binding.v2 ]; then
+    openspec_source_root=$(dirname "$(dirname "$(readlink -f "$0")")")
+    CHRL_PROJECT_ROOT="$openspec_project_root"
+    export CHRL_PROJECT_ROOT
+    exec "$openspec_source_root/bin/chrl" --project "$openspec_project_root" --exec-openspec "$@"
+fi
 
 export PYTHONDONTWRITEBYTECODE=1
 export OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 CI=true

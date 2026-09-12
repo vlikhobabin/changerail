@@ -2,15 +2,35 @@
 
 При разработке самого ChangeRail продуктовый checkout изменяется, а исполняемый
 engine остаётся закреплённым. Чистый Git checkout и символическая ссылка не
-обеспечивают этот контракт. Для engine нужен отдельный snapshot с полным inventory
-и локальным `.changerail/engine-binding.json`.
+обеспечивают этот контракт. Для engine выбирают отдельный snapshot либо принятый release checkout с полным
+inventory и локальным `.changerail/engine-binding.json`.
 
 Роли dev, рабочего checkout, engine и consumer binding описаны в
 [руководстве оператора](operations.md#разработка-самого-changerail).
 Обновление опубликованной версии рабочего checkout выполняется по
 [отдельному runbook](working-checkout.md), с сохранением локальной истории.
 
-## Подготовка engine
+## Release executor для будущих запусков
+
+Новый режим использует два каталога — dev и отдельный принятый release checkout.
+Установка и миграция не требуют карточки или OpenSpec artifacts; порядок первого
+implementation release, acceptance, binding и дальнейших обновлений описан в
+[runbook](working-checkout.md#executor-из-релиза-два-каталога).
+Release binding v2 закрепляет путь executor; каждый run фиксирует принятую identity.
+Runtime/dependencies читаются из executor, а продуктовые проверки — из dev.
+
+`executor-bind prepare/apply/reconcile` создаёт только переход будущего выбора:
+сохраняет original binding и всю историю, не переписывает run.json, не создаёт
+successor и не добавляет бюджет ревью. Недоступный старый snapshot требует
+восстановить его точные bytes для проверки identity до миграции.
+
+Описанные ниже `self-host-recovery-*` и `runtime-repair-*` остаются snapshot-only
+маршрутами. Для release binding CLI явно отклоняет их; новые механизмы recovery
+и переноса старой frozen identity этим режимом не вводятся. Переключение обратно
+в snapshot выполняется новой binding-транзакцией с `--kind snapshot` и точной
+`--previous-identity`, без ручного восстановления binding поверх новых receipts.
+
+## Подготовка engine (snapshot v1)
 
 Сначала проверьте и закоммитьте изменения инструмента. Snapshot создаётся только
 из чистого committed source и содержит публичную distribution-выборку: Python,

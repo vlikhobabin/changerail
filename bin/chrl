@@ -14,6 +14,70 @@ if [[ -z "${CHRL_PROJECT_ROOT:-}" ]]; then
   fi
 fi
 cd "$CHRL_PROJECT_ROOT"
+# Classify with isolated system stdlib before selecting any project Python.
+# A release binding requires invocation of its external launcher; it never
+# bootstraps through mutable product modules, venv hooks, or PYTHONPATH.
+chrl_binding_schema=$(/usr/bin/python3 -I -S -B -c '
+import json, os, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+if os.path.lexists(root.parent / ("." + root.name + ".release-maintenance.json")):
+    raise SystemExit("executor is fenced by release maintenance")
+project = Path(os.environ["CHRL_PROJECT_ROOT"])
+transitions = project / ".runtime/changerail/executor-bindings"
+if transitions.is_symlink(): raise SystemExit("linked executor binding history")
+for intent in transitions.glob("*/intent.json"):
+    if intent.is_symlink() or not (intent.parent / "applied.json").is_file():
+        raise SystemExit("pending executor binding requires reconcile")
+p = project / ".changerail/engine-binding.json"
+if p.exists() or p.is_symlink():
+    value = json.loads(p.read_bytes())
+    if not isinstance(value, dict): raise SystemExit("invalid engine binding")
+    print(value.get("schema", ""))
+' "$chrl_source_root")
+if [[ "$chrl_binding_schema" == changerail.engine-binding.v2 ]]; then
+  exec /usr/bin/python3 -I -S -B -c '
+import fcntl, hashlib, json, os, stat, sys
+from pathlib import Path
+root = Path(sys.argv.pop(1))
+try:
+    if root.resolve(strict=True) != root:
+        raise ValueError("noncanonical executor source")
+    binding = json.loads((Path(os.environ["CHRL_PROJECT_ROOT"]) / ".changerail/engine-binding.json").read_bytes())
+    if binding.get("engine_root") != str(root):
+        raise ValueError("executing source differs from release binding")
+    lock = root.parent / ("." + root.name + ".executor-use.lock")
+    fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        raise ValueError("unsafe executor use lock")
+    fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    # Tool transports may preserve env while closing inherited FDs. This trusted
+    # boundary owns a NEW shared lease; the old env integer grants no authority.
+    os.set_inheritable(fd, True)
+    os.environ["CHRL_ENGINE_USE_FD"] = str(fd)
+    marker = root.parent / ("." + root.name + ".release-maintenance.json")
+    if os.path.lexists(marker): raise ValueError("executor is fenced by release maintenance")
+    receipt = root.parent / ("." + root.name + ".accepted-release.json")
+    if receipt.is_symlink(): raise ValueError("linked accepted receipt")
+    info = receipt.stat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        raise ValueError("unsafe accepted receipt")
+    accepted = json.loads(receipt.read_bytes())
+    helper = root / "scripts/changerail/release_executor.py"
+    if helper.resolve(strict=True) != helper or not helper.is_file():
+        raise ValueError("linked release bootstrap")
+    raw = helper.read_bytes()
+    expected = accepted["distribution"]["files"]["scripts/changerail/release_executor.py"]
+    if expected != {"sha256":hashlib.sha256(raw).hexdigest(), "size":len(raw), "mode":stat.S_IMODE(helper.stat().st_mode)}:
+        raise ValueError("release bootstrap differs from accepted receipt")
+    # Compile exactly the verified bytes, under the shared lock.
+    exec(compile(raw, str(helper), "exec"), {"__name__":"__main__", "__file__":str(helper)})
+except (OSError, ValueError, KeyError, TypeError) as exc:
+    print("ChangeRail release bootstrap: " + str(exc), file=sys.stderr)
+    raise SystemExit(2)
+' "$chrl_source_root" "$@"
+fi
 chrl_python="$CHRL_PROJECT_ROOT/.venv/bin/python"
 if [[ ! -x "$chrl_python" ]]; then
   chrl_python="$chrl_source_root/.venv/bin/python"

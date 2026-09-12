@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import copy
 import importlib.util
 import inspect
 import json
@@ -221,6 +222,7 @@ def _base(
     role: str,
     artifact: Path,
     fragments: dict[str, object],
+    assertion_support: dict[str, object] | None = None,
 ) -> dict[str, object]:
     proof = {
         "schema": "changerail.card-proof.v1",
@@ -228,7 +230,7 @@ def _base(
         "inventory_digest": delivery.derive_proof_inventory(card)["digest"],
         "payload": delivery.payload_fingerprint(),
         "condition": row["identity"],
-        "method": row["method"],
+        "method": {"kind": row["method"]["kind"], "target": row["method"]["target"]},
         "stage": row["stage"],
         "observation_id": f"{role}-{row['condition']}",
         "recorder_role": role,
@@ -238,7 +240,7 @@ def _base(
         "fragments": fragments,
     }
     if row["method"]["kind"] == "test":
-        proof["assertion_support"] = _assertion_support(
+        proof["assertion_support"] = assertion_support or _assertion_support(
             root, str(row["method"]["target"])
         )
         proof["fragments"] = proof["assertion_support"]["fragments"]
@@ -423,6 +425,7 @@ def _final_v2_repository(
     monkeypatch: pytest.MonkeyPatch,
     *,
     final_target: str = "tests/test_receipt.py",
+    additional_final_targets: tuple[str, ...] = (),
 ) -> tuple[Path, Path, Path, dict[str, object], dict[str, object]]:
     """Build a current v2 GO with real implementation/review receipts.
 
@@ -433,9 +436,16 @@ def _final_v2_repository(
     """
 
     root, card, run_dir = _proof_repository(tmp_path, monkeypatch)
+    final_method = {"kind": "test", "target": final_target}
+    if additional_final_targets:
+        final_method["additional_targets"] = list(additional_final_targets)
+        for target in additional_final_targets:
+            source = root / target.partition("::")[0]
+            if not source.exists():
+                source.write_bytes((root / "tests/test_receipt.py").read_bytes())
     text = _proof_card().replace(
         '"method": {"kind": "runtime", "target": "offline-target"}, "stage": "final"',
-        f'"method": {{"kind": "test", "target": "{final_target}"}}, "stage": "final"',
+        f'"method": {json.dumps(final_method)}, "stage": "final"',
     )
     card.write_text(
         text
@@ -466,6 +476,10 @@ The isolated fixture retains substantive implementation evidence for final verif
         f"{sys.executable} -m pytest -p no:cacheprovider -vv "
         "tests/test_receipt.py::test_value[one]"
     )
+    final_commands = [command] + [
+        f"{sys.executable} -m pytest -p no:cacheprovider -v {target}[one]"
+        for target in additional_final_targets
+    ]
     monkeypatch.setattr(
         delivery,
         "profile",
@@ -475,7 +489,7 @@ The isolated fixture retains substantive implementation evidence for final verif
             },
             "verification": {
                 "pre_review_commands": [command],
-                "final_commands": [command],
+                "final_commands": final_commands,
             },
             "budgets": {"enforce_limits": False},
         },
@@ -540,6 +554,419 @@ The isolated fixture retains substantive implementation evidence for final verif
     delivery.retain_final_test_proof_input(run_dir, supplied)
     monkeypatch.setenv("CHRL_SESSION_ROLE", "outer")
     return root, card, run_dir, implementation, review
+
+
+def _proof_from_test_receipt(
+    root, card, run_dir, condition, target, receipt, support=None
+):
+    row = copy.deepcopy(
+        next(
+            row
+            for row in delivery.derive_proof_inventory(card)["conditions"]
+            if row["condition"] == condition
+        )
+    )
+    row["method"] = {"kind": "test", "target": target}
+    item, log, current = delivery.read_check_result(receipt, run_dir, "focused")
+    assert current
+    support = support or _assertion_support(root, target)
+    proof = _base(
+        root,
+        card,
+        run_dir,
+        row,
+        role=row["stage"],
+        artifact=receipt,
+        fragments=support["fragments"],
+        assertion_support=support,
+    )
+    proof.update(
+        lane="focused",
+        attempt_id=item["attempt_id"],
+        command_identity=item["command_identity"],
+        selected_nodes=pytest_nodes(item, log, target),
+    )
+    assert proof["selected_nodes"]
+    return proof
+
+
+def test_multiple_test_targets_and_shared_execution_cover_conditions(
+    tmp_path, monkeypatch
+):
+    root, card, run_dir = _proof_repository(tmp_path, monkeypatch)
+    primary = "tests/test_receipt.py::test_value"
+    other = "tests/test_other.py::test_value"
+    (root / "tests/test_other.py").write_bytes(
+        (root / "tests/test_receipt.py").read_bytes()
+    )
+    plan = delivery._evidence_plan_json(card.read_text())
+    original = json.dumps(plan)
+    plan["conditions"][0]["method"] = {
+        "kind": "test",
+        "target": primary,
+        "additional_targets": [other],
+    }
+    card.write_text(card.read_text().replace(original, json.dumps(plan)))
+    shared = _actual_pytest_proof(root, card, run_dir)
+    first = _proof_from_test_receipt(
+        root,
+        card,
+        run_dir,
+        "C1",
+        primary,
+        root / shared["artifact"]["path"],
+    )
+    delivery.record_observed_proof(run_dir, first)
+    with pytest.raises(delivery.DeliveryError, match=re.escape(other)):
+        delivery.require_current_stage_proofs(card, run_dir, ["implementation"])
+    assert (
+        delivery.run_evidence(
+            "other-pytest",
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-p",
+                "no:cacheprovider",
+                "-v",
+                other + "[two]",
+            ],
+        )
+        == 0
+    )
+    second = _proof_from_test_receipt(
+        root,
+        card,
+        run_dir,
+        "C1",
+        other,
+        _receipt_with_label(run_dir, "other-pytest"),
+    )
+    second["observation_id"] += "-other"
+    delivery.record_observed_proof(run_dir, second)
+    another = copy.deepcopy(first)
+    another["observation_id"] += "-additional-assertions"
+    delivery.record_observed_proof(run_dir, another)
+    monkeypatch.setenv("CHRL_SESSION_ROLE", "review")
+    delivery.record_observed_proof(run_dir, shared)
+    records = delivery.require_current_stage_proofs(
+        card, run_dir, ["implementation", "review"]
+    )
+    assert {p["observation_id"] for p in records} == {
+        p["observation_id"] for p in (first, second, another, shared)
+    }
+    assert first["artifact"] == shared["artifact"]
+    assert first["attempt_id"] == shared["attempt_id"]
+    assert first["selected_nodes"] == shared["selected_nodes"]
+    assert len(list((run_dir / "focused-evidence").glob("*.json"))) == 2
+
+    template = delivery.verdict_template(str(card))["template"]
+    decision = template["decisions"][0]
+    for ref in decision["condition_refs"]:
+        if ref["stage"] != "final":
+            ref["observation_ids"] = [
+                p["observation_id"]
+                for p in records
+                if p["condition"] == ref["condition"]
+            ]
+    decision["observation_ids"] = [p["observation_id"] for p in records]
+    decision["assessment"] = (
+        "Both required C1 targets passed; C2 shares the actual selected execution with its own current record."
+    )
+    delivery.write_json(delivery.verdict_path(delivery.card_id(card)), template)
+    assert delivery.validate_verdict(str(card))["result"] == "go"
+    index_before = (run_dir / "proof-index.json").read_bytes()
+    monkeypatch.setenv("CHRL_SESSION_ROLE", "implementation")
+    with pytest.raises(delivery.DeliveryError, match="duplicate observation"):
+        delivery.record_observed_proof(run_dir, first)
+    for mutation, message in (
+        (lambda p: p["method"].update(target="tests/foreign.py"), "foreign"),
+        (
+            lambda p: p["selected_nodes"].append(copy.deepcopy(p["selected_nodes"][0])),
+            "schema validation|outside declared selector",
+        ),
+        (
+            lambda p: p.update(selected_nodes=copy.deepcopy(first["selected_nodes"])),
+            "outside declared selector",
+        ),
+    ):
+        invalid = copy.deepcopy(second)
+        invalid["observation_id"] = "invalid-proof"
+        mutation(invalid)
+        with pytest.raises(delivery.DeliveryError, match=message):
+            delivery.record_observed_proof(run_dir, invalid)
+        assert (run_dir / "proof-index.json").read_bytes() == index_before
+    # Even surplus records remain authenticated: a broken receipt cannot hide
+    # behind another record of the same condition/target.
+    receipt = root / shared["artifact"]["path"]
+    receipt.write_bytes(receipt.read_bytes() + b" ")
+    with pytest.raises(delivery.DeliveryError, match="integrity failed"):
+        delivery.require_current_stage_proofs(card, run_dir, ["implementation"])
+    assert (run_dir / "proof-index.json").read_bytes() == index_before
+
+
+def _executed_helper_proof(tmp_path, monkeypatch):
+    root, card, run_dir = _proof_repository(tmp_path, monkeypatch)
+    source = root / "tests/test_receipt.py"
+    helper = root / "tests/helper.py"
+    helper.write_text(
+        "def check_value(value):\n"
+        "    before_state = value\n    assert before_state == 'one'\n"
+        "    action_state = value.upper()\n    assert action_state == 'ONE'\n"
+        "    after_state = action_state.lower()\n    assert after_state == value\n"
+    )
+    source.write_text(
+        "import pytest\nfrom helper import check_value\n"
+        "@pytest.mark.parametrize('value', ['one'])\n"
+        "def test_value(value):\n    check_value(value)\n"
+    )
+    target = "tests/test_receipt.py::test_value"
+    assert (
+        delivery.run_evidence(
+            "helper-pytest",
+            [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-v", target],
+        )
+        == 0
+    )
+    support = _assertion_support(root, "tests/helper.py")
+    support["source"] = _reference(source)
+    start = source.read_bytes().index(b"    check_value(value)")
+    support["invocation"] = _fragment(source, start, len(source.read_bytes()))
+    proof = _proof_from_test_receipt(
+        root,
+        card,
+        run_dir,
+        "C2",
+        target,
+        _receipt_with_label(run_dir, "helper-pytest"),
+        support,
+    )
+    monkeypatch.setenv("CHRL_SESSION_ROLE", "review")
+    return root, card, run_dir, source, helper, proof
+
+
+def test_invoked_helper_fragments_are_authenticated_before_recording(
+    tmp_path, monkeypatch
+):
+    root, card, run_dir, source, helper, proof = _executed_helper_proof(
+        tmp_path, monkeypatch
+    )
+    retained = delivery.record_observed_proof(run_dir, proof)
+    before = {p: p.read_bytes() for p in (retained, run_dir / "proof-index.json")}
+    assert delivery.require_current_stage_proofs(card, run_dir, ["review"]) == [proof]
+    helper_bytes = helper.read_bytes()
+    log_source = run_dir / "fake-source.py"
+    log_source.write_bytes(helper_bytes)
+    alias = run_dir / "helper-alias.py"
+    alias.symlink_to(helper)
+    for mutation, message in (
+        (lambda p: p["assertion_support"].pop("invocation"), "requires invocation"),
+        (
+            lambda p: p["assertion_support"].update(
+                invocation=p["fragments"]["before"]
+            ),
+            "invocation does not bind",
+        ),
+        (
+            lambda p: p["assertion_support"]["invocation"].update(
+                end=len(source.read_bytes()) + 1
+            ),
+            "offsets",
+        ),
+        (
+            lambda p: p["assertion_support"]["invocation"].update(
+                fragment_sha256="0" * 64
+            ),
+            "fragment identity",
+        ),
+        (
+            lambda p: p["assertion_support"]["source"].update(sha256="0" * 64),
+            "integrity failed",
+        ),
+        (
+            lambda p: p["fragments"]["after"].update(sha256="0" * 64),
+            "not from its declared source",
+        ),
+        (
+            lambda p: p["fragments"]["before"].update(end=len(helper_bytes) + 1),
+            "offsets",
+        ),
+        (
+            lambda p: p["fragments"]["before"].update(fragment_sha256="0" * 64),
+            "fragment identity",
+        ),
+        (
+            lambda p: p["fragments"]["before"].update(path="../helper.py"),
+            "schema validation",
+        ),
+        (
+            lambda p: p["fragments"]["before"].update(**_reference(log_source)),
+            "not a repository source",
+        ),
+        (
+            lambda p: p["fragments"]["before"].update(
+                path=alias.relative_to(root).as_posix()
+            ),
+            "safely read",
+        ),
+    ):
+        invalid = copy.deepcopy(proof)
+        invalid["observation_id"] = "invalid-helper"
+        mutation(invalid)
+        with pytest.raises(delivery.DeliveryError, match=message):
+            delivery.record_observed_proof(run_dir, invalid)
+        assert {p: p.read_bytes() for p in before} == before
+    helper.write_bytes(helper_bytes + b"# changed helper\n")
+    with pytest.raises(delivery.DeliveryError, match="integrity failed"):
+        delivery._validate_test_assertion_support(
+            proof["assertion_support"], proof["method"]["target"]
+        )
+    with pytest.raises(delivery.DeliveryError, match="stale"):
+        delivery.require_current_stage_proofs(card, run_dir, ["review"])
+    assert {p: p.read_bytes() for p in before} == before
+
+
+def test_helper_sources_are_read_once_per_validation(tmp_path, monkeypatch):
+    _root, _card, _run_dir, source, helper, proof = _executed_helper_proof(
+        tmp_path, monkeypatch
+    )
+    reads = {source: 0, helper: 0}
+    original = {p: p.read_bytes() for p in reads}
+    real_read = delivery._check_bytes
+
+    def swap_after_read(path, limit=32 * 1024 * 1024):
+        data = real_read(path, limit)
+        if path in reads:
+            reads[path] += 1
+            path.write_bytes(b"# swapped after authenticating bytes\n")
+        return data
+
+    monkeypatch.setattr(delivery, "_check_bytes", swap_after_read)
+    delivery._validate_test_assertion_support(
+        proof["assertion_support"], proof["method"]["target"]
+    )
+    assert reads == {source: 1, helper: 1}
+    source.write_bytes(original[source])
+    with pytest.raises(delivery.DeliveryError, match="integrity failed"):
+        delivery._validate_test_assertion_support(
+            proof["assertion_support"], proof["method"]["target"]
+        )
+    assert reads == {source: 2, helper: 2}
+
+
+@pytest.mark.parametrize("missing", ["draft", "node"])
+def test_final_multiple_targets_preserve_partial_supply_and_history(
+    tmp_path, monkeypatch, missing
+):
+    other = "tests/test_other.py::test_value"
+    root, card, run_dir, _implementation, _review = _final_v2_repository(
+        tmp_path,
+        monkeypatch,
+        additional_final_targets=(other,),
+    )
+    if missing == "node":
+        configured = delivery.profile()
+        configured["verification"]["final_commands"] = configured["verification"][
+            "final_commands"
+        ][:1]
+        monkeypatch.setattr(delivery, "profile", lambda: configured)
+    inventory = delivery.derive_proof_inventory(card)
+    primary_input = delivery._check_json(run_dir / "final-input.json")
+    assert "method" not in primary_input  # Existing singleton draft is unchanged.
+    extra_input = copy.deepcopy(primary_input)
+    extra_input.update(
+        method={"kind": "test", "target": other},
+        assertion_support=_assertion_support(root, other),
+    )
+    draft = run_dir / "extra-final-input.json"
+    monkeypatch.setenv("CHRL_SESSION_ROLE", "review")
+    for method in (
+        {"kind": "test", "target": "tests/foreign.py"},
+        {"kind": "test", "target": other, "additional_targets": [other]},
+        {"kind": "inspection", "target": other},
+    ):
+        invalid = {**extra_input, "method": method}
+        delivery.write_json(draft, invalid)
+        with pytest.raises(delivery.DeliveryError, match="method is foreign"):
+            delivery.retain_final_test_proof_input(run_dir, draft)
+    delivery.write_json(draft, extra_input)
+    if missing == "node":
+        delivery.retain_final_test_proof_input(run_dir, draft)
+    monkeypatch.delenv("CHRL_SESSION_ROLE")
+    assert delivery.preverify(str(card)) == 0
+    with pytest.raises(delivery.DeliveryError, match=re.escape(other)):
+        delivery.verify_as_outer_dispatch(str(card))
+    cycles = sorted((run_dir / "verification").glob("cycle-*"))
+    verification_before = (run_dir / "verification.json").read_bytes()
+    records = delivery._validated_index_records(
+        delivery._check_json(run_dir / "proof-index.json"),
+        card=card,
+        run_dir=run_dir,
+        inventory=inventory,
+    )
+    finals = [p for p in records if p["stage"] == "final"]
+    assert len(finals) == 1 and finals[0]["method"]["target"] == "tests/test_receipt.py"
+    assert (
+        finals[0]["observation_id"]
+        == "outer-final-"
+        + hashlib.sha256(finals[0]["condition"].encode()).hexdigest()[:16]
+    )
+    retained = {
+        p: p.read_bytes()
+        for directory in ("proof-records", "final-test-proof-supplies")
+        for p in (run_dir / directory).glob("*.json")
+    }
+    monkeypatch.setenv("CHRL_SESSION_ROLE", "review")
+    first_input_path = delivery.retain_final_test_proof_input(run_dir, draft)
+    assert delivery.retain_final_test_proof_input(run_dir, draft) == first_input_path
+    monkeypatch.delenv("CHRL_SESSION_ROLE")
+    if missing == "node":
+        with pytest.raises(delivery.DeliveryError, match=re.escape(other)):
+            delivery.verify_as_outer_dispatch(str(card))
+        assert (run_dir / "verification.json").read_bytes() == verification_before
+        assert sorted((run_dir / "verification").glob("cycle-*")) == cycles
+        assert {p: p.read_bytes() for p in retained} == retained
+        return
+
+    assert delivery.verify_as_outer_dispatch(str(card)) == 0
+    records = delivery.require_current_stage_proofs(card, run_dir, ["final"])
+    finals = [p for p in records if p["stage"] == "final"]
+    assert {p["method"]["target"] for p in finals} == {"tests/test_receipt.py", other}
+    assert len({p["observation_id"] for p in finals}) == 2
+    supplies = delivery._final_test_proof_supplies(run_dir, inventory, records)
+    assert len(supplies) == 2
+    assert {p: p.read_bytes() for p in retained} == retained
+    index_before = (run_dir / "proof-index.json").read_bytes()
+    markers_before = {
+        p: p.read_bytes()
+        for p in (run_dir / "final-test-proof-supplies").glob("*.json")
+    }
+    assert delivery.verify_as_outer_dispatch(str(card)) == 0
+    assert (run_dir / "proof-index.json").read_bytes() == index_before
+    assert {p: p.read_bytes() for p in markers_before} == markers_before
+    assert sorted((run_dir / "verification").glob("cycle-*")) == cycles
+    assert (run_dir / "verification.json").read_bytes() == verification_before
+
+    # Explicit and old implicit drafts identify the same primary target.
+    duplicate = {
+        **primary_input,
+        "method": {"kind": "test", "target": "tests/test_receipt.py"},
+    }
+    duplicate_path = run_dir / "final-test-proof-inputs" / "duplicate.json"
+    delivery.write_json(duplicate_path, duplicate)
+    with pytest.raises(delivery.DeliveryError, match="input is duplicate"):
+        delivery._final_test_proof_inputs(card, run_dir, inventory)
+    duplicate_path.unlink()
+    # Losing one accepted additional-target record never permits resupply.
+    additional_marker = next(
+        marker for key, marker in supplies.items() if key[1] == other
+    )
+    (root / additional_marker["record"]["path"]).unlink()
+    with pytest.raises(delivery.DeliveryError, match="safely read|missing|corrupt"):
+        delivery.verify_as_outer_dispatch(str(card))
+    assert (run_dir / "proof-index.json").read_bytes() == index_before
+    assert {p: p.read_bytes() for p in markers_before} == markers_before
+    assert sorted((run_dir / "verification").glob("cycle-*")) == cycles
 
 
 def test_observed_proof_review_and_final_gates(

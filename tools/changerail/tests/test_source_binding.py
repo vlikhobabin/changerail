@@ -57,6 +57,9 @@ def test_attach_two_projects_shared_edits_and_detach(source, tmp_path, monkeypat
     first, second = consumer(tmp_path, "one"), consumer(tmp_path, "two")
     install.attach(source, first, development=True)
     install.attach(source, second)
+    for project in (first, second):
+        assert not os.path.lexists(project / "tools/openspec/.gitignore")
+        assert "tools/openspec/.gitignore" not in binding.binding(project)["mappings"]
     assert (first / "tools/changerail/tests").is_symlink()
     assert (first / "tools/openspec/test-wrapper.mjs").is_symlink()
     assert not (second / "tools/changerail/tests").exists()

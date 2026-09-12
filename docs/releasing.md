@@ -10,7 +10,7 @@
 
 Обновите согласованно `pyproject.toml`, `uv.lock`, `distribution.json`, README,
 runtime README/ORIGIN, CHANGELOG и `docs/releases/<version>.md`. Для примера
-`2.0.0-rc.4` Python metadata имеет форму `2.0.0rc4`. Исторический
+`2.0.0-rc.5` Python metadata имеет форму `2.0.0rc5`. Исторический
 `distribution.json.provenance.upstream_commit` не заменяют самоссылкой на
 будущий commit; точное происхождение записывают отдельным release asset.
 
@@ -66,7 +66,7 @@ gh run view REPLACE_WITH_RUN_ID --json headSha,status,conclusion,jobs,url
 source snapshot исключает незакоммиченные файлы из архива.
 
 ```bash
-export CHRL_RELEASE_VERSION=2.0.0-rc.4
+export CHRL_RELEASE_VERSION=2.0.0-rc.5
 export CHRL_RELEASE_COMMIT=$(git rev-parse HEAD)
 export CHRL_RELEASE_TREE=$(git rev-parse 'HEAD^{tree}')
 git diff --quiet

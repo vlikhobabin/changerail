@@ -10,6 +10,15 @@ from typing import Any, Mapping
 from scripts.changerail.contracts import DeliveryError
 
 
+def shell_command_identity(command: str, *, login: bool = True) -> dict[str, Any]:
+    """Exact supported shell identity; legacy login-shell receipts stay unchanged."""
+    return {
+        "kind": "shell",
+        "argv": ["bash", "-lc" if login else "-c", command],
+        "shell_text": command,
+    }
+
+
 def _is_pytest_command_identity(identity: object) -> bool:
     """Recognize a supported pytest invocation without executing it.
 
@@ -45,7 +54,10 @@ def _is_pytest_command_identity(identity: object) -> bool:
         # than treating a later token as an invocation.
         if not shell_text or re.search(r"[\n\r;|&<>$`]", shell_text):
             return False
-        if supplied_argv != ["bash", "-lc", shell_text]:
+        if identity not in (
+            shell_command_identity(shell_text),
+            shell_command_identity(shell_text, login=False),
+        ):
             return False
         try:
             argv = shlex.split(shell_text)

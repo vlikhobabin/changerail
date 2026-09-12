@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import json
 import sys
@@ -200,6 +201,78 @@ def test_card_and_future_target_are_read_only(tmp_path: Path) -> None:
     assert delivery.validate_evidence_plan_text(_text("- [C1] inert", future), SCHEMA)[
         "conditions"
     ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "targets", "message"),
+    [
+        ("test", [], "too short|non-empty"),
+        ("test", ["tests/other.py", "tests/other.py"], "non-unique"),
+        ("test", ["src/example/core/future.py::test_plan"], "duplicate"),
+        ("test", ["../other.py"], "inert relative locator"),
+        ("test", ["/tmp/other.py"], "inert relative locator"),
+        ("test", ["tests/other.py;echo unsafe"], "inert relative locator"),
+        ("test", ["tests/other.py::test_x::test_y"], "inert relative locator"),
+        ("test", [42], "not of type"),
+        ("inspection", ["tests/other.py"], "test"),
+        ("runtime", ["tests/other.py"], "test"),
+    ],
+)
+def test_additional_test_targets_are_closed(kind, targets, message):
+    plan = _plan()
+    plan["conditions"][0]["method"].update(kind=kind, additional_targets=targets)
+    with pytest.raises(delivery.DeliveryError, match=message):
+        delivery.validate_evidence_plan_text(_text("- [C1] targets", plan), SCHEMA)
+
+
+def test_additional_targets_preserve_rows_and_singleton_inventory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
+    plan = _plan()
+    card = tmp_path / "card.md"
+    card.write_text(_text("- [C1] legacy", plan))
+    source_hash = hashlib.sha256(card.read_bytes()).hexdigest()
+    rows = [
+        {
+            "identity": f"card.md@sha256:{source_hash}:C1",
+            "source": {"path": "card.md", "sha256": source_hash},
+            "condition": "C1",
+            "scenario": f"card.md@sha256:{source_hash} / Condition: C1",
+            "method": {
+                "kind": "test",
+                "target": "src/example/core/future.py::test_plan",
+            },
+            "stage": "implementation",
+        }
+    ]
+    inventory = delivery.derive_proof_inventory(card)
+    assert inventory["conditions"] == rows
+    assert (
+        inventory["digest"]
+        == "sha256:"
+        + hashlib.sha256(
+            json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+
+    plan = _plan(("C1", "C2"))
+    for row in plan["conditions"]:
+        row["method"] = {
+            "kind": "test",
+            "target": "tests/shared.py::test_shared",
+            "additional_targets": ["tests/other.py::test_other", "tests/third.py"],
+        }
+    card.write_text(_text("- [C1] first\n- [C2] second", plan))
+    before = card.read_bytes()
+    checked = delivery.derive_proof_inventory(card)
+    assert len(checked["conditions"]) == 2
+    assert all(
+        row["method"] == plan["conditions"][0]["method"]
+        for row in checked["conditions"]
+    )
+    assert card.read_bytes() == before
+    assert not (tmp_path / "tests").exists()  # Locators are declarations, not commands.
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,21 @@
 # Изменения
 
+## 2.0.0-rc.5 — release executor и совокупные test proofs
+
+- Отдельный принятый release checkout исполняет будущие runs dev-проекта;
+  `release-update` и `executor-bind` сохраняют проверяемые receipts и поддерживают
+  reconcile без изменения истории и без новых полномочий resume старых runs.
+- Test method допускает необязательные `additional_targets`; совокупность
+  singleton proofs покрывает все объявленные targets. Одно исполнение может
+  поддерживать несколько условий, assertions — оставаться в вызываемом helper.
+- Сохранены текущие identity/freshness/selection проверки и совместимость прежних
+  singleton proofs. Новый формат требует совместимого engine до принятия плана.
+- `tools/openspec/.gitignore` исключён из runtime payload и source-link inventory;
+  исключения зависимостей задаются у потребителя.
+
+Это подготовленный кандидат; CI точного release commit и публикация выполняются
+отдельно. Подробности — в [release notes](docs/releases/2.0.0-rc.5.md).
+
 ## 2.0.0-rc.4 — изолированный engine и self-host recovery
 
 - Отдельный immutable engine с inventory, проверяемой identity и явным binding;

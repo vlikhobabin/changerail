@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -56,12 +55,11 @@ class OpenSpecAdapter:
 
     def __init__(self, root: Path, *, timeout: float = 40.0) -> None:
         self.root = root.resolve(strict=True)
-        dependency = self.root / "tools/openspec"
+        from scripts.changerail.engine_runtime import dependency_root, openspec_process
+
+        dependency = dependency_root(self.root)
         self.package = (dependency / "node_modules/@fission-ai/openspec").resolve()
-        node = shutil.which("node")
-        if node is None:
-            raise DeliveryError("Node.js executable missing from PATH")
-        self.node = Path(node).resolve(strict=True)
+        self.node, _env, _kwargs = openspec_process(self.root)
         self.cli = self.package / "bin/openspec.js"
         self.timeout = timeout
         manifest = self.package / "package.json"
@@ -101,9 +99,12 @@ class OpenSpecAdapter:
         return root.resolve()
 
     def _invoke(self, *args: str) -> subprocess.CompletedProcess[str]:
-        from scripts.changerail.engine_runtime import require_run
+        from scripts.changerail.engine_runtime import require_run, openspec_process
 
         require_run(self.root)
+        node, extra, kwargs = openspec_process(self.root)
+        if node != self.node:
+            raise DeliveryError("OpenSpec Node executable changed")
         if (self.root / "openspec/schemas").exists():
             raise DeliveryError("project OpenSpec schema overrides are unsupported")
         with tempfile.TemporaryDirectory(prefix="chrl-openspec-") as isolated:
@@ -121,6 +122,7 @@ class OpenSpecAdapter:
                 "OPENSPEC_NO_AUTO_CONFIG": "1",
                 "NO_UPDATE_NOTIFIER": "1",
                 "npm_config_update_notifier": "false",
+                **extra,
             }
             try:
                 return subprocess.run(
@@ -131,6 +133,7 @@ class OpenSpecAdapter:
                     capture_output=True,
                     check=False,
                     timeout=self.timeout,
+                    **kwargs,
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise DeliveryError(f"local OpenSpec command failed: {args}") from exc
@@ -235,9 +238,16 @@ class OpenSpecAdapter:
         """Read stock methodology from the pinned package, not global skills."""
         if name not in {"apply", "sync", "verify"}:
             raise DeliveryError("unknown stock OpenSpec workflow")
-        from scripts.changerail.engine_runtime import runtime_path, require_run
+        from scripts.changerail.engine_runtime import (
+            runtime_path,
+            require_run,
+            openspec_process,
+        )
 
         require_run(self.root)
+        node, extra, kwargs = openspec_process(self.root)
+        if node != self.node:
+            raise DeliveryError("OpenSpec Node executable changed")
         loader = runtime_path(
             self.root, self.root / "tools/openspec/workflow-instructions.mjs"
         )
@@ -248,12 +258,13 @@ class OpenSpecAdapter:
                 "PATH": "/usr/bin:/bin",
                 "OPENSPEC_TELEMETRY": "0",
                 "CI": "true",
-                "CHRL_PROJECT_ROOT": str(self.root),
+                **extra,
             },
             text=True,
             capture_output=True,
             timeout=self.timeout,
             check=False,
+            **kwargs,
         )
         if result.returncode or not result.stdout.strip():
             raise DeliveryError(
@@ -306,13 +317,15 @@ class OpenSpecAdapter:
         return artifacts
 
     def identity(self, change_id: str) -> dict[str, Any]:
+        from scripts.changerail.engine_runtime import dependency_root
+
         root = self.change_root(change_id)
         return {
             "schema": "changerail.openspec-plan.v1",
             "change_id": change_id,
             "openspec_version": self.VERSION,
             "package_lock_sha256": hashlib.sha256(
-                (self.root / "tools/openspec/package-lock.json").read_bytes()
+                (dependency_root(self.root) / "package-lock.json").read_bytes()
             ).hexdigest(),
             "artifacts": self.artifact_identity(root),
         }

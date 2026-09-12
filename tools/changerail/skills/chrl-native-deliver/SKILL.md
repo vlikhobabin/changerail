@@ -55,7 +55,7 @@ For a later `repair` session with archived context, fix the named product or
 evidence findings and refresh affected proofs. Do not edit canonical specs or
 archived artifacts, rerun sync, or replay group events; those changes need
 explicit lifecycle reconciliation. The runner starts a fresh independent
-review for a substantive repair, rather than reusing its earlier final GO.
+review for a substantive repair within the remaining shared review allowance.
 
 Preserve the `changerail.card-evidence.v1` contract. Record meaningful before/action/
 after observations for the assigned implementation-stage conditions and retain
@@ -64,14 +64,27 @@ review/final evidence.
 
 After implementation, finish Result/Log edits before running the checks that
 will support handoff. `chrl evidence` records a check receipt, not an observed
-proof. For each assigned implementation condition, record a genuine current
-`changerail.card-proof.v1` artifact with `./bin/chrl proof record <input.json>`.
-Use `tools/changerail/schemas/card-proof.schema.json`; test proofs require
-selected-node PASSED lines from `pytest -v`, authentic receipt/log references
-and before/action/after assertion fragments from the declared test source.
-Select tests that actually prove the condition; add missing acceptance coverage
-within the accepted test scope instead of citing unrelated assertions. Do not
-edit the payload after recording proofs without refreshing affected evidence.
+proof. For each assigned implementation condition, record current
+`changerail.card-proof.v1` artifacts with `./bin/chrl proof record <input.json>`
+using `tools/changerail/schemas/card-proof.schema.json`. Each test proof keeps
+a singleton `method: {kind, target}`; valid records must cover the primary target
+and all declared `additional_targets` in the accepted Verify plan. Use relevant
+independent tests, including existing common-boundary tests, without a monolithic
+wrapper. One genuine receipt may support several conditions through distinct
+condition-bound records; do not repeat dispatch merely for a condition number.
+Retain current receipts/logs, selected PASSED nodes from `pytest -v`, and meaningful
+before/action/after assertions. For assertions in an external helper, anchor the
+entry test file in `assertion_support.source`, its hash-bound invocation fragment
+in `invocation`, and the authenticated external assertion fragments. The reviewer
+checks the actual call path and relevance; the validator does not prove callgraph.
+Negative tests must assert the specific rejection and absence of unauthorized
+writes. Add missing coverage within the accepted scope; do not relabel a test
+proof as inspection to bypass validation. Payload edits after proof recording
+require refreshing affected evidence.
+
+Plan/proof extensions require a supporting engine before accepting a new plan.
+Do not rewrite accepted Verify or mix new fields with an old frozen engine.
+Existing singleton proofs remain compatible with the new reader.
 
 Confirm all assigned conditions have current proof coverage, then call
 `./bin/chrl handoff <card>` and stop only when it exits zero. Report a failed

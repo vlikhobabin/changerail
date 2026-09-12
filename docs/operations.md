@@ -212,7 +212,7 @@ successor с `recovery_of` на выбранную последнюю попыт
 
 ```sh
 chrl_tool=/opt/example-changerail-next
-chrl_archive=/opt/example-releases/changerail-2.0.0-rc.4-runtime.tar.gz
+chrl_archive=/opt/example-releases/changerail-2.0.0-rc.5-runtime.tar.gz
 "$chrl_tool/bin/chrl" --project "$chrl_project" plan-restore-prepare "$chrl_run" \
   --reason 'Восстановление Next с проверяемым переходом установленного runtime' \
   --runtime-archive "$chrl_archive"
@@ -332,6 +332,28 @@ binding, audit, backup и **неизменном inventory runs с момент�
 и выполняйте отдельный разбор, не подменяя audit. Команды и точные ограничения
 приведены в [shared-source.md](shared-source.md).
 
+## Release executor: установка и диагностика
+
+В режиме двух каталогов dev-проект содержит изменяемый код и свою `.venv`, а
+отдельный принятый release checkout — runtime, schemas, skills и его зависимости.
+Используйте `DEV/.changerail/chrl` и `DEV/.changerail/openspec` либо внешний
+`EXECUTOR/bin/chrl --project DEV`. `wiring` и `status` показывают выбранные
+project/source roots, release version/tag/commit, runtime hash и engine identity.
+Проверки продукта импортируют dev-код; обычные v1 snapshot execution inputs
+и wire identity сохраняют прежнюю семантику.
+
+Установка не требует board workflow. Принятие, обновление и binding запускают
+через `chrl-dist` из отдельной операторской оболочки. Shared lease держится
+supervisor до выхода модели/verification, exclusive maintenance не может войти
+параллельно. При незавершённом update marker блокирует bootstrap и verification.
+Не снимайте его и не меняйте receipt вручную: завершите provisioning/reconcile
+точного proposal по [runbook](working-checkout.md#executor-из-релиза-два-каталога).
+
+Binding receipt относится к будущим запускам. Он сохраняет старые runs, reviews,
+evidence и counters без successor; смена release identity блокирует их обычное
+продолжение. Snapshot-only recovery ниже не принимает v2 binding. Возврат к старому
+executor оформляется новым явным переходом, не восстановлением файла из backup.
+
 ## Разработка самого ChangeRail
 
 Разделяйте четыре роли; каталоги могут называться произвольно:
@@ -404,14 +426,41 @@ dispatch требует разбора. После доказанной terminal
 `CHRL_REPAIR_CONTEXT`. Старые sync и proofs сохраняются как история и не
 подтверждают новый payload. Завершите Result/Log, получите актуальные receipts
 и через `chrl proof record` запишите observed proof для всех назначенных
-implementation conditions. Для test proof требуются вывод выбранных `pytest -v`
-nodes со строками PASSED и реальные assertion fragments из закреплённого Verify.
-Схема — `tools/changerail/schemas/card-proof.schema.json`. После записи proofs
-не меняйте payload до `chrl handoff`; исправимый отказ формата требует исправить
-proof и повторить handoff. Затем обязательны обычные review, archive, final
+implementation conditions. Для test proof нужны текущие receipts выбранных
+`pytest -v` nodes со строками PASSED. Основной `method.target` и все уникальные
+`additional_targets` принятого Verify обязательны; каждый proof сохраняет
+singleton `{kind, target}`. Все records должны быть валидны; stale или ошибочный
+proof нельзя компенсировать хорошим. Несколько records могут подтверждать одно
+условие; один реальный receipt — несколько релевантных условий через отдельные
+condition-bound records. Независимые тесты общих границ не нужно копировать в
+wrapper или повторно исполнять ради номера условия.
+
+`assertion_support.source` закрепляет файл выбранного теста. Если содержательные
+before/action/after assertions находятся во внешнем вызываемом helper, добавьте
+hash-bound `invocation` из входного файла и аутентифицированные внешние source fragments.
+Reviewer прослеживает фактический вызов и оценивает совокупное покрытие рисков,
+включая конкретный отказ и отсутствие неразрешённых записей; валидатор проверяет
+identity, freshness и selection, но не callgraph. Test proof нельзя заменить
+inspection ради обхода. Прежние семантические выводы применимы только при
+неизменных релевантных входах и проверенной применимости; старые receipts от этого
+не становятся текущими. Явный dependency-based reuse сохраняет прежние ограничения.
+
+Схема — `tools/changerail/schemas/card-proof.schema.json`. Final test draft может
+явно выбрать singleton `method` для дополнительного target; без него используется
+основной target. Final proofs по-прежнему снабжает outer из текущего final command
+set. После записи proofs не меняйте payload до `chrl handoff`; исправимый отказ
+формата требует исправить proof и повторить handoff. Затем обязательны обычные review, archive, final
 verification и publication gates. Проверьте terminal metadata successor,
 результаты проверок и receipt точного опубликованного commit; одного успешного
 prepare, reconcile или `chrl evidence` недостаточно.
+
+Несколько targets и внешние assertion fragments требуют выпуска runtime с этой
+реализацией; правки dev-checkout не обновляют installed runtime. Сначала обеспечьте
+поддерживающий engine для нового плана. Старый frozen engine нельзя смешивать с
+новыми полями принятого плана. Новый reader сохраняет корректные singleton v1
+proofs, но не даёт ретроспективного acceptance: NO-GO после исчерпания общего
+лимита двух ревью остаётся terminal, без третьего ревью, сброса allowance или
+изменения старых runs и receipts.
 
 Если engine требует исправления, создайте новый snapshot и выполните из него
 `engine-rebind --previous-identity REPLACE_WITH_CURRENT_ENGINE_IDENTITY` вне delivery.

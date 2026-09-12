@@ -490,6 +490,7 @@ def git(
         capture_output=True,
         text=text,
         check=False,
+        **engine_runtime.child_process_kwargs(REPO_ROOT),
     )
     if check and result.returncode:
         stderr = result.stderr if text else result.stderr.decode(errors="replace")
@@ -924,18 +925,29 @@ def validate_evidence_plan_text(
             + ", ".join(sorted(_EVIDENCE_RISK_KINDS))
         )
     for entry in payload["conditions"]:
-        target = entry["method"]["target"]
-        path, separator, selector = target.partition("::")
-        if (
-            target.count("::") > 1
-            or not _SAFE_EVIDENCE_TARGET.fullmatch(path)
-            or any((part in {".", ".."} for part in path.split("/")))
-            or (separator and (not _SAFE_EVIDENCE_SELECTOR.fullmatch(selector)))
-        ):
-            raise DeliveryError(
-                f"evidence-plan method target is not an inert relative locator: {target}"
-            )
+        targets = [method["target"] for method in _evidence_methods(entry["method"])]
+        if len(targets) != len(set(targets)):
+            raise DeliveryError("duplicate evidence-plan method targets")
+        for target in targets:
+            path, separator, selector = target.partition("::")
+            if (
+                target.count("::") > 1
+                or not _SAFE_EVIDENCE_TARGET.fullmatch(path)
+                or any((part in {".", ".."} for part in path.split("/")))
+                or (separator and (not _SAFE_EVIDENCE_SELECTOR.fullmatch(selector)))
+            ):
+                raise DeliveryError(
+                    f"evidence-plan method target is not an inert relative locator: {target}"
+                )
     return payload
+
+
+def _evidence_methods(method: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Expand a validated plan without changing its retained inventory bytes."""
+    return [
+        {"kind": method["kind"], "target": target}
+        for target in [method["target"], *method.get("additional_targets", [])]
+    ]
 
 
 def validate_evidence_plan(card: Path, *, phase: str = "admission") -> dict[str, Any]:
@@ -1471,8 +1483,11 @@ def _validate_source_reference(
 
 
 def _validate_test_assertion_support(support: Mapping[str, Any], target: str) -> None:
-    """Require state assertions from the declared test source, never its log."""
-    if set(support) != {"source", "fragments"}:
+    """Authenticate source fragments; the reviewer assesses calls and assertions."""
+    if not isinstance(support, Mapping) or set(support) not in (
+        {"source", "fragments"},
+        {"source", "fragments", "invocation"},
+    ):
         raise DeliveryError("test assertion support is not closed")
     source, source_bytes = _reference_bytes(
         support["source"],
@@ -1485,17 +1500,45 @@ def _validate_test_assertion_support(support: Mapping[str, Any], target: str) ->
     if repo_relative(source) != declared_file:
         raise DeliveryError("test assertion support does not bind its declared source")
     fragments = support["fragments"]
-    if set(fragments) != {"before", "action", "after"}:
+    if not isinstance(fragments, Mapping) or set(fragments) != {
+        "before",
+        "action",
+        "after",
+    }:
         raise DeliveryError("test assertion support fragments are not closed")
-    reference = support["source"]
-    for name in ("before", "action", "after"):
-        fragment = fragments[name]
+    # Cache only within this decision, and compare every reference to the same
+    # authenticated bytes. No helper can replace the selected test's anchor.
+    sources = {declared_file: (support["source"], source_bytes)}
+    selected = dict(fragments)
+    if "invocation" in support:
+        selected["invocation"] = support["invocation"]
+    for name, fragment in selected.items():
         expected = {"path", "size", "sha256", "start", "end", "fragment_sha256"}
-        if (
-            not isinstance(fragment, Mapping)
-            or set(fragment) != expected
-            or {key: fragment[key] for key in ("path", "size", "sha256")} != reference
-        ):
+        if not isinstance(fragment, Mapping) or set(fragment) != expected:
+            raise DeliveryError(
+                "test assertion fragment is not from its declared source"
+            )
+        reference = _validate_reference_shape(
+            {key: fragment[key] for key in ("path", "size", "sha256")},
+            label="test assertion source",
+        )
+        path = reference["path"]
+        if name == "invocation":
+            if reference != support["source"]:
+                raise DeliveryError("test invocation does not bind its declared source")
+        elif path != declared_file and "invocation" not in support:
+            raise DeliveryError("external test assertion source requires invocation")
+        if path not in sources:
+            helper, helper_bytes = _reference_bytes(
+                reference,
+                root=REPO_ROOT,
+                label="test assertion source",
+                limit=2 * 1024 * 1024,
+            )
+            _validate_source_reference(reference, validated=(helper, helper_bytes))
+            sources[path] = (reference, helper_bytes)
+        checked_reference, checked_bytes = sources[path]
+        if reference != checked_reference:
             raise DeliveryError(
                 "test assertion fragment is not from its declared source"
             )
@@ -1505,11 +1548,11 @@ def _validate_test_assertion_support(support: Mapping[str, Any], target: str) ->
             or type(end) is not int
             or start < 0
             or (end <= start)
-            or (end > len(source_bytes))
+            or (end > len(checked_bytes))
         ):
             raise DeliveryError("test assertion fragment offsets are invalid")
         if (
-            hashlib.sha256(source_bytes[start:end]).hexdigest()
+            hashlib.sha256(checked_bytes[start:end]).hexdigest()
             != fragment["fragment_sha256"]
         ):
             raise DeliveryError("test assertion fragment identity failed")
@@ -1617,7 +1660,7 @@ def _validate_observed_proof(
     row = rows.get(proof["condition"])
     if (
         row is None
-        or proof["method"] != row["method"]
+        or proof["method"] not in _evidence_methods(row["method"])
         or proof["stage"] != row["stage"]
     ):
         raise DeliveryError("observed proof condition, method, or stage is foreign")
@@ -1650,7 +1693,7 @@ def _validate_observed_proof(
             or (item["attempt_id"] != proof["attempt_id"])
         ):
             raise DeliveryError("test proof has no current selected-node receipt")
-        target = str(row["method"]["target"])
+        target = str(proof["method"]["target"])
         identity = item["command_identity"]
         if item["command_identity"] != proof["command_identity"]:
             raise DeliveryError("test proof has no declared pytest selector")
@@ -2036,7 +2079,12 @@ def require_current_stage_proofs(
         return []
     if not set(stages) <= _PROOF_STAGES:
         raise DeliveryError("unknown observed-proof stage")
-    due = {row["identity"] for row in inventory["conditions"] if row["stage"] in stages}
+    due = {
+        (row["identity"], method["target"])
+        for row in inventory["conditions"]
+        if row["stage"] in stages
+        for method in _evidence_methods(row["method"])
+    }
     try:
         observations = _validated_index_records(
             _check_json(_proof_index_path(run_dir)),
@@ -2052,11 +2100,21 @@ def require_current_stage_proofs(
         return []
     except (OSError, ValueError) as exc:
         raise DeliveryError("observed proof index cannot be safely read") from exc
-    found = [proof["condition"] for proof in observations if proof["stage"] in stages]
+    found = [
+        (proof["condition"], proof["method"]["target"])
+        for proof in observations
+        if proof["stage"] in stages
+    ]
     missing = sorted(due - set(found))
     foreign = sorted(set(found) - due)
     duplicates = sorted(
-        {condition for condition in found if found.count(condition) > 1}
+        {
+            (proof["condition"], proof["method"]["target"])
+            for proof in observations
+            if proof["stage"] in stages
+            and proof["kind"] != "test"
+            and found.count((proof["condition"], proof["method"]["target"])) > 1
+        }
     )
     if missing or duplicates or foreign:
         raise DeliveryError(
@@ -2335,6 +2393,27 @@ def payload_fingerprint(paths: Sequence[str] | None = None) -> dict[str, str]:
 
 def execution_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
+    selected = engine_runtime.binding(REPO_ROOT)
+    if engine_runtime.is_release(selected):
+        # Product verification imports dev code and uses the dev environment.
+        # Nested chrl still selects the accepted executor through its launcher.
+        env["PYTHONPATH"] = str(REPO_ROOT)
+        env.pop("PYTHONHOME", None)
+        env.pop("VIRTUAL_ENV", None)
+        dev_venv = REPO_ROOT / ".venv"
+        executor = Path(selected["engine_root"])
+        # The absolute project bin/codex launcher resolves the operator's codex
+        # dispatcher via PATH. Prepending project/bin would select itself.
+        excluded = {str(executor / ".venv/bin"), str(dev_venv / "bin")}
+        paths = [
+            part
+            for part in env.get("PATH", "/usr/bin:/bin").split(os.pathsep)
+            if part not in excluded
+        ]
+        if (dev_venv / "bin/python").is_file():
+            env["VIRTUAL_ENV"] = str(dev_venv)
+            paths.insert(0, str(dev_venv / "bin"))
+        env["PATH"] = os.pathsep.join(paths)
     if extra:
         env.update(extra)
     return env
@@ -2403,11 +2482,28 @@ def install_local_hooks() -> dict[str, str]:
     return {"status": "installed", "core.hooksPath": configured}
 
 
+def execution_source_info() -> dict[str, Any]:
+    value = engine_runtime.binding(REPO_ROOT)
+    if not engine_runtime.is_release(value):
+        return source_binding.source_info(REPO_ROOT)
+    receipt = value["release_receipt"]
+    return {
+        "mode": "release-checkout",
+        "project_root": str(REPO_ROOT),
+        "source_root": value["engine_root"],
+        "version": receipt["release"]["version"],
+        "tag": receipt["release"]["tag"],
+        "revision": receipt["release"]["commit"],
+        "sha256": receipt["distribution"]["payload_sha256"],
+        "engine_identity": value["engine_identity"],
+    }
+
+
 def wiring_report() -> dict[str, Any]:
     """Check local installation without running agents, delivery or runtime tools."""
     errors: list[str] = []
     for relative in ("bin/chrl", "bin/chrl-run", "bin/openspec"):
-        path = REPO_ROOT / relative
+        path = engine_runtime.runtime_path(REPO_ROOT, REPO_ROOT / relative)
         try:
             trusted = source_binding.trusted_path(REPO_ROOT, path)
             if (
@@ -2419,14 +2515,14 @@ def wiring_report() -> dict[str, Any]:
         except DeliveryError as exc:
             errors.append(str(exc))
     for role in ("chrl-native-deliver", "chrl-native-review"):
-        path = REPO_ROOT / "tools/changerail/skills" / role / "SKILL.md"
+        path = engine_runtime.runtime_path(REPO_ROOT, REPO_ROOT / "tools/changerail/skills" / role / "SKILL.md")
         if not path.is_file():
             errors.append(f"missing local skill: {role}")
     try:
         errors.extend(
             f"external workflow link: {name}" for name in external_changerail_symlinks()
         )
-        source = source_binding.source_info(REPO_ROOT)
+        source = execution_source_info()
     except (DeliveryError, OSError, ValueError) as exc:
         errors.append(str(exc))
         source = {"mode": "invalid"}
@@ -2435,7 +2531,7 @@ def wiring_report() -> dict[str, Any]:
         checked_frozen_records()
         import jsonschema
 
-        for path in (REPO_ROOT / "tools/changerail/schemas").glob("*.json"):
+        for path in engine_runtime.runtime_path(REPO_ROOT, REPO_ROOT / "tools/changerail/schemas/card-proof.schema.json").parent.glob("*.json"):
             jsonschema.Draft202012Validator.check_schema(load_json(path))
         for role in ("implementation", "review"):
             model_route(profile(), role)
@@ -2781,6 +2877,7 @@ def doctor(
             text=True,
             check=False,
             timeout=15,
+            **engine_runtime.child_process_kwargs(REPO_ROOT),
         )
         add("remote", remote_check.returncode == 0, f"{remote}/{remote_branch}")
     add(
@@ -3173,7 +3270,7 @@ def is_review_protocol_command(command: str) -> bool:
     if (
         len(tokens) == 3
         and tokens[0] in {"bash", "/bin/bash", "/usr/bin/bash"}
-        and (tokens[1] == "-lc")
+        and (tokens[1] in {"-lc", "-c"})
     ):
         try:
             tokens = shlex.split(tokens[2])
@@ -3197,7 +3294,7 @@ def is_delivery_protocol_command(command: str) -> bool:
     if (
         len(tokens) == 3
         and tokens[0] in {"bash", "/bin/bash", "/usr/bin/bash"}
-        and (tokens[1] == "-lc")
+        and (tokens[1] in {"-lc", "-c"})
     ):
         try:
             tokens = shlex.split(tokens[2])
@@ -3221,7 +3318,7 @@ def is_review_wrapper_command(command: str) -> bool:
     if (
         len(tokens) == 3
         and tokens[0] in {"bash", "/bin/bash", "/usr/bin/bash"}
-        and (tokens[1] == "-lc")
+        and (tokens[1] in {"-lc", "-c"})
     ):
         try:
             tokens = shlex.split(tokens[2])
@@ -3244,7 +3341,7 @@ def is_ff_protocol_command(command: str) -> bool:
     if (
         len(tokens) == 3
         and tokens[0] in {"bash", "/bin/bash", "/usr/bin/bash"}
-        and (tokens[1] == "-lc")
+        and (tokens[1] in {"-lc", "-c"})
     ):
         try:
             tokens = shlex.split(tokens[2])
@@ -3470,6 +3567,7 @@ def launch_codex(
             text=True,
             bufsize=1,
             start_new_session=True,
+            **engine_runtime.child_process_kwargs(REPO_ROOT),
         )
     except OSError as exc:
         metadata.update(
@@ -4146,6 +4244,7 @@ def _run_evidence_locked(
             env=execution_env(),
             capture_output=True,
             check=False,
+            **engine_runtime.child_process_kwargs(REPO_ROOT),
         )
         output, code, outcome = (
             result.stdout + result.stderr,
@@ -4499,6 +4598,7 @@ def _write_review_payload_diff(
             capture_output=True,
             text=True,
             check=False,
+            **engine_runtime.child_process_kwargs(REPO_ROOT),
         )
         if result.returncode not in (0, 1):
             raise DeliveryError(result.stderr.strip() or "cannot build untracked diff")
@@ -5193,18 +5293,24 @@ def run_review(card_value: str) -> int:
         return 0 if verdict["result"] == "go" else 3
 
 
+def verification_command_identity(command: str) -> dict[str, Any]:
+    """Use the same shell argv for execution and current configured receipt reuse."""
+    from scripts.changerail.adapters.pytest import shell_command_identity
+
+    return shell_command_identity(
+        command,
+        login=not engine_runtime.is_release(engine_runtime.binding(REPO_ROOT)),
+    )
+
+
 def run_shell_verification(
     command: str, log: Path, *, proof: tuple[Path, str] | None = None
 ) -> dict[str, Any]:
     from jsonschema.exceptions import ValidationError
 
+    identity = verification_command_identity(command)
     if proof is not None:
         run_dir, lane = proof
-        identity = {
-            "kind": "shell",
-            "argv": ["bash", "-lc", command],
-            "shell_text": command,
-        }
         path, item = start_check_result(
             run_dir, lane, log.stem, identity, destination=log.parent
         )
@@ -5212,11 +5318,12 @@ def run_shell_verification(
     output, code, outcome = (b"", None, "unknown")
     try:
         result = subprocess.run(
-            ["bash", "-lc", command],
+            identity["argv"],
             cwd=REPO_ROOT,
             env=execution_env(),
             capture_output=True,
             check=False,
+            **engine_runtime.child_process_kwargs(REPO_ROOT),
         )
         output, code, outcome = (
             result.stdout + result.stderr,
@@ -5710,11 +5817,11 @@ class _VerifiedCommandSet(NamedTuple):
 
 def _validated_final_test_proof_input(
     raw: Mapping[str, Any], *, run_dir: Path, inventory: Mapping[str, Any]
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[tuple[str, str], dict[str, Any]]:
     """Validate one inert, current final assertion draft."""
     owner = _check_owner(run_dir)
     rows = {row["identity"]: row for row in inventory["conditions"]}
-    if set(raw) != {
+    if set(raw) - {"method"} != {
         "schema",
         "run",
         "payload",
@@ -5735,27 +5842,29 @@ def _validated_final_test_proof_input(
         or (row["method"]["kind"] != "test")
     ):
         raise DeliveryError("final test proof input is stale or foreign")
-    _validate_test_assertion_support(
-        raw["assertion_support"], str(row["method"]["target"])
-    )
-    return (condition, dict(raw["assertion_support"]))
+    methods = _evidence_methods(row["method"])
+    method = raw.get("method", methods[0])
+    if method not in methods:
+        raise DeliveryError("final test proof input method is foreign")
+    _validate_test_assertion_support(raw["assertion_support"], method["target"])
+    return ((condition, method["target"]), dict(raw["assertion_support"]))
 
 
 def _final_test_proof_inputs(
     card: Path, run_dir: Path, inventory: Mapping[str, Any]
-) -> dict[str, dict[str, Any]]:
+) -> dict[tuple[str, str], dict[str, Any]]:
     """Read current inert drafts while retaining stale history as inert history."""
     root = run_dir / "final-test-proof-inputs"
     if not root.exists():
         return {}
     if root.is_symlink() or not root.is_dir():
         raise DeliveryError("final test proof input root is unsafe")
-    result: dict[str, dict[str, Any]] = {}
+    result: dict[tuple[str, str], dict[str, Any]] = {}
     for path in sorted(root.glob("*.json")):
         raw = _check_json(path)
         if (
             not isinstance(raw, dict)
-            or set(raw)
+            or set(raw) - {"method"}
             != {
                 "schema",
                 "run",
@@ -5772,12 +5881,12 @@ def _final_test_proof_inputs(
             or raw.get("inventory_digest") != inventory["digest"]
         ):
             continue
-        condition, support = _validated_final_test_proof_input(
+        key, support = _validated_final_test_proof_input(
             raw, run_dir=run_dir, inventory=inventory
         )
-        if condition in result:
+        if key in result:
             raise DeliveryError("final test proof input is duplicate")
-        result[condition] = support
+        result[key] = support
     return result
 
 
@@ -5801,7 +5910,7 @@ def retain_final_test_proof_input(run_dir: Path, artifact: Path) -> Path:
         inventory = _current_proof_inventory(card, run_dir)
         if inventory is None:
             raise DeliveryError("legacy run has no final proof-input authority")
-        condition, _support = _validated_final_test_proof_input(
+        _validated_final_test_proof_input(
             raw, run_dir=run_dir, inventory=inventory
         )
         directory_fd = _safe_proof_directory(
@@ -5828,7 +5937,7 @@ def retain_final_test_proof_input(run_dir: Path, artifact: Path) -> Path:
 
 def _final_test_proof_supplies(
     run_dir: Path, inventory: Mapping[str, Any], existing: Sequence[Mapping[str, Any]]
-) -> dict[str, Mapping[str, Any]]:
+) -> dict[tuple[str, str], Mapping[str, Any]]:
     """Return current completed supplies and refuse lost accepted history."""
     root = run_dir / "final-test-proof-supplies"
     if not root.exists():
@@ -5839,7 +5948,7 @@ def _final_test_proof_supplies(
     present = {
         (proof["condition"], proof["observation_id"]): proof for proof in existing
     }
-    result: dict[str, Mapping[str, Any]] = {}
+    result: dict[tuple[str, str], Mapping[str, Any]] = {}
     for path in sorted(root.glob("*.json")):
         marker = _check_json(path)
         if set(marker) != {
@@ -5861,15 +5970,18 @@ def _final_test_proof_supplies(
             continue
         condition = marker.get("condition")
         observation_id = marker.get("observation_id")
-        if (
-            not isinstance(condition, str)
-            or not isinstance(observation_id, str)
-            or condition in result
-        ):
+        if not isinstance(condition, str) or not isinstance(observation_id, str):
             raise DeliveryError("final test proof supply is malformed")
         proof = present.get((condition, observation_id))
-        if proof is None or proof.get("stage") != "final":
+        if (
+            proof is None
+            or proof.get("stage") != "final"
+            or proof.get("kind") != "test"
+        ):
             raise DeliveryError("accepted final test proof is missing or corrupt")
+        key = (condition, proof["method"]["target"])
+        if key in result:
+            raise DeliveryError("final test proof supply is malformed")
         reference = marker.get("record")
         try:
             record_path, record_bytes = _reference_bytes(
@@ -5886,9 +5998,10 @@ def _final_test_proof_supplies(
             record_path.parent != run_dir / "proof-records"
             or record.get("condition") != condition
             or record.get("observation_id") != observation_id
+            or record != proof
         ):
             raise DeliveryError("accepted final test proof is missing or corrupt")
-        result[condition] = marker
+        result[key] = marker
     return result
 
 
@@ -5923,90 +6036,96 @@ def _supply_final_test_proofs(
     except (OSError, ValueError) as exc:
         raise DeliveryError("observed proof index cannot be safely read") from exc
     _final_test_proof_supplies(run_dir, inventory, existing)
-    covered = {proof["condition"] for proof in existing if proof["stage"] == "final"}
+    covered = {
+        (proof["condition"], proof["method"]["target"])
+        for proof in existing
+        if proof["stage"] == "final"
+    }
     inputs = _final_test_proof_inputs(card, run_dir, inventory)
     receipts = list(verification.receipts)
     for row in inventory["conditions"]:
-        if (
-            row["stage"] != "final"
-            or row["method"]["kind"] != "test"
-            or row["identity"] in covered
-        ):
+        if row["stage"] != "final" or row["method"]["kind"] != "test":
             continue
-        assertion_support = inputs.get(row["identity"])
-        if assertion_support is None:
-            continue
-        target = str(row["method"]["target"])
-        for receipt_index, (item, data, record_data) in enumerate(receipts):
-            nodes = receipt_nodes(REPO_ROOT, profile(), item, data, target)
-            if not nodes:
+        for method in _evidence_methods(row["method"]):
+            target = method["target"]
+            key = (row["identity"], target)
+            assertion_support = inputs.get(key)
+            if key in covered or assertion_support is None:
                 continue
-            entry = verification.payload["commands"][receipt_index]
-            record_path = _safe_reference_path(
-                entry["record"], root=run_dir, label="final receipt"
-            )
-            proof = {
-                "schema": "changerail.card-proof.v1",
-                "run": _check_owner(run_dir),
-                "inventory_digest": inventory["digest"],
-                "payload": payload_fingerprint(),
-                "condition": row["identity"],
-                "method": row["method"],
-                "stage": "final",
-                "observation_id": "outer-final-"
-                + hashlib.sha256(row["identity"].encode()).hexdigest()[:16],
-                "recorder_role": "outer",
-                "kind": "test",
-                "outcome": "pass",
-                "artifact": {
-                    "path": repo_relative(record_path),
-                    "size": len(record_data),
-                    "sha256": hashlib.sha256(record_data).hexdigest(),
-                },
-                "fragments": assertion_support["fragments"],
-                "assertion_support": assertion_support,
-                "lane": "final",
-                "attempt_id": item["attempt_id"],
-                "command_identity": item["command_identity"],
-                "selected_nodes": nodes,
-            }
-            record_path = _record_observed_proof_with_ownership(
-                run_dir, proof, actual_role="outer", ownership=ownership
-            )
-            marker = {
-                "schema": "changerail.final-test-proof-supply.v1",
-                "run": _check_owner(run_dir),
-                "payload": payload_fingerprint(),
-                "inventory_digest": inventory["digest"],
-                "condition": row["identity"],
-                "observation_id": proof["observation_id"],
-                "record": _record_index_reference(record_path),
-            }
-            directory_fd = _safe_proof_directory(
-                run_dir, "final-test-proof-supplies", create=True
-            )
-            try:
-                marker_name = (
-                    hashlib.sha256(
-                        (
-                            row["identity"]
-                            + "\x00"
-                            + inventory["digest"]
-                            + "\x00"
-                            + payload_fingerprint()["payload_fingerprint"]
-                        ).encode()
-                    ).hexdigest()
-                    + ".json"
+            # Keep singleton identities stable, including old supply markers.
+            supply_identity = row["identity"]
+            if target != row["method"]["target"]:
+                supply_identity += "\x00" + target
+            for receipt_index, (item, data, record_data) in enumerate(receipts):
+                nodes = receipt_nodes(REPO_ROOT, profile(), item, data, target)
+                if not nodes:
+                    continue
+                entry = verification.payload["commands"][receipt_index]
+                record_path = _safe_reference_path(
+                    entry["record"], root=run_dir, label="final receipt"
                 )
-                _write_json_at(directory_fd, marker_name, marker, replace=False)
-            except FileExistsError as exc:
-                raise DeliveryError(
-                    "final test proof supply history conflicts"
-                ) from exc
-            finally:
-                os.close(directory_fd)
-            covered.add(row["identity"])
-            break
+                proof = {
+                    "schema": "changerail.card-proof.v1",
+                    "run": _check_owner(run_dir),
+                    "inventory_digest": inventory["digest"],
+                    "payload": payload_fingerprint(),
+                    "condition": row["identity"],
+                    "method": method,
+                    "stage": "final",
+                    "observation_id": "outer-final-"
+                    + hashlib.sha256(supply_identity.encode()).hexdigest()[:16],
+                    "recorder_role": "outer",
+                    "kind": "test",
+                    "outcome": "pass",
+                    "artifact": {
+                        "path": repo_relative(record_path),
+                        "size": len(record_data),
+                        "sha256": hashlib.sha256(record_data).hexdigest(),
+                    },
+                    "fragments": assertion_support["fragments"],
+                    "assertion_support": assertion_support,
+                    "lane": "final",
+                    "attempt_id": item["attempt_id"],
+                    "command_identity": item["command_identity"],
+                    "selected_nodes": nodes,
+                }
+                record_path = _record_observed_proof_with_ownership(
+                    run_dir, proof, actual_role="outer", ownership=ownership
+                )
+                marker = {
+                    "schema": "changerail.final-test-proof-supply.v1",
+                    "run": _check_owner(run_dir),
+                    "payload": payload_fingerprint(),
+                    "inventory_digest": inventory["digest"],
+                    "condition": row["identity"],
+                    "observation_id": proof["observation_id"],
+                    "record": _record_index_reference(record_path),
+                }
+                directory_fd = _safe_proof_directory(
+                    run_dir, "final-test-proof-supplies", create=True
+                )
+                try:
+                    marker_name = (
+                        hashlib.sha256(
+                            (
+                                supply_identity
+                                + "\x00"
+                                + inventory["digest"]
+                                + "\x00"
+                                + payload_fingerprint()["payload_fingerprint"]
+                            ).encode()
+                        ).hexdigest()
+                        + ".json"
+                    )
+                    _write_json_at(directory_fd, marker_name, marker, replace=False)
+                except FileExistsError as exc:
+                    raise DeliveryError(
+                        "final test proof supply history conflicts"
+                    ) from exc
+                finally:
+                    os.close(directory_fd)
+                covered.add(key)
+                break
 
 
 def _verified_command_set(path, run_dir, card, fingerprint, commands, lane):
@@ -6064,11 +6183,7 @@ def _verified_command_set(path, run_dir, card, fingerprint, commands, lane):
                 "size": len(record_data),
                 "sha256": hashlib.sha256(record_data).hexdigest(),
             }
-            identity = {
-                "kind": "shell",
-                "argv": ["bash", "-lc", command],
-                "shell_text": command,
-            }
+            identity = verification_command_identity(command)
             item, data, current = read_check_result(
                 reference,
                 run_dir,
@@ -7662,6 +7777,15 @@ def delivery_lock(*, restoration_reconcile: bool = False):
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise DeliveryError("another delivery runner holds the checkout") from exc
+        marker = _SOURCE_REPO_ROOT.parent / f".{_SOURCE_REPO_ROOT.name}.release-maintenance.json"
+        if os.path.lexists(marker):
+            raise DeliveryError("executor is fenced by release maintenance")
+        from scripts.changerail import executor_binding
+
+        try:
+            executor_binding.ensure_no_pending(REPO_ROOT)
+        except executor_binding.ExecutorBindingError as exc:
+            raise DeliveryError(str(exc)) from exc
         if not restoration_reconcile:
             from scripts.changerail import plan_restoration
 
@@ -8069,6 +8193,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        from scripts.changerail import executor_binding
+
+        try:
+            executor_binding.ensure_no_pending(REPO_ROOT)
+        except executor_binding.ExecutorBindingError as exc:
+            raise DeliveryError(str(exc)) from exc
+        if args.command.startswith(("self-host-recovery-", "runtime-repair-")) and engine_runtime.is_release(engine_runtime.binding(REPO_ROOT)):
+            raise DeliveryError(
+                "snapshot-only recovery is unsupported for a release executor; "
+                "binding migration selects future runs and grants no old-run execution rights"
+            )
         if engine_runtime.binding(REPO_ROOT) is not None and os.environ.get(
             "CHRL_RUN_DIR"
         ):
@@ -8201,7 +8336,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             observation = status(runner_module(), args.run_dir)
             try:
-                observation["source"] = source_binding.source_info(REPO_ROOT)
+                observation["source"] = execution_source_info()
             except (DeliveryError, OSError, ValueError) as exc:
                 observation["source"] = {"mode": "invalid", "error": str(exc)}
             print(json.dumps(observation, ensure_ascii=False, indent=2))

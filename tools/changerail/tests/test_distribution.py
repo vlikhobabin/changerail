@@ -79,6 +79,10 @@ def test_runtime_consumer_installs_no_changerail_development_suite(consumer, tmp
     dist.install(consumer, archive)
     assert (consumer / "scripts/changerail/local_delivery.py").is_file()
     assert (consumer / "tools/openspec/check-install.mjs").is_file()
+    for module in ("executor_binding", "release_executor", "release_update"):
+        assert (consumer / f"scripts/changerail/{module}.py").is_file()
+    assert not (consumer / "tools/openspec/.gitignore").exists()
+    assert not (consumer / "tools/openspec/.gitignore").is_symlink()
     assert not (consumer / "tools/changerail/tests").exists()
     assert not (consumer / "tools/openspec/test-wrapper.mjs").exists()
     assert not (consumer / "bin/test-changerail").exists()

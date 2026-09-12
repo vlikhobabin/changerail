@@ -7,6 +7,20 @@
 команды проверки реальными командами продукта и задайте свой Codex launcher.
 OpenSpec config и board принадлежат проекту и создаются явно до первой доставки.
 
+## Отдельный release executor
+
+Для self-host разработки можно выбрать dev-проект и отдельный принятый release
+checkout вместо source-link. Миграция через `chrl-dist executor-bind` сохраняет
+историю и создаёт ignored `.changerail/chrl` и `.changerail/openspec`, вызывающие
+executor с явным `--project`; ссылки в dev/bin и scripts для этого не нужны.
+Source-link и executor binding одного проекта нельзя включать одновременно.
+Профили, credentials и пользовательские defaults остаются у владельца проекта.
+
+Следующие выпуски обновляют в executor через отдельный maintenance coordinator;
+новые runs выбирают принятое состояние по тому же пути. Это не переподключает
+других shared-source consumers и не даёт старым frozen runs право на resume.
+Подробности — [runbook двух каталогов](working-checkout.md#executor-из-релиза-два-каталога).
+
 ## Исходник, выпуск и engine
 
 Dev-checkout хранит разрабатываемые исходники ChangeRail. Рабочий checkout может
@@ -18,7 +32,7 @@ consumer выбирает один из этих каталогов собств
 Режим `--development` добавляет ссылки на тестовые инструменты; он не закрепляет
 Git revision и не создаёт отдельную копию runtime.
 
-Для self-host доставки нужен четвёртый отдельный каталог — immutable engine
+В прежнем snapshot v1 режиме self-host использует отдельный immutable engine
 snapshot. Его `.changerail/engine-binding.json` принадлежит self-host проекту,
 а inventory и `engine_identity` подтверждают точные bytes и режимы snapshot.
 Изменяемый dev-checkout служит продуктом доставки, snapshot — её исполнителем.

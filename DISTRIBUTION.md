@@ -3,15 +3,15 @@
 Помимо runtime-копии поддержано подключение общего рабочего checkout командами
 `attach-inventory`, `attach`, `detach`. Режим `--development` открывает тесты
 через ссылки. Контракт и восстановление описаны в
-[shared-source.md](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/shared-source.md).
+[shared-source.md](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/shared-source.md).
 Copy-install поверх подключённых ссылок запрещён.
 Обновление самого рабочего Git checkout описано в
-[отдельном runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/working-checkout.md);
+[отдельном runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/working-checkout.md);
 оно сохраняет локальный board и историю отдельно от исходника выпуска.
 Self-host recovery и engine binding описаны в
-[self-host runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/self-host-recovery.md).
+[self-host runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/self-host-recovery.md).
 
-Этот комплект содержит общий native runtime. Версия `2.0.0-rc.4`
+Этот комплект содержит общий native runtime. Версия `2.0.0-rc.5`
 обозначает предварительную версию для испытаний перед стабильным выпуском.
 Поле `provenance.upstream_commit` в `distribution.json` обозначает историческую
 базу исходника, а не Git-коммит этого выпуска. Точные release commit и tree
@@ -22,8 +22,8 @@ Self-host recovery и engine binding описаны в
 Ядро, адаптеры OpenSpec/Codex/pytest, схемы, навыки и выбранные README вместе
 с этим документом входят в один архив. Каталог `docs/` и корневой README
 остаются в исходном репозитории: для первого запуска используйте
-[quickstart](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/quickstart.md),
-для эксплуатации — [руководство оператора](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/operations.md).
+[quickstart](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/quickstart.md),
+для эксплуатации — [руководство оператора](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/operations.md).
 Тесты ChangeRail/OpenSpec, тестовые launchers и фикстуры также остаются
 в исходном репозитории ChangeRail. Runtime-архив их не устанавливает;
 разработчик может открыть их через `attach --development`.
@@ -31,6 +31,58 @@ Self-host recovery и engine binding описаны в
 настройки Codex, credentials, runtime evidence и `node_modules` в архив не входят.
 Установщик не редактирует профиль проекта и не запускает модель, тесты продукта,
 bootstrap зависимостей, commit или push.
+
+## Отдельный release executor
+
+`chrl-dist release-update` обслуживает полный Git checkout релиза, а
+`chrl-dist executor-bind` выбирает executor для будущих запусков проекта.
+Coordinator запускают из отдельной операторской оболочки вне `chrl`/Codex session:
+обычный runtime держит shared lease до завершения дочерних процессов, updater
+требует exclusive lease. Вложенный update отклоняется до изменения checkout.
+Для `apply`, `reconcile` и `provision-lease` coordinator должен находиться вне
+обновляемого дерева; CLI проверяет эту границу до mutation. Help и prepare можно
+запускать из самого accepted executor: `bin/chrl-dist` использует Python `-B`,
+а прямой запуск `distribution.py` отключает запись bytecode до импорта helpers.
+Старые команды `build`, `verify`, `install`, `attach` и snapshot CLI сохранены.
+Shared-source attach и executor binding одного проекта несовместимы.
+
+```sh
+chrl_coordinator=/srv/tools/changerail-dev
+"$chrl_coordinator/bin/chrl-dist" release-update --help
+"$chrl_coordinator/bin/chrl-dist" executor-bind --help
+"$chrl_coordinator/bin/chrl-dist" executor-bind prepare \
+  --project /srv/projects/example-dev --executor /srv/tools/changerail-release --dry-run
+```
+
+Для существующего binding обязателен `--previous-identity` с точной проверенной
+identity текущего executor. Отсутствующий старый snapshot не подтверждается одной
+строкой identity. Prepare сохраняет proposal, apply — intent/applied receipts;
+после прерывания используют `executor-bind reconcile PROPOSAL.json`.
+Поддержаны preview `prepare --dry-run` и `apply/reconcile --dry-run`.
+Generated `.changerail/chrl` и `.changerail/openspec` должны быть ignored/untracked;
+неизвестный локальный файл или tracked launcher не заменяется. Git ignore задаёт
+оператор, команда не меняет `.gitignore`, пользовательские defaults и credentials.
+
+Для updater доступны `prepare --root --archive --provenance --tag --proposal --node`
+(первое принятие дополнительно `--bootstrap`), `apply PROPOSAL_DIRECTORY`,
+`provision-lease PROPOSAL_DIRECTORY`, `reconcile PROPOSAL_DIRECTORY`.
+Preview `release-update prepare --dry-run` готовит проверяемый proposal во временном
+закрытом каталоге рядом с выбранным proposal и удаляет его; выбранный proposal
+и исходники не записываются. Родитель proposal должен уже существовать вне target
+на той же файловой системе: staging публикуется атомарным rename. Preview проверяет
+тот же путь и не использует системный `/tmp` для staging; скачанные assets могут
+лежать на другой файловой системе.
+Обычный prepare сохраняет отдельный durable proposal. Принятие связывает downloaded
+archive/provenance с выбранным Git tag, commit, tree и фактическими зависимостями;
+источник доверия к скачанному выпуску выбирает оператор.
+
+Обновление не скачивает зависимости, не запускает модель или набор тестов.
+При смене dependency declarations apply сохраняет maintenance fence и требует
+отдельного provisioning под lease, затем reconcile. Protected локальные настройки,
+board и история сохраняются при смене Git source. Новые запуски выбирают актуальный
+принятый релиз по стабильному пути; frozen identity старых runs не меняется.
+Первичная миграция и порядок provisioning описаны в
+[рабочем runbook](docs/working-checkout.md#executor-из-релиза-два-каталога).
 
 ## Сборка и проверка
 
@@ -81,7 +133,7 @@ Lock `.changerail/distribution-lock.json` содержит версию, про�
 `rolled_back`; поддерживаемой команды автоматического восстановления или очистки
 попытки нет. Не удаляйте audit и не редактируйте lock ради повтора. Сначала
 сохраните backup и фактическое состояние, затем выполните разбор по
-[аварийному runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/operations.md#незавершённая-установка-или-подключение).
+[аварийному runbook](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/operations.md#незавершённая-установка-или-подключение).
 
 Любой неучтённый сохранённый run блокирует замену кода; совпадения только
 `execution_contract` недостаточно для совместимости frozen process. Точное
@@ -110,7 +162,7 @@ python3 "$chrl_source/distribution.py" install /tmp/changerail-next.tar.gz \
 Разрешение истории не обходит delivery lock и не разрешает продолжение старых runs.
 
 Для stopped native run с точным drift принятого Next есть отдельный
-[plan restoration](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.4/docs/operations.md#восстановление-принятого-next):
+[plan restoration](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/operations.md#восстановление-принятого-next):
 prepare связывает lineage, прежний проверенный payload и точный target archive,
 apply выполняет установку под тем же разрешением и восстанавливает Next.
 Только этот ограниченный переход даёт право продолжить поддержанную installed

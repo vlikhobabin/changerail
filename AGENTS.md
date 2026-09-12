@@ -37,10 +37,16 @@ run используйте документированный repair receipt, н
 Успешный `chrl evidence` ещё не означает наличие observed proof. До проверок
 завершите правки Result/Log, затем получите актуальные receipts и запишите через
 `chrl proof record` доказательства всех назначенных implementation conditions.
-Для test proof используйте `pytest -v` с осмысленными выбранными nodes: нужны
-строки PASSED и реальные assertion fragments из закреплённого Verify-файла.
-Формат — `tools/changerail/schemas/card-proof.schema.json`. Если нужных assertions
-нет, исправьте покрытие тестами в принятом scope; не подменяйте их посторонними.
+Для test proof используйте актуальные receipts `pytest -v` с выбранными PASSED
+nodes из принятого Verify. Покройте основной `method.target` и все объявленные
+`additional_targets` отдельными singleton proofs; одно реальное исполнение может
+поддерживать несколько релевантных условий через отдельные condition-bound records.
+Не дублируйте тесты ради номера условия. Assertions могут находиться во внешнем
+вызываемом helper: `assertion_support.source` закрепляет входной файл теста, `invocation` —
+его вызов, внешние fragments — точные исходные bytes. Reviewer проверяет путь
+вызова и смысл assertions; валидатор проверяет identity, freshness и selection.
+Формат — `tools/changerail/schemas/card-proof.schema.json`. Недостающее покрытие
+добавляйте в принятом scope; не заменяйте test proof на inspection ради обхода.
 После записи proofs не меняйте payload до `chrl handoff`. Отсутствующие proofs
 или исправимая ошибка их формата требуют завершить этот шаг и повторить handoff,
 а не объявлять delivery завершённой или автоматически прекращать работу.
