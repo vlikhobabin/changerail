@@ -2630,7 +2630,10 @@ def test_metrics_separate_agent_and_deterministic_commands(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
-    run_dir = tmp_path / "run-1"
+    # Native metrics also report the review allowance, which is derived from the
+    # retained runs under RUNTIME_ROOT; isolate it with the rest of the fixture.
+    monkeypatch.setattr(delivery, "RUNTIME_ROOT", tmp_path / ".runtime/changerail")
+    run_dir = tmp_path / ".runtime/changerail/runs/run-1"
     card = tmp_path / f"{FIXTURE_BOARD}/2.todo/test.md"
     card.parent.mkdir(parents=True)
     card.write_text("legacy metric fixture")
@@ -6406,21 +6409,33 @@ def test_configured_pre_review_check_missing_owner_and_repeated_identity(
 def test_configured_pre_review_check_real_interruption(tmp_path, monkeypatch):
     import sys
 
+    # Interrupt only after the measured command really started. A fixed timer
+    # raced process startup under load and could signal before any record exists.
+    started = tmp_path / "command-started"
+    sleeper = tmp_path / "marker-sleep.sh"
+    sleeper.write_text(f"#!/bin/sh\ntouch {started}\nsleep 30\n", encoding="utf-8")
+    sleeper.chmod(0o755)
     root, card, run, commands = _configured_pre_review_check_fixture(
-        tmp_path, monkeypatch, ["sleep 0.4", "true"]
+        tmp_path, monkeypatch, [str(sleeper), "true"]
     )
     code = (
         _delivery_child_bootstrap(root, run)
-        + "import signal, threading; "
-        f'd.profile=lambda: {{"verification": {{"pre_review_commands": {commands!r}, "final_commands": ["true"]}}}}; '
-        "timer=threading.Timer(0.15, lambda: os.kill(os.getpid(), signal.SIGINT)); timer.start(); "
-        f"result=d._run_full_floor(Path({str(card)!r}), commands={commands!r}, "
+        + "import signal, threading, pathlib, time\n"
+        f"marker=pathlib.Path({str(started)!r})\n"
+        "def interrupt():\n"
+        "    deadline=time.monotonic()+10\n"
+        "    while not marker.exists() and time.monotonic()<deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    os.kill(os.getpid(), signal.SIGINT)\n"
+        "timer=threading.Thread(target=interrupt); timer.start()\n"
+        + f'd.profile=lambda: {{"verification": {{"pre_review_commands": {commands!r}, "final_commands": ["true"]}}}}; '
+        + f"result=d._run_full_floor(Path({str(card)!r}), commands={commands!r}, "
         'root_name="preverification", result_name="preverification.json", '
         'schema="changerail.pre-review-verification.v1", event_stage="preverification", proof_lane="pre_review"); '
         'timer.join(); sys.exit(0 if result["ok"] else 1)'
     )
     result = subprocess.run(
-        [sys.executable, "-c", code], cwd=root, capture_output=True, timeout=10
+        [sys.executable, "-c", code], cwd=root, capture_output=True, timeout=30
     )
     assert result.returncode == 1
     index = delivery.load_json(run / "preverification.json")
@@ -7123,15 +7138,28 @@ def test_focused_check_real_interruption(tmp_path, monkeypatch):
     import sys
 
     root, card, run = _focused_check_fixture(tmp_path, monkeypatch)
+    # Interrupt only after the measured command really started. A fixed timer
+    # raced process startup under load and could signal before any record exists.
+    started = tmp_path / "command-started"
+    command = (
+        "import pathlib, sys, time; "
+        "pathlib.Path(sys.argv[1]).write_text('x'); time.sleep(30)"
+    )
     code = (
         _delivery_child_bootstrap(root, run)
-        + "import signal, threading; "
-        "timer=threading.Timer(0.15, lambda: os.kill(os.getpid(), signal.SIGINT)); timer.start(); "
-        'result=d.run_evidence("interrupt", [sys.executable,"-c","import time; time.sleep(0.2)"]); '
+        + "import signal, threading, pathlib, time\n"
+        f"marker=pathlib.Path({str(started)!r})\n"
+        "def interrupt():\n"
+        "    deadline=time.monotonic()+10\n"
+        "    while not marker.exists() and time.monotonic()<deadline:\n"
+        "        time.sleep(0.01)\n"
+        "    os.kill(os.getpid(), signal.SIGINT)\n"
+        "timer=threading.Thread(target=interrupt); timer.start()\n"
+        f"result=d.run_evidence('interrupt', [sys.executable,'-c',{command!r},str(marker)])\n"
         "timer.join(); sys.exit(result)"
     )
     result = subprocess.run(
-        [sys.executable, "-c", code], cwd=root, capture_output=True, timeout=10
+        [sys.executable, "-c", code], cwd=root, capture_output=True, timeout=30
     )
     assert result.returncode != 0
     item = delivery.load_json(next((run / "focused-evidence").glob("*.json")))

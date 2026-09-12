@@ -188,7 +188,10 @@ def test_plan_parser_refusals(text: str, message: str) -> None:
         delivery.validate_evidence_plan_text(text, SCHEMA)
 
 
-def test_card_and_future_target_are_read_only(tmp_path: Path) -> None:
+def test_card_and_future_target_are_read_only(tmp_path: Path, monkeypatch) -> None:
+    # Schema reads resolve through the checkout's executor binding; these tests
+    # exercise pure declaration parsing, not the delivery runtime.
+    monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     card = tmp_path / "card.md"
     card.write_text(_text("- [C1] inert", _plan()))
     before = card.read_bytes()
@@ -329,7 +332,11 @@ def test_design_allows_only_known_partial_rows_and_tasks_requires_all_rows() -> 
 
 def test_native_card_declares_static_evidence_before_artifact_creation(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    # See test_card_and_future_target_are_read_only: isolate from the checkout's
+    # executor binding, which is not part of what this parser test covers.
+    monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     card = tmp_path / "card.md"
     card.write_text(
         "# Native fixture\n\n## Lifecycle\nopenspec-v1\n\n"

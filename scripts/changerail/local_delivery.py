@@ -4812,10 +4812,11 @@ def build_review_context(
         "shell_command_hard_stop": review_hard_stop,
         "budget_limits_enforced": budget_limits_enforced(),
     }
-    from scripts.changerail.review_allowance import review_slot
+    if run.get("execution_contract") == "changerail.native.v1":
+        from scripts.changerail.review_allowance import review_slot
 
-    # A native final-phase context retains the preliminary review's ordinal.
-    context.update(review_slot(runner_module(), run_dir, continuation=True))
+        # A native final-phase context retains the preliminary review's ordinal.
+        context.update(review_slot(runner_module(), run_dir, continuation=True))
     if inventory is not None:
         context["proof_inventory"] = inventory
         context["observed_proof_selection"] = _run_observed_contract(run_dir)[

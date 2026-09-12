@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from scripts.changerail import local_delivery as delivery
 
+from tools.changerail.tests.test_native_openspec_integration import project as project
+
 PROJECT = Path(__file__).resolve().parents[3]
 FIXTURE_BOARD = "openspec/" + "board"
 
@@ -88,15 +90,18 @@ def test_astra_unsupported_reasoning_is_explicit(effort):
         )
 
 
-def test_local_openspec_runs_pinned_cli_without_npx_fallback():
-    result = subprocess.run(
-        [str(PROJECT / "bin/openspec"), "--version"],
-        capture_output=True,
-        text=True,
-    )
+def test_local_openspec_runs_pinned_cli_without_npx_fallback(project):
+    # Run the real wrapper from an isolated project: the development checkout may
+    # itself be executor-bound, which correctly makes its own launcher refuse.
+    root, _card, _client = project
+    launcher = root / "bin/openspec"
+    launcher.parent.mkdir(exist_ok=True)
+    launcher.write_bytes((PROJECT / "bin/openspec").read_bytes())
+    launcher.chmod(0o755)
+    result = subprocess.run([str(launcher), "--version"], capture_output=True, text=True)
     assert result.returncode == 0
     assert result.stdout.strip() == "1.3.1"
-    wrapper = (PROJECT / "bin/openspec").read_text(encoding="utf-8")
+    wrapper = launcher.read_text(encoding="utf-8")
     assert "npx" not in wrapper
     assert "node_modules/@fission-ai/openspec/bin/openspec.js" in wrapper
 
