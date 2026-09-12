@@ -42,6 +42,10 @@ import distribution as dist
 from scripts.changerail import release_executor as engine
 
 SCHEMA = "changerail.release-update.v1"
+# Proposals/intents retain both complete nondependency inventories. Million-entry
+# checkouts exceed the ordinary 128 MiB source/receipt limit; cap only these two
+# transaction documents at 1 GiB, including their canonical serialized form.
+MAX_TRANSACTION_BYTES = 1024 * 1024 * 1024
 PROTECTED = (".changerail", ".codex", ".runtime", "bin/codex", "openspec")
 DEPENDENCIES = engine.DEPENDENCY_DIRS
 DECLARATIONS = (
@@ -296,12 +300,19 @@ def _write(path: Path, data: bytes, *, new: bool = False) -> None:
             os.unlink(temporary)
 
 
-def _json(path: Path) -> dict[str, Any]:
-    value = engine.document(path)
+def _json(path: Path, *, max_bytes: int = engine.MAX_FILE_BYTES) -> dict[str, Any]:
+    value = engine.document(path, max_bytes=max_bytes)
     info = path.stat()
     if info.st_uid != os.geteuid() or info.st_mode & 0o022 or info.st_nlink != 1:
         raise ReleaseUpdateError("unsafe authority ownership/mode")
     return value
+
+
+def _transaction_bytes(value: dict[str, Any]) -> bytes:
+    data = engine.encoded(value)
+    if len(data) > MAX_TRANSACTION_BYTES:
+        raise ReleaseUpdateError("transaction document exceeds supported byte limit")
+    return data
 
 
 def _assets(root: Path, archive: Path, provenance: Path, tag: str) -> dict[str, Any]:
@@ -450,8 +461,11 @@ def prepare(
     # Git tree adds/deletes those names. In particular an absent local path stays
     # absent and an untracked local counterpart is never installed over.
     changed = [n for n in release_changed if not _under(n, PROTECTED)]
+    # Descendant attributes in protected subtrees cannot affect the unprotected
+    # paths we publish; those subtrees (including archived repositories) stay exact.
     if any(
-        Path(n).name == ".gitattributes" for n in before.keys() | target_tree.keys()
+        Path(n).name == ".gitattributes" and not _under(n, PROTECTED)
+        for n in before.keys() | target_tree.keys()
     ):
         raise ReleaseUpdateError(
             "Git attributes/filters require separate operator resolution"
@@ -558,10 +572,13 @@ def prepare(
         or value["before_index"] != _git(root, "ls-files", "--stage", "-z").hex()
     ):
         raise ReleaseUpdateError("checkout changed while retaining transaction")
-    _write(proposal / "proposal.json", engine.encoded(value), new=True)
+    # Reject before publishing transaction authority. External staged blobs/index
+    # may remain on failure; no proposal, intent or target maintenance fence exists.
+    data = _transaction_bytes(value)
+    _write(proposal / "proposal.json", data, new=True)
     return {
         "proposal": str(proposal),
-        "proposal_sha256": engine.digest(engine.encoded(value)),
+        "proposal_sha256": engine.digest(data),
         "requires_provisioning": declarations_changed,
         "trust": "operator-selected assets; local tag does not prove publication",
     }
@@ -569,7 +586,7 @@ def prepare(
 
 def _load(proposal: Path) -> tuple[Path, dict[str, Any], dict[str, str]]:
     proposal = Path(proposal)
-    value = _json(proposal / "proposal.json")
+    value = _json(proposal / "proposal.json", max_bytes=MAX_TRANSACTION_BYTES)
     if value.get("schema") != SCHEMA or "transaction" not in value:
         raise ReleaseUpdateError("unsupported proposal")
     root = engine.canonical_root(Path(value["root"]))
@@ -579,7 +596,7 @@ def _load(proposal: Path) -> tuple[Path, dict[str, Any], dict[str, str]]:
     identity = {
         "schema": SCHEMA,
         "proposal": str(proposal),
-        "proposal_sha256": engine.digest(engine.encoded(value)),
+        "proposal_sha256": engine.digest(_transaction_bytes(value)),
     }
     return root, value, identity
 
@@ -943,7 +960,9 @@ def _advance(
         raise ReleaseUpdateError("exclusive lease required before mutation")
     marker = maintenance_path(root)
     _check_inputs(root, value)
-    if (proposal / "intent.json").exists() and _json(proposal / "intent.json") != value:
+    if (proposal / "intent.json").exists() and _json(
+        proposal / "intent.json", max_bytes=MAX_TRANSACTION_BYTES
+    ) != value:
         raise ReleaseUpdateError("frozen proposal changed")
     completed = proposal / "accepted-receipt.json"
     if completed.exists() and not marker.exists():
@@ -964,12 +983,12 @@ def _advance(
     if marker.exists():
         if _json(marker) != identity:
             raise ReleaseUpdateError("different maintenance intent owns checkout")
-        frozen = _json(proposal / "intent.json")
+        frozen = _json(proposal / "intent.json", max_bytes=MAX_TRANSACTION_BYTES)
         if frozen != value:
             raise ReleaseUpdateError("frozen proposal changed")
     else:
         if (proposal / "intent.json").exists() and _json(
-            proposal / "intent.json"
+            proposal / "intent.json", max_bytes=MAX_TRANSACTION_BYTES
         ) != value:
             raise ReleaseUpdateError("changed proposal after intent")
         if _position(root, value) not in {"before", "after"}:
@@ -990,7 +1009,7 @@ def _advance(
         ):
             raise ReleaseUpdateError("dependencies changed after prepare")
         if not (proposal / "intent.json").exists():
-            _write(proposal / "intent.json", engine.encoded(value), new=True)
+            _write(proposal / "intent.json", _transaction_bytes(value), new=True)
         _write(marker, engine.encoded(identity), new=True)
         _state(proposal, identity, "intent")
     if not _matches_step(root, value, len(value["transaction"])):
@@ -1086,7 +1105,7 @@ def provisioning(proposal: Path):
     with _ownership(root):
         if (
             _json(maintenance_path(root)) != identity
-            or _json(proposal / "intent.json") != value
+            or _json(proposal / "intent.json", max_bytes=MAX_TRANSACTION_BYTES) != value
         ):
             raise ReleaseUpdateError(
                 "provisioning requires the same active maintenance intent"

@@ -49,6 +49,7 @@ REQUIRED = {
 }
 _LEASES: dict[Path, int] = {}
 _EXCLUSIVE_LEASES: dict[Path, int] = {}
+MAX_FILE_BYTES = 128 * 1024 * 1024
 
 
 class ReleaseExecutorError(ValueError):
@@ -76,16 +77,18 @@ def canonical_root(root: Path) -> Path:
     return root
 
 
-def regular(path: Path) -> bytes:
+def regular(path: Path, *, max_bytes: int = MAX_FILE_BYTES) -> bytes:
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ReleaseExecutorError("file bound must be a positive integer")
     for parent in (path, *path.parents):
         if parent.is_symlink():
             raise ReleaseExecutorError(f"linked authority/source: {path}")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as stream:
         before = os.fstat(stream.fileno())
-        if not stat.S_ISREG(before.st_mode) or before.st_size > 128 * 1024 * 1024:
+        if not stat.S_ISREG(before.st_mode) or before.st_size > max_bytes:
             raise ReleaseExecutorError(f"not a bounded regular file: {path}")
-        data = stream.read()
+        data = stream.read(before.st_size + 1)
         after = os.fstat(stream.fileno())
         if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
             after.st_size,
@@ -96,8 +99,8 @@ def regular(path: Path) -> bytes:
         return data
 
 
-def document(path: Path) -> dict[str, Any]:
-    value = json.loads(regular(path))
+def document(path: Path, *, max_bytes: int = MAX_FILE_BYTES) -> dict[str, Any]:
+    value = json.loads(regular(path, max_bytes=max_bytes))
     if not isinstance(value, dict):
         raise ReleaseExecutorError(f"expected object: {path}")
     return value
