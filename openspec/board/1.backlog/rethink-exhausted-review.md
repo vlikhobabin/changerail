@@ -100,7 +100,7 @@ unassigned
     {"condition": "C1", "seam": "recurrence across verdicts", "precondition": "Synthetic lineage with two NO-GO verdicts where one condition closes and others repeat", "action": "Build the recurrence digest and inspect it", "expected": "Repeated and closed findings are labelled; verdicts, plan and card are byte-identical", "method": {"kind": "test", "target": "tools/changerail/tests/test_exhaustion_diagnosis.py"}, "stage": "implementation"},
     {"condition": "C2", "seam": "bounded idempotent diagnosis", "precondition": "Exhausted lineage state", "action": "Run diagnosis twice on unchanged state, then change the payload and re-run", "expected": "One diagnosis per state; the stale one becomes inapplicable; class is cross-checked against observations", "method": {"kind": "test", "target": "tools/changerail/tests/test_exhaustion_diagnosis.py"}, "stage": "implementation"},
     {"condition": "C3", "seam": "no authority from diagnosis", "precondition": "A diagnosis proposing an in-scope systemic repair with no granted slot", "action": "Record the choice, then attempt to continue delivery and to change Acceptance from the diagnosis", "expected": "Writer does not start, allowance, criteria and scope stay unchanged, refusal is explicit", "method": {"kind": "test", "target": "tools/changerail/tests/test_review_allowance_integration.py::test_diagnosis_grants_no_slot_and_never_continues_delivery"}, "stage": "implementation"},
-    {"condition": "C4", "seam": "operator choice and continuation", "precondition": "No supported automatic path", "action": "Observe the awaiting state, record each option, and exercise in-scope repair, plan revision and technical recovery routes", "expected": "Stop is a normal state with preserved history; each choice continues on the same card or closes and replans separately; invalid choices are rejected before any writer", "method": {"kind": "test", "target": "tools/changerail/tests/test_exhaustion_diagnosis.py"}, "stage": "final"}
+    {"condition": "C4", "seam": "operator choice and continuation", "precondition": "No supported automatic path", "action": "Observe the awaiting state, record each option, and exercise in-scope repair, plan revision and technical recovery routes", "expected": "Stop is a normal state with preserved history; each choice continues on the same card or closes and replans separately; invalid choices are rejected before any writer", "method": {"kind": "test", "target": "tools/changerail/tests/test_review_allowance_integration.py"}, "stage": "final"}
   ],
   "risks": [
     {"kinds": ["input_safety"], "applies": true, "decision": "Closed class set, runtime cross-check of the class against observations, and refusal of diagnoses that contradict state", "conditions": ["C2", "C3"]},
@@ -114,8 +114,8 @@ unassigned
 Выполнено 2026-09-12 для решения `5a12c46` (проверки воспроизводимы на этом
 коммите):
 - `./.changerail/openspec validate --all --strict --no-interactive` — 4 passed.
-- `./.venv/bin/python -m pytest -q tools/changerail/tests/test_exhaustion_diagnosis.py tools/changerail/tests/test_review_allowance_integration.py tools/changerail/tests/test_native_execution_contract.py tools/changerail/tests/test_native_openspec_integration.py` — 116 passed.
-- `./.venv/bin/python -m pytest -n 16 tools/changerail/tests -q` — 1278 passed за 4:53.
+- `./.venv/bin/python -m pytest -q tools/changerail/tests/test_exhaustion_diagnosis.py tools/changerail/tests/test_review_allowance_integration.py tools/changerail/tests/test_native_execution_contract.py tools/changerail/tests/test_native_openspec_integration.py` — 115 passed (41 + 17 + 49 + 8).
+- `./.venv/bin/python -m pytest -n 16 tools/changerail/tests -q` — 1282 passed за 4:58.
 - `./.venv/bin/python -m ruff check scripts tools/changerail/tests distribution.py` — All checks passed.
 - `git diff --check` — clean.
 - `./.venv/bin/python scripts/public-surface-scan.py` — pass, 0 findings.
@@ -165,12 +165,27 @@ accounting и frozen identity, `status` отдаёт `stop_state` и
 плану и payload), 16 тестов реального resume-маршрута учёта слотов (включая C3 —
 диагностика и записанный выбор не дают слота и не продолжают доставку, и C4 —
 решение доходит до продолжения, отдельный маршрут останавливает продолжение, а
-изменение payload делает решение неприменимым), 49 тестов execution contract,
-полный набор 1278 тестов.
+изменение payload делает решение неприменимым, контекст ремонта несёт
+решение), 49 тестов execution contract,
+полный набор 1282 теста.
 
 Внешний независимый review коммитов `4fe6645`/`f399917` дал NO-GO и был
 исправлен коммитом `5a12c46`; findings 1–14 разобраны, что именно сделано и что
 сознательно оставлено иначе — в Log.
+
+Открытый вопрос к оператору (не решается worker'ом молча): C4 называет третьим
+маршрутом техническое восстановление. Существующее техническое восстановление
+принимает только исходный остановленный run до первого ревью — его граница
+отклоняет любой run с сохранёнными ревью и любого преемника, — и повторно
+захватывает delivery lock, который уже удерживает run. Автоматически подготовить
+его для линии исчерпания невозможно, поэтому реализация называет средовую
+причину классом `infrastructure` и оставляет оператору выполнимые маршруты.
+Варианты: (1) изменить C4 — убрать техническое восстановление из маршрутов
+исчерпания, оставив закрытие попытки, пересмотр плана и изменение критерия;
+(2) отдельной доставкой инструмента расширить техническое восстановление на
+линии после ревью (снять границу по `reviews`/`recovery_of` и вложенный lock);
+(3) оставить как есть — класс сообщает о среде, маршрут называет оператор.
+До решения оператора change не архивируется.
 
 Осталось: 5.4 — повторный узкий внешний review коммита `5a12c46` и архивация
 change после вердикта. Это операторское действие: worker не выдаёт себе ревью.
@@ -192,5 +207,6 @@ change после вердикта. Это операторское действ
 - 2026-09-12T22:10:00Z закрыты 3.1 и 4.3: исчерпание стало штатным состоянием `awaiting-operator-decision` вместо пути ошибки (`ReviewExhausted`, `AwaitingDecision`, код 3, `stop_state`/`awaiting_decision` в `status`), инфраструктурный класс автоматически готовит техническое восстановление под его гейтами. Коммит `4fe6645`.
 - 2026-09-12T23:20:00Z внешний независимый review коммитов `4fe6645`/`f399917`: NO-GO. Подтвердил два блокера (решение оператора не доходит до продолжения; артефакт модельной диагностики пишется туда, где runner его не читает) и добавил ещё двенадцать находок: гейт автоматического маршрута опирается на класс, а не на наблюдаемое; класс без подтверждающих наблюдений принимается; у амендмента нет автора и потребителя; у вариантов нет предусловий; привязка разбора не включает план и payload; разбор видит только текущий run; исчерпание после финальной проверки остаётся путём ошибки; выбор накапливается; документация и покрытие `status` неполны. Отмечено как верное: `remaining = 2 + grants - spent`, диагностика не выдаёт слот, frozen run не перезаписывается, новый `except AwaitingDecision` не меняет смысл прежних отказов.
 - 2026-09-12T23:55:00Z исправлено коммитом `5a12c46`: решение читается у непосредственного предшественника и попадает в recovery- и repair-контекст; переходы, требующие отдельного маршрута, останавливают продолжение вместо подмены ремонтом; `re-review` действительно повторяет ревью неизменённого payload (runner восстанавливает scope и pre-review floor детерминированно); артефакт диагностики называется репозиторно-относительным путём; в digest входят принятый план и payload; повторяемость охватывает всю линию восстановления; модель не может приписать ситуацию критерию или плану без сравнимых наблюдений; варианты несут предусловия; выбор эксклюзивен и идемпотентен; амендмент связывает автора и время; исчерпание после финальной проверки — тоже точка решения; `status` покрыт тестом. Два расхождения с первоначальным текстом зафиксированы ниже.
+- 2026-09-13T00:40:00Z повторный узкий review коммита `5a12c46`: NO-GO. Findings 1–14 в основном закрыты (продолжение, артефакт диагностики, кросс-проверка класса, предусловия, привязка к плану и payload, охват линии, финальная проверка, эксклюзивность, документация, `status`, валидация run, диапазон коммитов), но найдены два блокера и четыре минора: (A) digest предпросмотра решения включал `author`/`observed_at` до хеширования, поэтому предпросмотр и авторизация, разнесённые на секунду, ломались — исправлено (хеш только по решению, регрессия с переводом часов); (B) автоматическая подготовка технического восстановления недостижима: `prepare` повторно берёт уже удержанный delivery lock, а его граница отклоняет любой run с ревью и любого преемника — исправлено честно: автоматическая подготовка удалена, класс `infrastructure` больше не даёт автоматического маршрута, техническое восстановление не предлагается, потому что не может выполниться; (C) тупик единственного варианта — снят вместе с B; (D) счёт focused-тестов в карточке был неверен (116, верно 115) — исправлено; (E) решение отдельного маршрута не переживало промежуточного преемника — теперь такое решение блокирует всех потомков (публичный маршрут grant при этом и так отклоняется `_eligible`); (F) `recorded_choice` доверял полю `transition` — теперь переход выводится из `OPTION_SPECS` и расхождение отклоняется.
 - 2026-09-12T23:55:00Z сознательные отклонения от первоначального плана: (1) автоматический маршрут инфраструктуры остаётся предложением модели, а не только детерминированного разбора, потому что детерминированный разбор по вердиктам не может установить инфраструктуру вообще; авторитетом сделан существующий гейт `technical_recovery.prepare`, который требует сохранённого доказанного отказа ёмкости, а отказ сообщается — это записано в коде, тестах и документации; (2) амендмент критерия фиксирует новую формулировку, но не применяет её сам: применение к карточке и принятому плану идёт обычным маршрутом принятия, и до этого доставка не продолжается — формулировка delta-спеки приведена к этому явно.
 - 2026-09-12T22:40:00Z закрыт разрыв в доказательствах C3: объявленный target `test_native_execution_contract.py` не содержал ни одной проверки диагностики. Регрессия перенесена на реальный маршрут resume/учёта слотов (`test_diagnosis_grants_no_slot_and_never_continues_delivery`) и проверяет, что разбор и записанный выбор не расходуют и не выдают слот, не создают writer, не меняют карточку, scope и байты frozen run. Объявленный Scope карточки сверен с реализацией: отдельный файл схемы и отдельный skill заменены на константу в модуле и правило в навыке доставки (по design.md). 5.3 выполнено, 5.4 — внешний review.

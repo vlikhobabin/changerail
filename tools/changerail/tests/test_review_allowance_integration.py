@@ -541,3 +541,24 @@ def test_payload_change_makes_the_decision_and_diagnosis_stale(lineage):
         rethink.load_diagnosis(delivery, original)
     with pytest.raises(delivery.DeliveryError, match="stale"):
         rethink.recorded_choice(delivery, original)
+
+
+def test_repair_context_carries_the_operator_decision(lineage):
+    """The session that repairs is told the decision, not only the menu."""
+    _root, card, original, launches = lineage
+    assert delivery.main(["resume", str(original)]) == 3
+    reason = "the same shape of repair already failed twice"
+    choice = _record_decision(original, "systemic-repair", reason)
+
+    context = delivery._check_json(
+        delivery.build_repair_context(
+            card=card, run_dir=original, reason="semantic_review", decision=choice
+        )
+    )
+
+    carried = context["operator_decision"]
+    assert carried["option"] == "systemic-repair"
+    assert carried["reason"] == reason
+    assert carried["choice_sha256"] == choice["choice_sha256"]
+    assert carried["effect"]
+    assert "operator chose" in context["instruction"].lower()

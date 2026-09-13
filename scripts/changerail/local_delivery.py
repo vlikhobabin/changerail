@@ -7998,10 +7998,6 @@ def _exhaustion_decision(
 
     emit_event("rethink", "awaiting-operator-decision")
     try:
-        deterministic = exhaustion_diagnosis.diagnosis(runner_module(), run_dir)
-        recovery = exhaustion_diagnosis.automatic_route(
-            runner_module(), run_dir, deterministic
-        )
         detail = exhaustion_diagnosis.announce(
             runner_module(),
             run_dir,
@@ -8012,8 +8008,6 @@ def _exhaustion_decision(
     except DeliveryError:
         # A diagnosis that cannot be recorded must not replace the real stop.
         raise exc from None
-    if recovery is not None:
-        detail = f"{detail}; technical recovery {recovery}"
     return AwaitingDecision(
         detail,
         state=exhaustion_diagnosis.decision_state(runner_module(), run_dir),
@@ -8024,24 +8018,29 @@ def _lineage_decision(run_dir: Path) -> tuple[dict[str, Any], Path] | None:
     """The recorded operator decision this continuation must honour, and where.
 
     A decision is recorded on the run that stopped for it, while a granted
-    continuation executes in the successor run. Only the immediate predecessor
-    can hold the decision that authorizes this continuation: a deeper ancestor's
-    decision was already spent on an earlier successor. A record that no longer
-    matches its own retained state is refused by ``recorded_choice`` and stops
-    the continuation instead of being silently dropped.
+    continuation executes in the successor run. The immediate predecessor holds
+    the decision that authorizes this continuation; a deeper repair or review
+    decision was already spent by the successor it authorized. A decision that
+    names a separate route is different: nothing executes it automatically, so it
+    keeps blocking every descendant until the operator does that separate action
+    or records a new decision. A record that no longer matches its own retained
+    state is refused by ``recorded_choice`` instead of being silently dropped.
     """
     from scripts.changerail import exhaustion_diagnosis
 
     origins = [run_dir]
     try:
-        origins.extend(recovery_ancestors(run_dir)[:1])
+        origins.extend(recovery_ancestors(run_dir))
     except DeliveryError:
         # A run without a valid native recovery chain holds no recorded decision.
         pass
-    for origin in origins:
+    for index, origin in enumerate(origins):
         choice = exhaustion_diagnosis.recorded_choice(runner_module(), origin)
-        if choice is not None:
-            return choice, origin
+        if choice is None:
+            continue
+        if index > 1 and choice.get("transition") not in SEPARATE_ROUTES:
+            continue
+        return choice, origin
     return None
 
 
@@ -8055,7 +8054,6 @@ def _lineage_choice(run_dir: Path) -> dict[str, Any] | None:
 SEPARATE_ROUTES = {
     "close-and-replan",
     "close-attempt",
-    "technical-recovery",
     "amend-criterion",
 }
 

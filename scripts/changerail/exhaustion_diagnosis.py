@@ -303,14 +303,6 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "architecture": False,
         "transition": "amend-criterion",
     },
-    "technical-recovery": {
-        "preconditions": "A retained capacity failure makes this an environment stop rather than a product defect.",
-        "effect": "Treat the stop as an infrastructure failure and use the existing recovery route.",
-        "reviews": 0,
-        "scope": "infrastructure",
-        "architecture": False,
-        "transition": "technical-recovery",
-    },
     "close-attempt": {
         "preconditions": "The operator decides the attempt ends without a successor plan.",
         "effect": "Close the attempt as unsuccessful without a new plan.",
@@ -327,14 +319,15 @@ CLASS_OPTIONS: dict[str, tuple[str, ...]] = {
     "plan_conflict": ("revise-plan", "amend-criterion"),
     "evidence_model_gap": ("extend-proof-model", "amend-criterion", "revise-plan"),
     "unreproducible": ("re-review", "systemic-repair"),
-    "infrastructure": ("technical-recovery",),
     "unsatisfiable": ("amend-criterion", "revise-plan"),
 }
+# Technical recovery is deliberately absent: its own boundary accepts only the
+# original stopped run before any review, so it cannot operate on a lineage that
+# already went through review. Offering it here would be an empty promise.
 FALLBACK_OPTIONS = (
     "systemic-repair",
     "revise-plan",
     "amend-criterion",
-    "technical-recovery",
     "close-attempt",
 )
 
@@ -344,13 +337,14 @@ RECOMMENDED = {
     "plan_conflict": "revise-plan",
     "evidence_model_gap": "extend-proof-model",
     "unreproducible": "re-review",
-    "infrastructure": "technical-recovery",
     "unsatisfiable": "amend-criterion",
 }
 
 
 def options_for(primary_class: str | None) -> list[dict[str, Any]]:
-    """Transitions offered for one class; an unknown class offers the full menu."""
+    """Transitions offered for one class; an unknown class offers the full menu.
+
+    """
     ids = CLASS_OPTIONS.get(primary_class or "", FALLBACK_OPTIONS)
     return [{"id": name, **OPTION_SPECS[name]} for name in ids]
 
@@ -402,7 +396,9 @@ def _deterministic(d: Any, run_dir: Path) -> dict[str, Any]:
         "schema": DIAGNOSIS_SCHEMA,
         "run": report["run"],
         "primary_class": primary,
-        "status": "auto" if primary == "infrastructure" else "operator_required",
+        # No class routes automatically: the only environment route that exists
+        # accepts a run before any review, which an exhausted lineage is not.
+        "status": "operator_required",
         "rationale": _rationale(primary, report),
         "options": options_for(primary),
         "recommendation": RECOMMENDED.get(primary or ""),
@@ -448,9 +444,13 @@ CONTEXT_NAME = "exhausted-diagnosis-context.json"
 # A model may refine the class, but it must not deny what the retained verdicts
 # already show. A repeated condition cannot become "incomplete work", and a new
 # failure cannot be reported as a repeat.
+# `infrastructure` is consistent with either observation: an environment stop can
+# look like a repeat and can look like newly failed work. It asserts something
+# about the environment, not about the defect, and it grants nothing automatic.
 CONSISTENT_WITH_REPEAT = frozenset(
     {
         "repeat_defect",
+        "infrastructure",
         "plan_conflict",
         "evidence_model_gap",
         "unreproducible",
@@ -460,6 +460,7 @@ CONSISTENT_WITH_REPEAT = frozenset(
 CONSISTENT_WITH_NEW = frozenset(
     {
         "incomplete_work",
+        "infrastructure",
         "plan_conflict",
         "evidence_model_gap",
         "unreproducible",
@@ -628,11 +629,6 @@ def followup(transition: str | None) -> str:
             "close this attempt as unsuccessful and accept a separate new plan;"
             " no review slot is spent by this route"
         )
-    if transition == "technical-recovery":
-        return (
-            "use the existing technical recovery route; this is not a product"
-            " review decision"
-        )
     if transition == "amend-criterion":
         return (
             "record the criterion amendment, then apply the new wording and"
@@ -649,29 +645,6 @@ def followup(transition: str | None) -> str:
         "grant the next review with review-allow and resume; the chosen"
         " approach applies to the repair turn"
     )
-
-
-def automatic_route(d: Any, run_dir: Path, value: dict[str, Any]) -> str | None:
-    """Prepare the existing technical recovery for an infrastructure stop.
-
-    Only an infrastructure class is prepared without an operator, and this
-    function only *prepares*. The class itself grants nothing: the authority is
-    ``technical_recovery.prepare``, which independently requires a retained
-    capacity failure and refuses an unproven or unsupported stop. A model claim
-    is therefore a bounded proposal - the recovery guard decides whether it is
-    even expressible, and applying the prepared proposal stays an operator
-    action.
-    """
-    if value.get("primary_class") != "infrastructure":
-        return None
-    from scripts.changerail import technical_recovery
-
-    source = "deterministic" if value.get("status") == "auto" else "proposed"
-    try:
-        proposal = technical_recovery.prepare(d, run_dir)
-    except DeliveryError as refusal:
-        return f"{source}, refused: {refusal}"
-    return f"{source}, prepared: {proposal['proposal']}"
 
 
 def decision_state(d: Any, run_dir: Path) -> dict[str, Any]:
@@ -701,6 +674,11 @@ def recorded_choice(d: Any, run_dir: Path) -> dict[str, Any] | None:
     value = d.load_json(records[-1])
     if value.get("diagnosis_sha256") != diagnosis(d, run_dir)["diagnosis_sha256"]:
         raise DeliveryError("recorded choice is stale for the current diagnosis")
+    # The transition decides whether the runner may execute the decision, so it
+    # is re-derived from the option instead of being trusted as recorded.
+    spec = OPTION_SPECS.get(value.get("option"))
+    if spec is None or value.get("transition") != spec["transition"]:
+        raise DeliveryError("recorded choice does not match a supported transition")
     return value
 
 
@@ -794,11 +772,14 @@ def choose(
     reason: str,
     authorize: str | None = None,
 ) -> dict[str, Any]:
-    """Preview or append the one immutable operator choice for a diagnosis.
+    """Preview or append one immutable operator choice for a diagnosis.
 
-    A decision is exclusive and non-accumulating: one diagnosis supports exactly
-    one transition, so a second, different choice is refused instead of silently
-    replacing the first. Recording the same choice again is idempotent.
+    Decisions are append-only and bound to the exact diagnosis, as review
+    allowance is bound to a run: recording the same decision for the same reason
+    again is idempotent, and the same reason cannot silently carry a different
+    transition. A genuinely reconsidered decision needs its own reason and
+    becomes the latest record that governs the continuation - otherwise a route
+    the recovery guard refuses would leave the operator with no way forward.
     """
     _operator()
     if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 1000:
@@ -813,11 +794,13 @@ def choose(
             recorded = d.load_json(path)
             if recorded.get("diagnosis_sha256") != value["diagnosis_sha256"]:
                 continue
-            if recorded.get("option") != option_id or recorded.get("reason") != reason.strip():
+            if recorded.get("reason") != reason.strip():
+                continue
+            if recorded.get("option") != option_id:
                 raise DeliveryError(
-                    "this diagnosis already carries the"
-                    f" `{recorded.get('option')}` decision; one decision per"
-                    " exhausted state, and the recorded one is immutable"
+                    f"the reason is already recorded for the"
+                    f" `{recorded.get('option')}` decision; a different decision"
+                    " needs its own reason"
                 )
             # The same decision recorded again is the same decision.
             return {
@@ -835,10 +818,12 @@ def choose(
             "transition": OPTION_SPECS[option_id]["transition"],
             "reviews": OPTION_SPECS[option_id]["reviews"],
             "reason": reason.strip(),
-            "author": _author(),
-            "observed_at": d.utc_now(),
         }
+        # The digest covers the decision itself: the author and the timestamp are
+        # recorded next to it, so a preview stays authorizable across seconds.
         proposal["choice_sha256"] = _digest(proposal)
+        proposal["author"] = _author()
+        proposal["observed_at"] = d.utc_now()
         if authorize is None:
             return {"state": "preview", "proposal": proposal}
         if authorize != proposal["choice_sha256"]:
@@ -891,10 +876,10 @@ def amend_criterion(
             "before": before.strip(),
             "after": after.strip(),
             "reason": reason.strip(),
-            "author": _author(),
-            "observed_at": d.utc_now(),
         }
         proposal["amendment_sha256"] = _digest(proposal)
+        proposal["author"] = _author()
+        proposal["observed_at"] = d.utc_now()
         if authorize is None:
             return {"state": "preview", "proposal": proposal}
         if authorize != proposal["amendment_sha256"]:

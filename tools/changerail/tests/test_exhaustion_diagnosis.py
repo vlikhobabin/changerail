@@ -208,16 +208,16 @@ def test_repair_context_carries_the_recurrence(tmp_path, monkeypatch):
     assert "Change the approach" in payload["instruction"]
 
 
-def _repeat_run(tmp_path, monkeypatch):
+def _repeat_run(tmp_path, monkeypatch, name: str = "example-run"):
     first = _verdict("no-go", [_condition("C1", "fail")], [_finding(1, ["src/a.py"])])
     second = _verdict("no-go", [_condition("C1", "fail")], [_finding(1, ["src/a.py"])])
-    return _run(tmp_path, monkeypatch, [first, second])
+    return _run(tmp_path, monkeypatch, [first, second], name=name)
 
 
-def _undetermined_run(tmp_path, monkeypatch):
+def _undetermined_run(tmp_path, monkeypatch, name: str = "example-run"):
     first = _verdict("no-go", [_condition("C1", "fail")], [])
     second = _verdict("no-go", [], [_finding(1, ["src/x.py"])])
-    return _run(tmp_path, monkeypatch, [first, second])
+    return _run(tmp_path, monkeypatch, [first, second], name=name)
 
 
 def test_diagnosis_for_repeat_offers_repair_and_replan(tmp_path, monkeypatch):
@@ -247,8 +247,7 @@ def test_infrastructure_class_is_automatic(tmp_path, monkeypatch):
         lambda d, r: {**original(d, r), "observed_class": "infrastructure"},
     )
     value = diagnosis.diagnosis(delivery, run)
-    assert value["status"] == "auto"
-    assert [item["id"] for item in value["options"]] == ["technical-recovery"]
+    assert value["status"] == "operator_required"
 
 
 def test_diagnosis_is_reused_and_refreshed(tmp_path, monkeypatch):
@@ -558,58 +557,41 @@ def test_awaiting_decision_is_a_delivery_error_carrying_state():
     assert error.state["primary_class"] == "repeat_defect"
 
 
-def test_automatic_route_prepares_technical_recovery_for_infrastructure(
-    tmp_path, monkeypatch
-):
-    from scripts.changerail import technical_recovery
-
+def test_no_class_routes_automatically(tmp_path, monkeypatch):
+    """The environment route cannot operate on a reviewed lineage, so nothing is
+    prepared without an operator - and a model claim never makes a route auto."""
     run = _repeat_run(tmp_path, monkeypatch)
-    seen: list = []
+    original = diagnosis.recurrence
     monkeypatch.setattr(
-        technical_recovery,
-        "prepare",
-        lambda d, r: (seen.append(r), {"proposal": "/tmp/proposal.json"})[1],
+        diagnosis,
+        "recurrence",
+        lambda d, r: {**original(d, r), "observed_class": "infrastructure"},
     )
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("infrastructure"))
 
-    note = diagnosis.automatic_route(
-        delivery, run, {"primary_class": "infrastructure", "status": "auto"}
-    )
+    value = diagnosis.diagnosis(delivery, run)
 
-    assert note == "deterministic, prepared: /tmp/proposal.json"
-    assert seen == [run]
+    assert value["primary_class"] == "infrastructure"
+    assert value["status"] == "operator_required"
+    # The only environment route that exists refuses a run that already went
+    # through review, so the operator keeps the routes that can actually run.
+    assert [item["id"] for item in value["options"]] == [
+        "systemic-repair",
+        "revise-plan",
+        "amend-criterion",
+        "close-attempt",
+    ]
 
 
-def test_automatic_route_reports_a_refusal_from_recovery_guards(tmp_path, monkeypatch):
-    from scripts.changerail import technical_recovery
-
+def test_environment_claim_is_not_rejected_by_a_repeat(tmp_path, monkeypatch):
+    """An environment stop can look like a repeat; the class carries that signal."""
     run = _repeat_run(tmp_path, monkeypatch)
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("infrastructure"))
 
-    def refuse(d, r):
-        raise delivery.DeliveryError("not a proven capacity failure")
+    value = diagnosis.diagnosis(delivery, run)
 
-    monkeypatch.setattr(technical_recovery, "prepare", refuse)
-
-    note = diagnosis.automatic_route(
-        delivery, run, {"primary_class": "infrastructure", "status": "auto"}
-    )
-
-    assert note == "deterministic, refused: not a proven capacity failure"
-
-    # A class the model merely proposed is reported as a proposal, and the
-    # recovery guard still decides whether it is expressible at all.
-    proposed = diagnosis.automatic_route(
-        delivery, run, {"primary_class": "infrastructure", "status": "operator_required"}
-    )
-    assert proposed == "proposed, refused: not a proven capacity failure"
-
-
-def test_automatic_route_ignores_every_other_class(tmp_path, monkeypatch):
-    run = _repeat_run(tmp_path, monkeypatch)
-    assert (
-        diagnosis.automatic_route(delivery, run, {"primary_class": "repeat_defect"})
-        is None
-    )
-    assert diagnosis.automatic_route(delivery, run, {"primary_class": None}) is None
+    assert value["primary_class"] == "infrastructure"
+    assert value["status"] == "operator_required"
 
 
 def test_options_carry_effect_price_and_preconditions(tmp_path, monkeypatch):
@@ -681,7 +663,7 @@ def test_observation_classes_survive_an_unverified_base(tmp_path, monkeypatch):
     assert value["status"] == "operator_required"
 
 
-def test_one_decision_per_exhausted_state(tmp_path, monkeypatch):
+def test_operator_can_reconsider_a_recorded_decision(tmp_path, monkeypatch):
     run = _repeat_run(tmp_path, monkeypatch)
     diagnosis.write_diagnosis(delivery, run)
 
@@ -699,11 +681,21 @@ def test_one_decision_per_exhausted_state(tmp_path, monkeypatch):
     records = list((diagnosis._rethink_root(delivery, run) / "choices").glob("*.json"))
     assert len(records) == 1
 
-    # A different transition for the same exhausted state is refused outright.
-    for reason in ("replan instead", "repair it"):
-        with pytest.raises(delivery.DeliveryError, match="already carries"):
-            diagnosis.choose(delivery, run, option_id="revise-plan", reason=reason)
+    # The same reason cannot silently carry a different transition...
+    with pytest.raises(delivery.DeliveryError, match="needs its own reason"):
+        diagnosis.choose(delivery, run, option_id="revise-plan", reason="repair it")
     assert list((diagnosis._rethink_root(delivery, run) / "choices").glob("*.json")) == records
+
+    # ...but a genuinely reconsidered decision has its own reason and becomes
+    # the latest record, so a refused route can never trap the operator.
+    other = diagnosis.choose(delivery, run, option_id="revise-plan", reason="replan instead")
+    replanned = diagnosis.choose(
+        delivery, run, option_id="revise-plan", reason="replan instead",
+        authorize=other["proposal"]["choice_sha256"],
+    )
+    assert replanned["state"] == "chosen"
+    assert diagnosis.recorded_choice(delivery, run)["option"] == "revise-plan"
+    assert len(list((diagnosis._rethink_root(delivery, run) / "choices").glob("*.json"))) == 2
 
 
 def test_amendment_records_its_author(tmp_path, monkeypatch):
@@ -725,3 +717,101 @@ def test_amendment_records_its_author(tmp_path, monkeypatch):
     assert amendment["observed_at"]
     assert amendment["before"] == "old wording"
     assert amendment["after"] == "new wording"
+
+
+def test_preview_digest_survives_a_second_boundary(tmp_path, monkeypatch):
+    """The documented flow authorizes a digest copied at an earlier second."""
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+    real = delivery.utc_now
+    ticks = iter(["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z"] * 4)
+    monkeypatch.setattr(delivery, "utc_now", lambda: next(ticks))
+
+    preview = diagnosis.choose(delivery, run, option_id="systemic-repair", reason="repair it")
+    # A human copies the digest and authorizes it one second later.
+    chosen = diagnosis.choose(
+        delivery, run, option_id="systemic-repair", reason="repair it",
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+
+    assert chosen["state"] == "chosen"
+    assert chosen["choice"]["observed_at"] != preview["proposal"]["observed_at"]
+    assert chosen["choice"]["choice_sha256"] == preview["proposal"]["choice_sha256"]
+    monkeypatch.setattr(delivery, "utc_now", real)
+
+    # The same rule holds for an amendment preview.
+    other = _undetermined_run(tmp_path, monkeypatch, name="run-amend")
+    diagnosis.write_diagnosis(delivery, other)
+    amendment_preview = diagnosis.amend_criterion(
+        delivery, other, condition="C1", before="old wording",
+        after="new wording", reason="not expressible",
+    )
+    assert amendment_preview["proposal"]["amendment_sha256"]
+
+
+def test_recorded_choice_must_match_a_supported_transition(tmp_path, monkeypatch):
+    """A hand-edited transition cannot smuggle a separate route into a repair."""
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+    preview = diagnosis.choose(delivery, run, option_id="revise-plan", reason="replan")
+    diagnosis.choose(
+        delivery, run, option_id="revise-plan", reason="replan",
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+    path = next((diagnosis._rethink_root(delivery, run) / "choices").glob("*.json"))
+    record = delivery.load_json(path)
+    record["transition"] = "repair"
+    delivery.write_json(path, record)
+
+    with pytest.raises(delivery.DeliveryError, match="supported transition"):
+        diagnosis.recorded_choice(delivery, run)
+
+
+def test_separate_route_decision_survives_down_the_lineage(tmp_path, monkeypatch):
+    """A route nothing executes automatically keeps blocking its descendants.
+
+    A repair or review decision is spent by the successor it authorized, so a
+    deeper one is history. A separate-route decision is not spent by anything, so
+    it must keep governing a later continuation instead of being dropped.
+    """
+    base = _repeat_run(tmp_path, monkeypatch, name="lineage-a")
+    middle = _run(tmp_path, monkeypatch, [], name="lineage-b")
+    leaf = _run(tmp_path, monkeypatch, [], name="lineage-c")
+    monkeypatch.setattr(
+        delivery,
+        "recovery_ancestors",
+        lambda run: {middle: [base], leaf: [middle, base]}.get(run, []),
+    )
+    diagnosis.write_diagnosis(delivery, base)
+    preview = diagnosis.choose(delivery, base, option_id="revise-plan", reason="replan")
+    diagnosis.choose(
+        delivery, base, option_id="revise-plan", reason="replan",
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+
+    found = delivery._lineage_decision(leaf)
+
+    assert found is not None
+    assert found[1] == base
+    assert found[0]["option"] == "revise-plan"
+
+
+def test_spent_repair_decision_does_not_govern_a_deeper_run(tmp_path, monkeypatch):
+    base = _repeat_run(tmp_path, monkeypatch, name="lineage-d")
+    middle = _run(tmp_path, monkeypatch, [], name="lineage-e")
+    leaf = _run(tmp_path, monkeypatch, [], name="lineage-f")
+    monkeypatch.setattr(
+        delivery,
+        "recovery_ancestors",
+        lambda run: {middle: [base], leaf: [middle, base]}.get(run, []),
+    )
+    diagnosis.write_diagnosis(delivery, base)
+    preview = diagnosis.choose(delivery, base, option_id="systemic-repair", reason="repair")
+    diagnosis.choose(
+        delivery, base, option_id="systemic-repair", reason="repair",
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+
+    # The immediate successor honours it; a deeper run treats it as spent.
+    assert delivery._lineage_decision(middle) is not None
+    assert delivery._lineage_decision(leaf) is None
