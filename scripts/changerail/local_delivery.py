@@ -463,9 +463,11 @@ def profile() -> dict[str, Any]:
         "implementation",
         "review",
         "technical_recovery",
+        "diagnosis",
     }:
         raise DeliveryError(
-            "profile models permit only implementation, review and technical_recovery"
+            "profile models permit only implementation, review, technical_recovery "
+            "and diagnosis"
         )
     if not isinstance(configured.get("budgets", {}), dict):
         raise DeliveryError("profile budgets must be a table")
@@ -7661,6 +7663,8 @@ def launch_implementation_stage(
     resume_thread_id: str | None = None,
     recovery_context: Path | None = None,
     repair_context: Path | None = None,
+    diagnosis_context: Path | None = None,
+    model_route_name: str = "implementation",
     require_first_file_change: bool = True,
     inherited_investigative_commands: int = 0,
 ) -> str | None:
@@ -7674,6 +7678,11 @@ def launch_implementation_stage(
         )
     if repair_context is not None:
         session_env["CHRL_REPAIR_CONTEXT"] = str(repair_context)
+    if diagnosis_context is not None:
+        # A diagnosis turn analyses and reports; it implements nothing and
+        # produces no handoff.
+        session_env["CHRL_DIAGNOSIS_CONTEXT"] = str(diagnosis_context)
+        require_first_file_change = False
     native_mode = native.is_native(card)
     if native_mode:
         context_path = run_dir / "native-context.json"
@@ -7688,7 +7697,7 @@ def launch_implementation_stage(
             else "finalize"
         )
     implementation_model, implementation_reasoning = model_route(
-        current_profile, "implementation"
+        current_profile, model_route_name
     )
     code = launch_codex(
         role="implementation",
@@ -7705,6 +7714,8 @@ def launch_implementation_stage(
     )
     if code:
         raise DeliveryError(f"implementation Codex session exited with {code}")
+    if diagnosis_context is not None:
+        return latest_implementation_thread(run_dir) or resume_thread_id
     require_current_implementation_handoff(card, run_dir)
     return latest_implementation_thread(run_dir) or resume_thread_id
 
@@ -7756,19 +7767,41 @@ def orchestrate_delivery(
                 # among the transitions the situation actually supports.
                 from scripts.changerail import exhaustion_diagnosis
 
+                def _diagnose(*, context: Path) -> None:
+                    launch_implementation_stage(
+                        card=card,
+                        run_dir=run_dir,
+                        current_profile=current_profile,
+                        diagnosis_context=context,
+                        model_route_name="diagnosis",
+                    )
+
+                emit_event("rethink", "awaiting-operator-decision")
                 try:
-                    value = exhaustion_diagnosis.write_diagnosis(
-                        runner_module(), run_dir
+                    detail = exhaustion_diagnosis.announce(
+                        runner_module(),
+                        run_dir,
+                        current_profile,
+                        reason=str(exc),
+                        launch=_diagnose,
                     )
                 except DeliveryError:
                     raise exc from None
-                emit_event("rethink", "awaiting-operator-decision")
-                options = ", ".join(item["id"] for item in value["options"])
-                raise DeliveryError(
-                    f"{exc}; diagnosis {value['primary_class'] or 'undetermined'}"
-                    f" (recommended: {value['recommendation'] or 'operator judgement'});"
-                    f" available: {options}"
-                ) from None
+                raise DeliveryError(detail) from None
+            # A recorded operator choice decides how the granted slot is spent:
+            # re-review the unchanged payload, or repair with the chosen approach.
+            choice: dict[str, Any] | None = None
+            try:
+                from scripts.changerail import exhaustion_diagnosis
+
+                choice = exhaustion_diagnosis.recorded_choice(
+                    runner_module(), run_dir
+                )
+            except DeliveryError:
+                choice = None
+            if choice is not None and choice.get("transition") == "review":
+                emit_event("review", "operator chose to re-review the payload")
+                continue
             repair_reason = "semantic_review"
             repair_thread_id = thread_id
             repair = build_repair_context(

@@ -21,6 +21,14 @@ before choosing work, including during `finalize`. Read `CHRL_REPAIR_CONTEXT`
 when supplied. Complete the remaining evidence work named there; repeating sync
 alone does not repair an observed-proof handoff failure.
 
+When `CHRL_DIAGNOSIS_CONTEXT` is set this is a diagnosis turn, not delivery.
+Read that context and the whole retained review history. Do not implement, review,
+repair, publish, edit the card, the accepted plan or any acceptance criterion, and
+do not run `handoff`. Write only the diagnosis artifact the context names, with the
+class from its closed set and an honest rationale. The runner rejects a class that
+denies what the retained verdicts already show, and nothing here grants review
+allowance, a recovery transition or publication authority.
+
 For `CHRL_DELIVERY_STAGE=change`, implement only `CHRL_CHANGE_NUMBER`. Honor
 `CHRL_CHANGE_NEXT_EVENT`; do not repeat an already started checkpoint. Emit
 `change-<N> starting`, complete the group's product work, mark its actual tasks,

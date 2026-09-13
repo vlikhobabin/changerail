@@ -55,7 +55,7 @@ def _run(tmp_path: Path, monkeypatch, cycles: list[dict]) -> Path:
     monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(delivery, "RUNTIME_ROOT", tmp_path / ".runtime/changerail")
     run = tmp_path / ".runtime/changerail/runs/example-run"
-    (run / "reviews").mkdir(parents=True)
+    (run / "reviews").mkdir(parents=True, exist_ok=True)
     delivery.write_json(run / "run.json", {"run_id": "example-run"})
     for index, cycle in enumerate(cycles, start=1):
         delivery.write_json(run / "reviews" / f"cycle-{index:02d}.json", cycle)
@@ -367,3 +367,170 @@ def test_criterion_amendment_is_refused_for_a_repeated_defect(tmp_path, monkeypa
             after="b",
             reason="not a criterion problem",
         )
+
+
+PROFILE_ROUTE = {
+    "models": {
+        "implementation": {"model": "m", "reasoning_effort": "high"},
+        "diagnosis": {"model": "d", "reasoning_effort": "high"},
+    }
+}
+
+
+def _model_claim(primary: str, rationale: str = "model view") -> dict:
+    return {
+        "schema": diagnosis.MODEL_SCHEMA,
+        "primary_class": primary,
+        "rationale": rationale,
+        "model": {"model": "d", "reasoning_effort": "high"},
+    }
+
+
+def test_model_claim_refines_a_consistent_class(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    assert diagnosis.diagnosis(delivery, run)["primary_class"] == "repeat_defect"
+
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("plan_conflict"))
+
+    refined = diagnosis.diagnosis(delivery, run)
+    assert refined["primary_class"] == "plan_conflict"
+    assert refined["rationale"] == "model view"
+    assert refined["options"][0]["id"] == "revise-plan"
+    # The model cannot make a stop automatic on its own.
+    assert refined["status"] == "operator_required"
+
+
+def test_model_claim_denying_an_observed_repeat_is_ignored(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    delivery.write_json(
+        run / diagnosis.MODEL_ARTIFACT, _model_claim("incomplete_work")
+    )
+
+    value = diagnosis.diagnosis(delivery, run)
+
+    assert value["primary_class"] == "repeat_defect"
+    assert "model" not in value
+
+
+def test_model_claim_denying_a_new_failure_is_ignored(tmp_path, monkeypatch):
+    first = _verdict("no-go", [_condition("C1", "fail")], [])
+    second = _verdict("no-go", [_condition("C2", "fail")], [])
+    run = _run(tmp_path, monkeypatch, [first, second])
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("repeat_defect"))
+
+    assert diagnosis.diagnosis(delivery, run)["primary_class"] == "incomplete_work"
+
+
+def test_unknown_model_class_is_ignored(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("made-up"))
+
+    assert diagnosis.diagnosis(delivery, run)["primary_class"] == "repeat_defect"
+
+
+def test_route_is_optional_and_validated(tmp_path, monkeypatch):
+    assert diagnosis.route(delivery, {"models": {}}) is None
+    configured = diagnosis.route(
+        delivery, {"models": {"diagnosis": {"model": "d", "reasoning_effort": "high"}}}
+    )
+    assert configured == ("d", "high")
+    with pytest.raises(delivery.DeliveryError, match="invalid reasoning effort"):
+        diagnosis.route(
+            delivery, {"models": {"diagnosis": {"model": "d", "reasoning_effort": ""}}}
+        )
+
+
+def test_announce_launches_the_model_only_for_an_undetermined_class(
+    tmp_path, monkeypatch
+):
+    run = _repeat_run(tmp_path, monkeypatch)
+    calls = []
+    detail = diagnosis.announce(
+        delivery,
+        run,
+        PROFILE_ROUTE,
+        reason="exhausted",
+        launch=lambda *, context: calls.append(context),
+    )
+    assert calls == []
+    assert "diagnosis repeat_defect" in detail
+    assert "systemic-repair" in detail
+
+    undetermined = _undetermined_run(tmp_path, monkeypatch)
+    launched = []
+    diagnosis.announce(
+        delivery,
+        undetermined,
+        PROFILE_ROUTE,
+        reason="exhausted",
+        launch=lambda *, context: launched.append(context),
+    )
+    assert len(launched) == 1
+    assert launched[0].name == diagnosis.CONTEXT_NAME
+
+
+def test_announce_without_a_route_never_launches(tmp_path, monkeypatch):
+    run = _undetermined_run(tmp_path, monkeypatch)
+    calls = []
+    diagnosis.announce(
+        delivery, run, {"models": {}}, reason="exhausted",
+        launch=lambda *, context: calls.append(context),
+    )
+    assert calls == []
+
+
+def test_recorded_choice_is_latest_and_refuses_a_stale_record(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+    assert diagnosis.recorded_choice(delivery, run) is None
+
+    diagnosis.choose(
+        delivery, run, option_id="revise-plan", reason="replan instead"
+    )
+    preview = diagnosis.choose(
+        delivery, run, option_id="revise-plan", reason="replan instead"
+    )
+    diagnosis.choose(
+        delivery,
+        run,
+        option_id="revise-plan",
+        reason="replan instead",
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+    record = diagnosis.recorded_choice(delivery, run)
+    assert record["option"] == "revise-plan"
+    assert record["transition"] == "close-and-replan"
+
+    changed = _verdict("go", [_condition("C1", "pass")], [])
+    delivery.write_json(run / "reviews" / "cycle-02.json", changed)
+    with pytest.raises(delivery.DeliveryError, match="stale"):
+        diagnosis.recorded_choice(delivery, run)
+
+
+def test_announce_reports_the_recorded_choice_and_its_followup(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+    preview = diagnosis.choose(
+        delivery, run, option_id="revise-plan", reason="replan instead"
+    )
+    diagnosis.choose(
+        delivery,
+        run,
+        option_id="revise-plan",
+        reason="replan instead",
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+
+    detail = diagnosis.announce(delivery, run, PROFILE_ROUTE, reason="exhausted")
+
+    assert "operator chose revise-plan (close-and-replan)" in detail
+    assert "separate new plan" in detail
+
+
+def test_announce_without_a_choice_still_offers_the_menu(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+
+    detail = diagnosis.announce(delivery, run, {"models": {}}, reason="exhausted")
+
+    assert "diagnosis repeat_defect" in detail
+    assert "available: systemic-repair, revise-plan" in detail

@@ -354,7 +354,7 @@ def _rationale(primary: str | None, report: dict[str, Any]) -> str:
     )
 
 
-def diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
+def _deterministic(d: Any, run_dir: Path) -> dict[str, Any]:
     """Build a bounded diagnosis for an exhausted review lineage.
 
     The artifact is a proposal: it states the observed class, why, and which
@@ -384,8 +384,215 @@ def diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
     }
 
 
-def _rethink_root(d: Any, run_dir: Path) -> Path:
-    return d.RUNTIME_ROOT / "rethink" / run_dir.name
+MODEL_SCHEMA = "changerail.exhausted-review-diagnosis-model.v1"
+MODEL_ARTIFACT = "exhausted-diagnosis-model.json"
+CONTEXT_NAME = "exhausted-diagnosis-context.json"
+
+# A model may refine the class, but it must not deny what the retained verdicts
+# already show. A repeated condition cannot become "incomplete work", and a new
+# failure cannot be reported as a repeat.
+CONSISTENT_WITH_REPEAT = frozenset(
+    {
+        "repeat_defect",
+        "plan_conflict",
+        "evidence_model_gap",
+        "unreproducible",
+        "unsatisfiable",
+    }
+)
+CONSISTENT_WITH_NEW = frozenset(
+    {
+        "incomplete_work",
+        "plan_conflict",
+        "evidence_model_gap",
+        "unreproducible",
+        "unsatisfiable",
+    }
+)
+
+
+def route(d: Any, current_profile: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the optional diagnosis model route, or None when not configured.
+
+    The route is optional by contract: without it the runner keeps the
+    deterministic analysis and the operator menu, exactly as before.
+    """
+    configured = current_profile.get("models", {}).get("diagnosis")
+    if not isinstance(configured, dict):
+        return None
+    return d.model_route({"models": {"diagnosis": configured}}, "diagnosis")
+
+
+def _model_claim(d: Any, run_dir: Path) -> dict[str, Any] | None:
+    path = run_dir / MODEL_ARTIFACT
+    if not path.is_file():
+        return None
+    value = d.load_json(path)
+    return value if isinstance(value, dict) else None
+
+
+def _refine(d: Any, run_dir: Path, base: dict[str, Any]) -> dict[str, Any]:
+    claim = _model_claim(d, run_dir)
+    if claim is None or claim.get("schema") != MODEL_SCHEMA:
+        return base
+    primary = claim.get("primary_class")
+    if primary not in CLASSES:
+        return base
+    report = base["recurrence"]
+    if report["recurring_conditions"] or report["recurring_findings"]:
+        allowed = CONSISTENT_WITH_REPEAT
+    elif report["new_failures"]:
+        allowed = CONSISTENT_WITH_NEW
+    else:
+        allowed = frozenset(CLASSES)
+    if primary not in allowed:
+        return base
+    rationale = claim.get("rationale")
+    refined = {
+        **base,
+        "primary_class": primary,
+        # A model-claimed infrastructure stop is not automatic: only the
+        # deterministic analysis may route there without an operator.
+        "status": "auto"
+        if base["primary_class"] == "infrastructure"
+        else "operator_required",
+        "rationale": rationale.strip()
+        if isinstance(rationale, str) and rationale.strip()
+        else base["rationale"],
+        "options": options_for(primary),
+        "recommendation": RECOMMENDED.get(primary),
+        "model": {
+            "model": claim.get("model"),
+            "reasoning_effort": claim.get("reasoning_effort"),
+        },
+    }
+    refined["diagnosis_sha256"] = _digest(
+        {
+            "run": base["run"],
+            "recurrence_sha256": report["recurrence_sha256"],
+            "primary_class": primary,
+        }
+    )
+    return refined
+
+
+def diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
+    """Diagnosis for the current state, refined by the model claim when present."""
+    return _refine(d, run_dir, _deterministic(d, run_dir))
+
+
+def diagnosis_context(d: Any, run_dir: Path) -> Path:
+    """Write the bounded instruction for one diagnosis session."""
+    base = _deterministic(d, run_dir)
+    path = run_dir / CONTEXT_NAME
+    d.write_json(
+        path,
+        {
+            "schema": "changerail.exhausted-review-diagnosis-context.v1",
+            "run": base["run"],
+            "deterministic": {
+                "primary_class": base["primary_class"],
+                "recurrence": base["recurrence"],
+                "options": base["options"],
+            },
+            "classes": list(CLASSES),
+            "artifact": MODEL_ARTIFACT,
+            "artifact_schema": MODEL_SCHEMA,
+            "instruction": (
+                "Two independent reviews rejected this lineage and the review"
+                " allowance is exhausted. Diagnose why; do not implement, review,"
+                " repair, publish or change any accepted plan or acceptance"
+                " criterion. Read the whole review history, the accepted plan and"
+                " the card. Decide whether the same defect repeats, whether the work"
+                " is merely incomplete, whether the accepted plan and the review"
+                " demands conflict, whether the required proof cannot be expressed,"
+                " whether the observation is not reproducible, whether the stop is"
+                " infrastructure, or whether a criterion cannot be achieved as"
+                " written. Write "
+                f"{MODEL_ARTIFACT} with schema {MODEL_SCHEMA}, fields"
+                " primary_class (one of the listed classes), rationale and model."
+                " A class that denies an observed repetition or a newly failed"
+                " condition is rejected by the runner."
+            ),
+        },
+    )
+    return path
+
+
+def announce(
+    d: Any,
+    run_dir: Path,
+    current_profile: dict[str, Any],
+    *,
+    reason: str,
+    launch: Any = None,
+) -> str:
+    """Record the diagnosis and return the operator-facing stop message.
+
+    With a configured diagnosis model route the runner refines an undetermined
+    situation through one bounded session; without it the deterministic analysis
+    stands. Either way the message names the class, the recommendation and the
+    transitions the situation supports - the stop is a decision point, not a
+    dead end.
+    """
+    value = write_diagnosis(d, run_dir)
+    configured = route(d, current_profile)
+    if configured is not None and value["primary_class"] is None and launch is not None:
+        context = diagnosis_context(d, run_dir)
+        launch(context=context)
+        value = write_diagnosis(d, run_dir)
+    options = ", ".join(item["id"] for item in value["options"])
+    try:
+        choice = recorded_choice(d, run_dir)
+    except DeliveryError:
+        choice = None
+    if choice is None:
+        return (
+            f"{reason}; diagnosis {value['primary_class'] or 'undetermined'}"
+            f" (recommended: {value['recommendation'] or 'operator judgement'});"
+            f" available: {options}"
+        )
+    transition = choice.get("transition")
+    if transition in {"close-and-replan", "close-attempt"}:
+        followup = (
+            "close this attempt as unsuccessful and accept a separate new plan;"
+            " no review slot is spent by this route"
+        )
+    elif transition == "technical-recovery":
+        followup = (
+            "use the existing technical recovery route; this is not a product"
+            " review decision"
+        )
+    elif transition == "amend-criterion":
+        followup = (
+            "record the criterion amendment, then re-accept the plan before any"
+            " further implementation"
+        )
+    else:
+        followup = (
+            "grant the next review with review-allow and resume; the chosen"
+            " approach applies to the repair turn"
+        )
+    return (
+        f"{reason}; operator chose {choice.get('option')} ({transition}): {followup}"
+    )
+
+
+def recorded_choice(d: Any, run_dir: Path) -> dict[str, Any] | None:
+    """Latest recorded operator choice, refused when it no longer matches state."""
+    directory = _rethink_root(d, run_dir) / "choices"
+    if not directory.is_dir():
+        return None
+    records = sorted(directory.glob("choice-*.json"))
+    if not records:
+        return None
+    value = d.load_json(records[-1])
+    if value.get("diagnosis_sha256") != diagnosis(d, run_dir)["diagnosis_sha256"]:
+        raise DeliveryError("recorded choice is stale for the current diagnosis")
+    return value
+
+
+def _rethink_root(d: Any, run_dir: Path) -> Path:    return d.RUNTIME_ROOT / "rethink" / run_dir.name
 
 
 def write_diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
@@ -425,7 +632,8 @@ def _append(d: Any, directory: Path, prefix: str, value: dict[str, Any]) -> Path
 
     directory.mkdir(parents=True, exist_ok=True)
     retained._sync(directory.parent)
-    path = directory / f"{len(list(directory.glob(f'{prefix}-*.json'))) + 1:04d}.json"
+    index = len(list(directory.glob(f"{prefix}-*.json"))) + 1
+    path = directory / f"{prefix}-{index:04d}.json"
     retained._write(path, value)
     return path
 

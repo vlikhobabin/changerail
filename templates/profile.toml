@@ -20,6 +20,13 @@ reasoning_effort = "high"
 model = "gpt-6-astra"
 reasoning_effort = "high"
 
+# Optional. A distinct model for the bounded diagnosis of an exhausted review
+# lineage. Without this route the runner keeps its deterministic analysis and the
+# operator menu, and no diagnosis session is launched.
+# [models.diagnosis]
+# model = "gpt-6-astra"
+# reasoning_effort = "high"
+
 [adapters.codex]
 launcher = "bin/codex"
 
