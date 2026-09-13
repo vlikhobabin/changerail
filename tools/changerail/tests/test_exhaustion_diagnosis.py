@@ -238,7 +238,7 @@ def test_diagnosis_for_repeat_offers_repair_and_replan(tmp_path, monkeypatch):
     assert all(item["reviews"] in (0, 1) for item in value["options"])
 
 
-def test_infrastructure_class_is_automatic(tmp_path, monkeypatch):
+def test_infrastructure_class_never_routes_automatically(tmp_path, monkeypatch):
     run = _repeat_run(tmp_path, monkeypatch)
     original = diagnosis.recurrence
     monkeypatch.setattr(
@@ -574,13 +574,15 @@ def test_no_class_routes_automatically(tmp_path, monkeypatch):
     assert value["primary_class"] == "infrastructure"
     assert value["status"] == "operator_required"
     # The only environment route that exists refuses a run that already went
-    # through review, so the operator keeps the routes that can actually run.
+    # through review, so the operator keeps the routes that can actually run,
+    # and the class still names a recommendation.
     assert [item["id"] for item in value["options"]] == [
         "systemic-repair",
         "revise-plan",
         "amend-criterion",
         "close-attempt",
     ]
+    assert value["recommendation"] == "close-attempt"
 
 
 def test_environment_claim_is_not_rejected_by_a_repeat(tmp_path, monkeypatch):
@@ -739,14 +741,28 @@ def test_preview_digest_survives_a_second_boundary(tmp_path, monkeypatch):
     assert chosen["choice"]["choice_sha256"] == preview["proposal"]["choice_sha256"]
     monkeypatch.setattr(delivery, "utc_now", real)
 
-    # The same rule holds for an amendment preview.
+    # The same rule holds for an amendment preview: authorizing it one second
+    # later must still match the digest the operator copied.
     other = _undetermined_run(tmp_path, monkeypatch, name="run-amend")
     diagnosis.write_diagnosis(delivery, other)
+    ticks = iter(["2026-01-01T00:00:10Z", "2026-01-01T00:00:11Z"] * 2)
+    monkeypatch.setattr(delivery, "utc_now", lambda: next(ticks))
     amendment_preview = diagnosis.amend_criterion(
         delivery, other, condition="C1", before="old wording",
         after="new wording", reason="not expressible",
     )
-    assert amendment_preview["proposal"]["amendment_sha256"]
+    amended = diagnosis.amend_criterion(
+        delivery, other, condition="C1", before="old wording",
+        after="new wording", reason="not expressible",
+        authorize=amendment_preview["proposal"]["amendment_sha256"],
+    )
+    assert amended["state"] == "amended"
+    assert amended["amendment"]["amendment_sha256"] == (
+        amendment_preview["proposal"]["amendment_sha256"]
+    )
+    assert amended["amendment"]["observed_at"] != (
+        amendment_preview["proposal"]["observed_at"]
+    )
 
 
 def test_recorded_choice_must_match_a_supported_transition(tmp_path, monkeypatch):

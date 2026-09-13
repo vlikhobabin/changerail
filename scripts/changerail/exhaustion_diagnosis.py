@@ -332,6 +332,10 @@ FALLBACK_OPTIONS = (
 )
 
 RECOMMENDED = {
+    # The environment case has no systemic product route. Ending the attempt
+    # spends no review slot and leaves the operator free to re-admit a fresh
+    # attempt once the environment is sound; the choice stays theirs.
+    "infrastructure": "close-attempt",
     "repeat_defect": "systemic-repair",
     "incomplete_work": "continue-repair",
     "plan_conflict": "revise-plan",
