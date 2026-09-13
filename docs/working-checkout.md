@@ -156,22 +156,32 @@ git -C "$chrl_work" diff --binary > "$chrl_backup/unstaged.patch"
 git -C "$chrl_work" diff --cached --binary > "$chrl_backup/staged.patch"
 ```
 
-До первой замены исходников проверьте отсутствие runner и его дочерних процессов,
-а также доступность delivery lock; не удаляйте lock. Сохраните полную копию
-checkout, включая `.git`, ignored/untracked файлы, ACL/modes и сами ссылки без
-разыменования, в закрытом каталоге вне checkout. Например, GNU tar:
+Сохраняйте не весь checkout, а только то локальное состояние, которое обновление
+объявлено protected и которое нельзя восстановить из Git: board и specs, профиль и
+launchers. Копировать остальное для обновления не нужно и вредно по времени:
+`.runtime/` не перезаписывается, `.venv/` и `tools/openspec/node_modules/`
+проявятся заново по объявленному dependency inventory, а `.git/` и есть история.
+Полная копия checkout'а на реальном executor'е измеряется гигабайтами, тогда как
+сам ChangeRail — единицы мегабайт; такой архив не помещается в разумный шаг
+обновления.
 
 ```sh
-tar --acls --xattrs -cpf "$chrl_backup/checkout.tar" -C "$chrl_work" .
-sha256sum "$chrl_backup/checkout.tar" > "$chrl_backup/checkout.tar.sha256"
-tar -df "$chrl_backup/checkout.tar" -C "$chrl_work"
+tar --acls --xattrs -cpf "$chrl_backup/local-state.tar" -C "$chrl_work" \
+  openspec .changerail/profile.toml .changerail/engine-binding.json
+sha256sum "$chrl_backup/local-state.tar" > "$chrl_backup/local-state.tar.sha256"
 ```
 
-Сверьте backup и составьте inventory типов, режимов, SHA-256 обычных файлов и
-literal targets ссылок. Особо выделите `.changerail/`, настройки и credentials,
-проектный launcher, `openspec/`, старые `run.json`, manifests, checkpoints,
-evidence и review accounting. Не выводите credentials в отчёт. Проверьте,
-что восстановление архива в отдельный закрытый каталог воспроизводит inventory.
+Аварийная копия сохранённой истории прогонов — отдельное решение оператора, а не
+шаг обновления: обновление эту историю не заменяет. Если она нужна, её снимают
+отдельной операцией с заранее измеренным размером (`du -sh "$chrl_work/.runtime"`).
+
+До первой замены исходников проверьте отсутствие runner и его дочерних процессов,
+а также доступность delivery lock; не удаляйте lock. Составьте inventory типов,
+режимов, SHA-256 обычных файлов и literal targets ссылок для сохраняемых путей.
+Особо выделите `.changerail/`, настройки и credentials, проектный launcher,
+`openspec/`, старые `run.json`, manifests, checkpoints, evidence и review
+accounting. Не выводите credentials в отчёт. Проверьте, что восстановление
+`local-state.tar` в отдельный закрытый каталог воспроизводит inventory.
 Для связанного Git worktree сохраните также фактический common git dir;
 копии одного файла `.git` недостаточно. Основной checkout может владеть другими
 worktrees: изменение пути его `.git` требует `git worktree repair`.
