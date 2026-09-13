@@ -297,3 +297,29 @@ backup: сначала сохраните новые записи и разбе�
 не откатывает доставку, remote publication, engine binding или review accounting.
 У self-host recovery нет универсального rollback; допустимые rebind и повторный
 apply/reconcile описаны в [self-host runbook](self-host-recovery.md).
+
+### Если принятый receipt разошёлся с зависимостями
+
+Обычный `release-update` тогда отказывает навсегда: receipt фиксирует пофайловые
+хеши `.venv` и `node_modules`, включая `.pyc`, и воспроизвести их задним числом
+нельзя. Та же проверка выполняется при каждом запуске executor'а, поэтому
+launchers перестают работать, даже если исходники целы.
+
+Восстановление — перепринятие через bootstrap на выбранном теге:
+
+1. убедитесь, что checkout считается непринятым: отложите
+   `../.<name>.accepted-release.json` в закрытый каталог вне checkout, не удаляя
+   безвозвратно — это история;
+2. переведите исходник на нужный tag (`git checkout --detach <tag>`), сохранив
+   локальные protected-изменения (`openspec/`) отдельной копией заранее;
+3. проявите зависимости по объявленным версиям: `uv venv` с тем же
+   интерпретатором, установка объявленных зависимостей, `npm ci` для pinned
+   OpenSpec;
+4. `release-update prepare --bootstrap` → `apply`; если prepare сообщает
+   `requires_provisioning`, пройдите `provision-lease` и `reconcile`;
+5. проверьте launchers dev-проекта. Они привязаны к пути executor'а и
+   подхватывают новый accepted release без повторного `executor-bind`.
+
+Путь не восстанавливает прежний receipt, а устанавливает новый на выбранном
+выпуске; прежний сохраняют как историю. Поэтому зависимости перед `prepare` не
+удаляют: это самый быстрый способ попасть в эту ситуацию.
