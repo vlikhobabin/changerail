@@ -7,12 +7,40 @@ outside this fixture's scope. Tests of profiles can still select their own file.
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
 from scripts.changerail import local_delivery
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _tmp_basetemp_stays_removable(request: pytest.FixtureRequest) -> None:
+    """Let the suite clean up after itself on a small ``/tmp``.
+
+    Engine snapshots are genuinely immutable while they exist - directories
+    ``0555``, files ``0444`` - so a fixture that builds one leaves a tree pytest
+    itself cannot delete. Because ``/tmp`` here is a RAM-backed tmpfs, those
+    leftovers accumulate across runs until a toolchain copy fails with ENOSPC
+    and the run reports a mass of unrelated errors. Restoring write permission
+    once the session is over changes nothing the tests observe and keeps the
+    next run's cleanup, and this run's retention, working.
+    """
+    yield
+    factory = getattr(request.config, "_tmp_path_factory", None)
+    if factory is None:
+        return
+    for root, directories, files in os.walk(factory.getbasetemp()):
+        for name in (*directories, *files):
+            path = Path(root) / name
+            try:
+                if not path.is_symlink():
+                    path.chmod(path.lstat().st_mode | stat.S_IWUSR)
+            except OSError:
+                # A vanished or unreadable entry is not this hook's problem.
+                continue
 
 
 @pytest.fixture(autouse=True)

@@ -17,6 +17,13 @@ include = ["scripts", "scripts.changerail*"]
 [tool.pytest.ini_options]
 testpaths = ["tools/changerail/tests"]
 pythonpath = [".", "tools/changerail/tests"]
+# Heavy fixtures copy the pinned toolchain and build engine snapshots per test,
+# and /tmp here is a small RAM-backed tmpfs. pytest keeps the last three runs by
+# default, which multiplies that footprint and can fill the tmpfs - a full
+# copytree then fails with ENOSPC and the run reports a mass of unrelated
+# errors. Keep one generation, and only when something failed.
+tmp_path_retention_count = 1
+tmp_path_retention_policy = "failed"
 
 [tool.ruff]
 target-version = "py311"
