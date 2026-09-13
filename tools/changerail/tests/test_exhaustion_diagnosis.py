@@ -534,3 +534,66 @@ def test_announce_without_a_choice_still_offers_the_menu(tmp_path, monkeypatch):
 
     assert "diagnosis repeat_defect" in detail
     assert "available: systemic-repair, revise-plan" in detail
+
+
+def test_decision_state_carries_class_and_options(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    state = diagnosis.decision_state(delivery, run)
+
+    assert state["schema"] == "changerail.awaiting-operator-decision.v1"
+    assert state["primary_class"] == "repeat_defect"
+    assert state["options"] == ["systemic-repair", "revise-plan"]
+    assert state["recommendation"] == "systemic-repair"
+    assert state["diagnosis"].endswith("diagnosis.json")
+
+
+def test_awaiting_decision_is_a_delivery_error_carrying_state():
+    error = delivery.AwaitingDecision("stop", state={"primary_class": "repeat_defect"})
+    # Existing failure handlers must still catch it as a delivery error.
+    assert isinstance(error, delivery.DeliveryError)
+    assert error.state["primary_class"] == "repeat_defect"
+
+
+def test_automatic_route_prepares_technical_recovery_for_infrastructure(
+    tmp_path, monkeypatch
+):
+    from scripts.changerail import technical_recovery
+
+    run = _repeat_run(tmp_path, monkeypatch)
+    seen: list = []
+    monkeypatch.setattr(
+        technical_recovery,
+        "prepare",
+        lambda d, r: (seen.append(r), {"proposal": "/tmp/proposal.json"})[1],
+    )
+
+    note = diagnosis.automatic_route(delivery, run, {"primary_class": "infrastructure"})
+
+    assert note == "prepared: /tmp/proposal.json"
+    assert seen == [run]
+
+
+def test_automatic_route_reports_a_refusal_from_recovery_guards(tmp_path, monkeypatch):
+    from scripts.changerail import technical_recovery
+
+    run = _repeat_run(tmp_path, monkeypatch)
+
+    def refuse(d, r):
+        raise delivery.DeliveryError("not a proven capacity failure")
+
+    monkeypatch.setattr(technical_recovery, "prepare", refuse)
+
+    note = diagnosis.automatic_route(delivery, run, {"primary_class": "infrastructure"})
+
+    assert note == "refused: not a proven capacity failure"
+
+
+def test_automatic_route_ignores_every_other_class(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    assert (
+        diagnosis.automatic_route(delivery, run, {"primary_class": "repeat_defect"})
+        is None
+    )
+    assert diagnosis.automatic_route(delivery, run, {"primary_class": None}) is None

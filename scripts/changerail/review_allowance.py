@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.changerail import plan_restoration as retained
-from scripts.changerail.contracts import DeliveryError
+from scripts.changerail.contracts import DeliveryError, ReviewExhausted
 
 SCHEMA = "changerail.review-authorization.v1"
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
@@ -437,7 +437,7 @@ def require_remaining(d: Any, run: Path, *, after: str = "") -> dict:
     status = allowance(d, run)
     if status["remaining"] <= 0:
         label = "review allowance exhausted" if status["operator_granted_slots"] else "shared two-review budget exhausted"
-        raise DeliveryError(
+        raise ReviewExhausted(
             f"{label}{after}; autonomous=2, operator={status['operator_granted_slots']}, "
             f"spent={status['spent_reviews']}, remaining=0; operator review-allow +1 required"
         )

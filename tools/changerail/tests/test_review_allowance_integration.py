@@ -110,24 +110,40 @@ def authorize(run, reason):
 def test_public_resume_grants_third_then_fourth_without_reset_or_history_edits(lineage):
     _root, card, original, launches = lineage
     histories = {original: snapshot(original)}
-    assert delivery.main(["resume", str(original)]) == 2
+    # Two autonomous NO-GO exhaust the shared allowance: resume reports the
+    # retained decision point (3) without touching the frozen predecessor.
+    assert delivery.main(["resume", str(original)]) == 3
+    assert snapshot(original) == histories[original]
     assert launches == [(original.name, 1, 1), (original.name, 2, 2)]
     for ordinal in (3, 4):
         predecessor = list(histories)[-1]
         receipt = authorize(predecessor, f"repair remaining failure before review {ordinal}")
         child = delivery.RUNTIME_ROOT / "runs" / receipt["proposal"]["successor_run_id"]
         assert not child.exists()
-        assert delivery.main(["resume", str(predecessor)]) == 2  # NO-GO after granted review.
+        assert delivery.main(["resume", str(predecessor)]) == 3  # NO-GO after granted review.
         assert launches[-1] == (child.name, 1, ordinal)
         assert delivery.review_budget_usage(child) == {"semantic_cycles": ordinal}
-        assert f"spent={ordinal}, remaining=0" in delivery._check_json(child / "run.json")["terminal_reason"]
+        stopped = delivery._check_json(child / "run.json")
+        assert f"spent={ordinal}, remaining=0" in stopped["terminal_reason"]
+        assert stopped["stop_state"] == "awaiting-operator-decision"
+        # The fixture profile configures no diagnosis model route, so the
+        # deterministic analysis and the operator menu are what the run reports.
+        decision = stopped["awaiting_decision"]
+        assert decision["schema"] == "changerail.awaiting-operator-decision.v1"
+        assert decision["primary_class"] is None
+        assert decision["recommendation"] is None
+        assert "amend-criterion" in decision["options"]
+        assert (delivery.REPO_ROOT / decision["diagnosis"]).is_file()
+
+        assert "amend-criterion" in stopped["awaiting_decision"]["options"]
+        assert stopped["exit_code"] == 3
         status = policy.allowance(delivery, child)
         assert (status["operator_granted_slots"], status["spent_reviews"], status["remaining"]) == (ordinal - 2, ordinal, 0)
         assert status["in_flight"] is False
         for origin, before in histories.items():
             assert snapshot(origin) == before
         before_children = set((delivery.RUNTIME_ROOT / "runs").iterdir())
-        assert delivery.main(["resume", str(child)]) == 2
+        assert delivery.main(["resume", str(child)]) == 3
         assert set((delivery.RUNTIME_ROOT / "runs").iterdir()) == before_children
         assert len(launches) == ordinal
         histories[child] = snapshot(child)

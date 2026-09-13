@@ -500,4 +500,10 @@ def status(delivery: Any, value: Path) -> dict[str, Any]:
     }
     if metadata.get("execution_contract") == "changerail.native.v1":
         result["review_allowance"] = delivery.review_allowance_status(run_dir, read_only=True)
+    # A run that waits for an operator decision is a working state, not a failure;
+    # surface it together with the transitions the diagnosis supports.
+    if metadata.get("stop_state"):
+        result["stop_state"] = metadata["stop_state"]
+    if isinstance(metadata.get("awaiting_decision"), dict):
+        result["awaiting_decision"] = metadata["awaiting_decision"]
     return result

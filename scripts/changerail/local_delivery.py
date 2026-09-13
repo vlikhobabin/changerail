@@ -28,7 +28,7 @@ from typing import Any, Callable, Mapping, NamedTuple, Protocol, Sequence
 _SOURCE_REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_SOURCE_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOURCE_REPO_ROOT))
-from scripts.changerail.contracts import DeliveryError
+from scripts.changerail.contracts import AwaitingDecision, DeliveryError, ReviewExhausted
 from scripts.changerail import openspec_context as native
 from scripts.changerail.adapters.results import validate_selected_nodes, receipt_nodes
 from scripts.changerail.targeted_checks import select_targeted_commands
@@ -7761,33 +7761,14 @@ def orchestrate_delivery(
         if review_code == 3:
             try:
                 require_remaining(runner_module(), run_dir, after=" after NO-GO")
-            except DeliveryError as exc:
-                # Exhaustion is a working state, not a dead end: record a bounded
-                # diagnosis of the whole review history so the operator decides
-                # among the transitions the situation actually supports.
-                from scripts.changerail import exhaustion_diagnosis
-
-                def _diagnose(*, context: Path) -> None:
-                    launch_implementation_stage(
-                        card=card,
-                        run_dir=run_dir,
-                        current_profile=current_profile,
-                        diagnosis_context=context,
-                        model_route_name="diagnosis",
-                    )
-
-                emit_event("rethink", "awaiting-operator-decision")
-                try:
-                    detail = exhaustion_diagnosis.announce(
-                        runner_module(),
-                        run_dir,
-                        current_profile,
-                        reason=str(exc),
-                        launch=_diagnose,
-                    )
-                except DeliveryError:
-                    raise exc from None
-                raise DeliveryError(detail) from None
+            except ReviewExhausted as exc:
+                raise _exhaustion_decision(
+                    run_dir,
+                    card,
+                    current_profile,
+                    exc,
+                    launch=_diagnosis_launcher(card, run_dir, current_profile),
+                ) from None
             # A recorded operator choice decides how the granted slot is spent:
             # re-review the unchanged payload, or repair with the chosen approach.
             choice: dict[str, Any] | None = None
@@ -7912,6 +7893,62 @@ def delivery_lock(*, restoration_reconcile: bool = False):
         os.close(descriptor)
 
 
+def _exhaustion_decision(
+    run_dir: Path,
+    card: Path,
+    current_profile: dict[str, Any],
+    exc: DeliveryError,
+    *,
+    launch: Any = None,
+) -> AwaitingDecision:
+    """Turn an exhausted review allowance into an explicit operator decision.
+
+    Two consecutive NO-GO are a working situation, not a dead end: the whole
+    review history is reduced to a bounded diagnosis, the only deterministic
+    class may prepare the existing technical recovery, and the run stops with
+    the transitions the situation actually supports.
+    """
+    from scripts.changerail import exhaustion_diagnosis
+
+    emit_event("rethink", "awaiting-operator-decision")
+    try:
+        deterministic = exhaustion_diagnosis.diagnosis(runner_module(), run_dir)
+        recovery = exhaustion_diagnosis.automatic_route(
+            runner_module(), run_dir, deterministic
+        )
+        detail = exhaustion_diagnosis.announce(
+            runner_module(),
+            run_dir,
+            current_profile,
+            reason=str(exc),
+            launch=launch,
+        )
+    except DeliveryError:
+        # A diagnosis that cannot be recorded must not replace the real stop.
+        raise exc from None
+    if recovery is not None:
+        detail = f"{detail}; technical recovery {recovery}"
+    return AwaitingDecision(
+        detail,
+        state=exhaustion_diagnosis.decision_state(runner_module(), run_dir),
+    )
+
+
+def _diagnosis_launcher(
+    card: Path, run_dir: Path, current_profile: dict[str, Any]
+) -> Any:
+    def _diagnose(*, context: Path) -> None:
+        launch_implementation_stage(
+            card=card,
+            run_dir=run_dir,
+            current_profile=current_profile,
+            diagnosis_context=context,
+            model_route_name="diagnosis",
+        )
+
+    return _diagnose
+
+
 def run_delivery(
     card_value: str, *, recovery: bool = False, required_run_id: str | None = None
 ) -> int:
@@ -7948,7 +7985,21 @@ def _run_delivery(
                 )
         from scripts.changerail.review_allowance import recovery_authorization
 
-        review_claim = recovery_authorization(runner_module(), previous_run)
+        try:
+            review_claim = recovery_authorization(runner_module(), previous_run)
+        except ReviewExhausted as exc:
+            from scripts.changerail import exhaustion_diagnosis
+
+            # Resuming an already-exhausted run is the same working stop, not a
+            # new failure. The predecessor stays frozen: read the decision state
+            # it already recorded instead of writing a second diagnosis into it.
+            raise AwaitingDecision(
+                f"{exc}; the predecessor holds the recorded diagnosis - choose a"
+                " transition with `rethink`, then resume",
+                state=exhaustion_diagnosis.decision_state(
+                    runner_module(), previous_run
+                ),
+            ) from None
     if recovery and native.is_native(card):
         changes = declared_change_plan(previous_run)
         from scripts.changerail import plan_restoration
@@ -8180,8 +8231,24 @@ def execute_prepared_delivery(
                 run["terminal_reason"] = (
                     "session exited without a clean published done card"
                 )
+        except AwaitingDecision as exc:
+            # A decision point, not a failure: history, accounting and frozen
+            # identity stay intact, and the run remains resumable after the
+            # operator records a choice.
+            code = 3
+            run["stop_state"] = "awaiting-operator-decision"
+            run["awaiting_decision"] = exc.state
+            run["terminal_reason"] = str(exc)
+            try:
+                retain_recovery_manifest(
+                    card_name=card.name, run_dir=run_dir, manifest=manifest
+                )
+            except DeliveryError as manifest_exc:
+                run["recovery_manifest_error"] = str(manifest_exc)
+            print(f"local ChangeRail: {exc}", file=sys.stderr)
         except DeliveryError as exc:
             code = 2
+            run["stop_state"] = "failed"
             run["terminal_reason"] = str(exc)
             try:
                 retain_recovery_manifest(
@@ -8654,6 +8721,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = admission_report(resolve_card(args.card))
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 0 if report["status"] == "READY" else 3
+    except AwaitingDecision as exc:
+        # An exhausted allowance is a decision point, not a failure. Nothing was
+        # overwritten and the retained history stays authoritative.
+        print(f"local ChangeRail: {exc}", file=sys.stderr)
+        return 3
     except (DeliveryError, OSError, subprocess.SubprocessError) as exc:
         print(f"local ChangeRail: {exc}", file=sys.stderr)
         return 2

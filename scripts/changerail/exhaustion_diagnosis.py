@@ -578,6 +578,41 @@ def announce(
     )
 
 
+def automatic_route(d: Any, run_dir: Path, value: dict[str, Any]) -> str | None:
+    """Route the one class that is automatic, or return None.
+
+    Only an infrastructure stop is prepared without an operator. The existing
+    technical recovery keeps its own guards: an unproven or unsupported failure
+    is refused here and reported, not forced through. Applying the prepared
+    proposal remains an operator action.
+    """
+    if value.get("primary_class") != "infrastructure":
+        return None
+    from scripts.changerail import technical_recovery
+
+    try:
+        proposal = technical_recovery.prepare(d, run_dir)
+    except DeliveryError as refusal:
+        return f"refused: {refusal}"
+    return f"prepared: {proposal['proposal']}"
+
+
+def decision_state(d: Any, run_dir: Path) -> dict[str, Any]:
+    """Machine-readable state of a run that waits for an operator decision."""
+    value = diagnosis(d, run_dir)
+    path = _rethink_root(d, run_dir) / "diagnosis.json"
+    return {
+        "schema": "changerail.awaiting-operator-decision.v1",
+        "run": value["run"],
+        "primary_class": value["primary_class"],
+        "rationale": value["rationale"],
+        "recommendation": value["recommendation"],
+        "options": [item["id"] for item in value["options"]],
+        "diagnosis": d.repo_relative(path) if path.is_file() else None,
+        "diagnosis_sha256": value["diagnosis_sha256"],
+    }
+
+
 def recorded_choice(d: Any, run_dir: Path) -> dict[str, Any] | None:
     """Latest recorded operator choice, refused when it no longer matches state."""
     directory = _rethink_root(d, run_dir) / "choices"
