@@ -1,13 +1,13 @@
 # Выход из двух подряд NO-GO: разбор, выбор, продолжение
 
 ## Status
-1.backlog
+4.done
 
 ## Lifecycle
 openspec-v1
 
 ## OpenSpec Stage
-artifacts
+archived
 
 ## Owner
 unassigned
@@ -113,7 +113,8 @@ unassigned
 ```
 Выполнено 2026-09-12 для решения `5a12c46` (проверки воспроизводимы на этом
 коммите):
-- `./.changerail/openspec validate --all --strict --no-interactive` — 4 passed.
+- `./.changerail/openspec validate --all --strict --no-interactive` — 4 passed до
+  архивации, 3 после (change стал `openspec/changes/archive/2026-09-13-rethink-exhausted-review/`).
 - `./.venv/bin/python -m pytest -q tools/changerail/tests/test_exhaustion_diagnosis.py tools/changerail/tests/test_review_allowance_integration.py tools/changerail/tests/test_native_execution_contract.py tools/changerail/tests/test_native_openspec_integration.py` — 115 passed (41 + 17 + 49 + 8).
 - `./.venv/bin/python -m pytest -n 16 tools/changerail/tests -q` — 1282 passed за 4:58.
 - `./.venv/bin/python -m ruff check scripts tools/changerail/tests distribution.py` — All checks passed.
@@ -175,10 +176,16 @@ accounting и frozen identity, `status` отдаёт `stop_state` и
 исправлен коммитом `5a12c46`; findings 1–14 разобраны, что именно сделано и что
 сознательно оставлено иначе — в Log.
 
-Осталось: 5.4 — повторный узкий внешний review коммита `5a12c46` и архивация
-change после вердикта. Это операторское действие: worker не выдаёт себе ревью.
+Внешний review пройден в три прохода: NO-GO, NO-GO, GO-WITH-NITS; все находки
+закрыты регрессиями, четвёртый проход не требуется по заключению ревьюера
+(«no further code re-review of the routing behavior is needed»). Change
+архивирован 2026-09-13; шесть требований добавлены в
+`openspec/specs/native-delivery/spec.md`. Решение оператора по C4 (убрать
+техническое восстановление из маршрутов исчерпания) зафиксировано как амендмент
+и внесено в карточку, delta-спеку, design и документацию.
 
 ## Next
+- Нет: change архивирован, все 21 задача закрыта.
 - Реализация change — коммиты `be40f82..5a12c46` (разбор повторяемости, схема
   диагностики, операторские записи, модельная диагностика, состояние решения,
   исправление по внешнему review); карточная часть — `79a7171`.
