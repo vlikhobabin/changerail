@@ -4458,6 +4458,7 @@ def require_repaired_final_payload(run_dir: Path) -> None:
 def build_recovery_context(
     *, run_dir: Path, previous_run: Path, objective: str,
     review_authorization: dict[str, Any] | None = None,
+    decision: dict[str, Any] | None = None,
 ) -> Path:
     current_fingerprint = payload_fingerprint()
     plan = declared_change_plan(run_dir) or []
@@ -4561,6 +4562,27 @@ def build_recovery_context(
         context["instruction"] += (
             " The operator authorized one additional independent review only. "
             "Repair within the accepted scope; all proof, handoff and final gates remain required."
+        )
+    if isinstance(decision, dict) and decision.get("option"):
+        from scripts.changerail import exhaustion_diagnosis
+
+        option = str(decision["option"])
+        spec = exhaustion_diagnosis.OPTION_SPECS.get(option, {})
+        context["operator_decision"] = {
+            "schema": decision.get("schema"),
+            "option": option,
+            "transition": decision.get("transition"),
+            "reviews": decision.get("reviews"),
+            "primary_class": decision.get("primary_class"),
+            "reason": decision.get("reason"),
+            "choice_sha256": decision.get("choice_sha256"),
+            "effect": spec.get("effect"),
+        }
+        context["instruction"] += (
+            f" The operator chose `{option}` for this continuation after the review"
+            f" allowance was exhausted: {spec.get('effect') or 'follow the recorded decision'}."
+            " Follow that decision; repeating the rejected repair shape does not"
+            " satisfy it."
         )
     # Context readers also support historical owner-less unit inputs. Ordinary
     # native execution still requires its pinned owner in _run_observed_contract.
@@ -7613,8 +7635,19 @@ def start_delivery_card(card: Path, manifest: dict[str, Any]) -> Path:
     return target
 
 
-def build_repair_context(*, card: Path, run_dir: Path, reason: str) -> Path:
-    """Create the bounded finding or floor context for one repair turn."""
+def build_repair_context(
+    *,
+    card: Path,
+    run_dir: Path,
+    reason: str,
+    decision: dict[str, Any] | None = None,
+) -> Path:
+    """Create the bounded finding or floor context for one repair turn.
+
+    When a repair continues an exhausted review, the operator's recorded decision
+    is carried into the turn: a chosen option is an instruction, not a
+    suggestion, and it must reach the session that does the work.
+    """
     reviews = _completed_review_verdicts(run_dir / "reviews")
     verdict = load_json(reviews[-1]) if reviews else None
     verification_path = run_dir / "verification.json"
@@ -7648,6 +7681,27 @@ def build_repair_context(*, card: Path, run_dir: Path, reason: str) -> Path:
                 " repair of the same shape is not sufficient. Change the approach and"
                 " state explicitly what is different this time."
             )
+    if isinstance(decision, dict) and decision.get("option"):
+        from scripts.changerail import exhaustion_diagnosis
+
+        option = str(decision["option"])
+        spec = exhaustion_diagnosis.OPTION_SPECS.get(option, {})
+        payload["operator_decision"] = {
+            "schema": decision.get("schema"),
+            "option": option,
+            "transition": decision.get("transition"),
+            "reviews": decision.get("reviews"),
+            "primary_class": decision.get("primary_class"),
+            "reason": decision.get("reason"),
+            "choice_sha256": decision.get("choice_sha256"),
+            "effect": spec.get("effect"),
+        }
+        payload["instruction"] += (
+            f" The operator chose `{option}` after the review allowance was"
+            f" exhausted: {spec.get('effect') or 'follow the recorded decision'}."
+            " That decision describes the required approach; a repair that repeats"
+            " the rejected shape does not satisfy it."
+        )
     root = run_dir / "repair-contexts"
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"repair-{len(list(root.glob('repair-*.json'))) + 1:02d}.json"
@@ -7733,27 +7787,56 @@ def orchestrate_delivery(
     """Own review, repair, verification, and publish outside the LLM."""
     from scripts.changerail.review_allowance import require_remaining
 
+    # A recorded operator decision decides how the granted slot is spent: re-review
+    # the unchanged payload, or repair with the chosen approach.
+    found = _lineage_decision(run_dir)
+    decision = found[0] if found is not None else None
+    transition = decision.get("transition") if decision else None
+    if transition in SEPARATE_ROUTES:
+        raise _separate_route_stop(decision, found[1])
+    re_review = transition == "review"
+    if re_review:
+        # `re-review` is the operator's answer to an unreproducible observation:
+        # the payload stays as it is and only the observed scope, the
+        # deterministic pre-review floor and the independent review repeat. Both
+        # records are runner-owned and describe the unchanged payload, so no
+        # writer is started; if either cannot be re-established the ordinary
+        # repair path takes over instead of sending the gate something it will
+        # reject.
+        emit_event("review", "operator decided to re-review the unchanged payload")
+        re_review = bool(os.environ.get("CHRL_RUN_DIR"))
+        if re_review:
+            try:
+                capture_manifest(str(card))
+                re_review = preverify(str(card)) == 0
+            except DeliveryError:
+                re_review = False
+        if not re_review:
+            emit_event("review", "re-review gates failed; repairing instead")
+    thread_id = resume_thread_id
     if native.is_native(card) and (not (run_dir / "native-archive.json").exists()):
         from scripts.changerail.native_workflow import launch_groups
 
-        launch_groups(
-            runner_module(),
+        if not re_review:
+            launch_groups(
+                runner_module(),
+                card=card,
+                run_dir=run_dir,
+                current_profile=current_profile,
+                recovery_context=recovery_context,
+            )
+            resume_thread_id = None
+            require_first_file_change = False
+    if not re_review:
+        thread_id = launch_implementation_stage(
             card=card,
             run_dir=run_dir,
             current_profile=current_profile,
+            resume_thread_id=resume_thread_id,
             recovery_context=recovery_context,
+            require_first_file_change=require_first_file_change,
+            inherited_investigative_commands=inherited_investigative_commands,
         )
-        resume_thread_id = None
-        require_first_file_change = False
-    thread_id = launch_implementation_stage(
-        card=card,
-        run_dir=run_dir,
-        current_profile=current_profile,
-        resume_thread_id=resume_thread_id,
-        recovery_context=recovery_context,
-        require_first_file_change=require_first_file_change,
-        inherited_investigative_commands=inherited_investigative_commands,
-    )
     while True:
         require_frozen_execution(run_dir)
         emit_event("review", "waiting")
@@ -7769,24 +7852,13 @@ def orchestrate_delivery(
                     exc,
                     launch=_diagnosis_launcher(card, run_dir, current_profile),
                 ) from None
-            # A recorded operator choice decides how the granted slot is spent:
-            # re-review the unchanged payload, or repair with the chosen approach.
-            choice: dict[str, Any] | None = None
-            try:
-                from scripts.changerail import exhaustion_diagnosis
-
-                choice = exhaustion_diagnosis.recorded_choice(
-                    runner_module(), run_dir
-                )
-            except DeliveryError:
-                choice = None
-            if choice is not None and choice.get("transition") == "review":
+            if decision is not None and decision.get("transition") == "review":
                 emit_event("review", "operator chose to re-review the payload")
                 continue
             repair_reason = "semantic_review"
             repair_thread_id = thread_id
             repair = build_repair_context(
-                card=card, run_dir=run_dir, reason=repair_reason
+                card=card, run_dir=run_dir, reason=repair_reason, decision=decision
             )
             thread_id = launch_implementation_stage(
                 card=card,
@@ -7833,9 +7905,23 @@ def orchestrate_delivery(
         if verification_code == 0:
             emit_event("publish", "finalizing")
             return publish(str(card))
-        require_remaining(runner_module(), run_dir, after=" after failed final verification")
+        try:
+            require_remaining(
+                runner_module(), run_dir, after=" after failed final verification"
+            )
+        except ReviewExhausted as exc:
+            # Exhaustion here is the same working stop as a second NO-GO and must
+            # not degrade into a bare failure just because the last stop came from
+            # the final floor.
+            raise _exhaustion_decision(
+                run_dir,
+                card,
+                current_profile,
+                exc,
+                launch=_diagnosis_launcher(card, run_dir, current_profile),
+            ) from None
         repair = build_repair_context(
-            card=card, run_dir=run_dir, reason="final_verification"
+            card=card, run_dir=run_dir, reason="final_verification", decision=decision
         )
         thread_id = launch_implementation_stage(
             card=card,
@@ -7934,6 +8020,65 @@ def _exhaustion_decision(
     )
 
 
+def _lineage_decision(run_dir: Path) -> tuple[dict[str, Any], Path] | None:
+    """The recorded operator decision this continuation must honour, and where.
+
+    A decision is recorded on the run that stopped for it, while a granted
+    continuation executes in the successor run. Only the immediate predecessor
+    can hold the decision that authorizes this continuation: a deeper ancestor's
+    decision was already spent on an earlier successor. A record that no longer
+    matches its own retained state is refused by ``recorded_choice`` and stops
+    the continuation instead of being silently dropped.
+    """
+    from scripts.changerail import exhaustion_diagnosis
+
+    origins = [run_dir]
+    try:
+        origins.extend(recovery_ancestors(run_dir)[:1])
+    except DeliveryError:
+        # A run without a valid native recovery chain holds no recorded decision.
+        pass
+    for origin in origins:
+        choice = exhaustion_diagnosis.recorded_choice(runner_module(), origin)
+        if choice is not None:
+            return choice, origin
+    return None
+
+
+def _lineage_choice(run_dir: Path) -> dict[str, Any] | None:
+    found = _lineage_decision(run_dir)
+    return found[0] if found is not None else None
+
+
+# Transitions a recorded decision names but the runner must not execute as an
+# ordinary repair: each one belongs to a separate, explicit operator route.
+SEPARATE_ROUTES = {
+    "close-and-replan",
+    "close-attempt",
+    "technical-recovery",
+    "amend-criterion",
+}
+
+
+def _separate_route_stop(
+    decision: dict[str, Any], origin: Path
+) -> AwaitingDecision:
+    """Stop a continuation whose recorded transition needs its own route."""
+    from scripts.changerail import exhaustion_diagnosis
+
+    emit_event("rethink", "recorded-decision-needs-a-separate-route")
+    transition = decision.get("transition")
+    detail = (
+        f"the operator decision `{decision.get('option')}` ({transition}) is"
+        " recorded, but it is not a delivery continuation:"
+        f" {exhaustion_diagnosis.followup(transition if isinstance(transition, str) else None)}"
+    )
+    return AwaitingDecision(
+        detail,
+        state=exhaustion_diagnosis.decision_state(runner_module(), origin),
+    )
+
+
 def _diagnosis_launcher(
     card: Path, run_dir: Path, current_profile: dict[str, Any]
 ) -> Any:
@@ -7992,10 +8137,11 @@ def _run_delivery(
 
             # Resuming an already-exhausted run is the same working stop, not a
             # new failure. The predecessor stays frozen: read the decision state
-            # it already recorded instead of writing a second diagnosis into it.
+            # it recorded instead of writing into it.
             raise AwaitingDecision(
-                f"{exc}; the predecessor holds the recorded diagnosis - choose a"
-                " transition with `rethink`, then resume",
+                f"{exc}; this run waits for an operator decision - inspect the"
+                " transitions with `rethink`, then grant the next review with"
+                " `review-allow` and resume",
                 state=exhaustion_diagnosis.decision_state(
                     runner_module(), previous_run
                 ),
@@ -8144,6 +8290,7 @@ def _run_delivery(
                 previous_run=previous_run,
                 objective=str(run["recovery_objective"]),
                 review_authorization=review_claim[1] if review_claim else None,
+                decision=_lineage_choice(run_dir),
             )
             recovery_payload = load_json(recovery_context)
             run["resume_thread_id"] = resume_thread_id

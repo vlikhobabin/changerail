@@ -9,8 +9,10 @@ finding list. Nothing here grants authority or spends review allowance.
 
 from __future__ import annotations
 
+import getpass
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,7 @@ from scripts.changerail.contracts import DeliveryError
 
 RECURRENCE_SCHEMA = "changerail.review-recurrence.v1"
 CONDITION_SUFFIX = re.compile(r"([A-Za-z][A-Za-z0-9._-]*)$")
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 FAILED = "fail"
 
 
@@ -94,25 +97,47 @@ def _findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _cycles(d: Any, run_dir: Path) -> list[dict[str, Any]]:
-    history = run_dir / "reviews"
-    cycles = []
-    for index, path in enumerate(d._completed_review_verdicts(history), start=1):
-        try:
-            verdict = d.load_json(path)
-        except DeliveryError:
-            continue
-        if not isinstance(verdict, dict):
-            continue
-        cycles.append(
-            {
-                "cycle": index,
-                "path": d.repo_relative(path),
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "result": verdict.get("result"),
-                "conditions": _conditions(verdict),
-                "findings": _findings(verdict),
-            }
-        )
+    """Completed verdicts of the whole recovery lineage, oldest first.
+
+    A successor run continues the same attempt, so its reasons only make sense
+    against the reviews that already rejected the lineage. Cycle numbers are
+    therefore lineage-wide, and a verdict retained twice is counted once.
+    """
+    roots = [run_dir]
+    try:
+        roots = [*reversed(d.recovery_ancestors(run_dir)), run_dir]
+    except DeliveryError:
+        # A run outside a valid recovery chain reports its own history only.
+        pass
+    cycles: list[dict[str, Any]] = []
+    # A successor that retained copies of its predecessor's verdicts must not
+    # count them twice; genuinely identical cycles inside one run still stand.
+    inherited: set[str] = set()
+    for root in roots:
+        retained_here: set[str] = set()
+        for path in d._completed_review_verdicts(root / "reviews"):
+            try:
+                verdict = d.load_json(path)
+            except DeliveryError:
+                continue
+            if not isinstance(verdict, dict):
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest in inherited:
+                continue
+            retained_here.add(digest)
+            cycles.append(
+                {
+                    "cycle": len(cycles) + 1,
+                    "run": root.name,
+                    "path": d.repo_relative(path),
+                    "sha256": digest,
+                    "result": verdict.get("result"),
+                    "conditions": _conditions(verdict),
+                    "findings": _findings(verdict),
+                }
+            )
+        inherited |= retained_here
     return cycles
 
 
@@ -231,6 +256,7 @@ CLASSES = (
 
 OPTION_SPECS: dict[str, dict[str, Any]] = {
     "systemic-repair": {
+        "preconditions": "The payload can still be repaired inside the accepted scope, and the operator grants the one review this costs.",
         "effect": "One in-scope repair that changes the approach, then one independent review.",
         "reviews": 1,
         "scope": "in-scope",
@@ -238,6 +264,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "repair",
     },
     "continue-repair": {
+        "preconditions": "The remaining accepted work is unfinished and no accepted criterion has to change.",
         "effect": "Finish the remaining in-scope work, then one independent review.",
         "reviews": 1,
         "scope": "in-scope",
@@ -245,6 +272,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "repair",
     },
     "re-review": {
+        "preconditions": "The payload is reviewable as it stands: the observed scope and the deterministic pre-review floor can be re-established for the same bytes.",
         "effect": "Repeat the independent review on the unchanged payload.",
         "reviews": 1,
         "scope": "in-scope",
@@ -252,6 +280,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "review",
     },
     "revise-plan": {
+        "preconditions": "The operator accepts that the current attempt is closed as unsuccessful and that a separate new plan must be accepted.",
         "effect": "Close this attempt as unsuccessful and accept a separate new plan.",
         "reviews": 0,
         "scope": "new-plan",
@@ -259,6 +288,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "close-and-replan",
     },
     "extend-proof-model": {
+        "preconditions": "The proof model needs a tool change, which is a separate delivery, not a repair inside this attempt.",
         "effect": "Change the tool so the required proof can be expressed, then replan.",
         "reviews": 0,
         "scope": "tool-change",
@@ -266,6 +296,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "close-and-replan",
     },
     "amend-criterion": {
+        "preconditions": "The operator restates the criterion explicitly with `rethink --amend-criterion`, and the amended criterion is accepted before any further implementation.",
         "effect": "Restate an unachievable acceptance criterion as a separate operator decision.",
         "reviews": 1,
         "scope": "criterion",
@@ -273,6 +304,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "amend-criterion",
     },
     "technical-recovery": {
+        "preconditions": "A retained capacity failure makes this an environment stop rather than a product defect.",
         "effect": "Treat the stop as an infrastructure failure and use the existing recovery route.",
         "reviews": 0,
         "scope": "infrastructure",
@@ -280,6 +312,7 @@ OPTION_SPECS: dict[str, dict[str, Any]] = {
         "transition": "technical-recovery",
     },
     "close-attempt": {
+        "preconditions": "The operator decides the attempt ends without a successor plan.",
         "effect": "Close the attempt as unsuccessful without a new plan.",
         "reviews": 0,
         "scope": "terminal",
@@ -374,14 +407,38 @@ def _deterministic(d: Any, run_dir: Path) -> dict[str, Any]:
         "options": options_for(primary),
         "recommendation": RECOMMENDED.get(primary or ""),
         "recurrence": report,
-        "diagnosis_sha256": _digest(
-            {
-                "run": report["run"],
-                "recurrence_sha256": report["recurrence_sha256"],
-                "primary_class": primary,
-            }
-        ),
+        "diagnosis_sha256": _state_digest(d, run_dir, report, primary),
     }
+
+
+def _state_digest(
+    d: Any, run_dir: Path, report: dict[str, Any], primary: str | None
+) -> str:
+    """Digest of the exact lineage state a diagnosis speaks about.
+
+    The verdict history alone is not the state: a diagnosis and the choice it
+    supports must become inapplicable when the accepted plan or the payload
+    changes, even before another review exists. A layer that cannot observe the
+    working tree records that explicitly instead of pretending the state is
+    bound.
+    """
+    try:
+        plan = d.declared_change_plan(run_dir)
+    except (DeliveryError, OSError):
+        plan = None
+    try:
+        fingerprint: str | None = d.payload_fingerprint()
+    except (DeliveryError, OSError):
+        fingerprint = None
+    return _digest(
+        {
+            "run": report["run"],
+            "recurrence_sha256": report["recurrence_sha256"],
+            "primary_class": primary,
+            "change_plan": [list(group) for group in plan] if plan else None,
+            "payload_fingerprint": fingerprint,
+        }
+    )
 
 
 MODEL_SCHEMA = "changerail.exhausted-review-diagnosis-model.v1"
@@ -409,6 +466,10 @@ CONSISTENT_WITH_NEW = frozenset(
         "unsatisfiable",
     }
 )
+# With no comparable condition or finding in the retained history the runner
+# cannot confirm any claim about the criteria or the plan, so a model may only
+# report what this stop itself shows.
+UNVERIFIED_BASE_CLASSES = frozenset({"unreproducible", "infrastructure"})
 
 
 def route(d: Any, current_profile: dict[str, Any]) -> tuple[str, str] | None:
@@ -444,18 +505,18 @@ def _refine(d: Any, run_dir: Path, base: dict[str, Any]) -> dict[str, Any]:
     elif report["new_failures"]:
         allowed = CONSISTENT_WITH_NEW
     else:
-        allowed = frozenset(CLASSES)
+        # The retained verdicts show nothing comparable. A claim about the
+        # criteria or the plan then rests on no observation at all, so only the
+        # two classes that assert something about this stop itself are accepted:
+        # the observation did not reproduce, or the stop is environmental.
+        allowed = UNVERIFIED_BASE_CLASSES
     if primary not in allowed:
         return base
     rationale = claim.get("rationale")
     refined = {
         **base,
         "primary_class": primary,
-        # A model-claimed infrastructure stop is not automatic: only the
-        # deterministic analysis may route there without an operator.
-        "status": "auto"
-        if base["primary_class"] == "infrastructure"
-        else "operator_required",
+        "status": "operator_required",
         "rationale": rationale.strip()
         if isinstance(rationale, str) and rationale.strip()
         else base["rationale"],
@@ -466,13 +527,7 @@ def _refine(d: Any, run_dir: Path, base: dict[str, Any]) -> dict[str, Any]:
             "reasoning_effort": claim.get("reasoning_effort"),
         },
     }
-    refined["diagnosis_sha256"] = _digest(
-        {
-            "run": base["run"],
-            "recurrence_sha256": report["recurrence_sha256"],
-            "primary_class": primary,
-        }
-    )
+    refined["diagnosis_sha256"] = _state_digest(d, run_dir, report, primary)
     return refined
 
 
@@ -485,6 +540,10 @@ def diagnosis_context(d: Any, run_dir: Path) -> Path:
     """Write the bounded instruction for one diagnosis session."""
     base = _deterministic(d, run_dir)
     path = run_dir / CONTEXT_NAME
+    # The session runs from the repository root, so name the artifact by its
+    # repository-relative path: a bare filename would be written where the
+    # runner never reads it, and the refinement would silently never apply.
+    artifact = d.repo_relative(run_dir / MODEL_ARTIFACT)
     d.write_json(
         path,
         {
@@ -496,7 +555,7 @@ def diagnosis_context(d: Any, run_dir: Path) -> Path:
                 "options": base["options"],
             },
             "classes": list(CLASSES),
-            "artifact": MODEL_ARTIFACT,
+            "artifact": artifact,
             "artifact_schema": MODEL_SCHEMA,
             "instruction": (
                 "Two independent reviews rejected this lineage and the review"
@@ -509,7 +568,7 @@ def diagnosis_context(d: Any, run_dir: Path) -> Path:
                 " whether the observation is not reproducible, whether the stop is"
                 " infrastructure, or whether a criterion cannot be achieved as"
                 " written. Write "
-                f"{MODEL_ARTIFACT} with schema {MODEL_SCHEMA}, fields"
+                f"{artifact} with schema {MODEL_SCHEMA}, fields"
                 " primary_class (one of the listed classes), rationale and model."
                 " A class that denies an observed repetition or a newly failed"
                 " condition is rejected by the runner."
@@ -552,49 +611,67 @@ def announce(
             f" (recommended: {value['recommendation'] or 'operator judgement'});"
             f" available: {options}"
         )
-    transition = choice.get("transition")
+    return (
+        f"{reason}; operator chose {choice.get('option')}"
+        f" ({choice.get('transition')}): {followup(str(choice.get('transition')))}"
+    )
+
+
+def followup(transition: str | None) -> str:
+    """What the operator must do next for one recorded transition.
+
+    Shared by the stop message and by the runner: a decision the runner cannot
+    execute itself must name the separate route that can.
+    """
     if transition in {"close-and-replan", "close-attempt"}:
-        followup = (
+        return (
             "close this attempt as unsuccessful and accept a separate new plan;"
             " no review slot is spent by this route"
         )
-    elif transition == "technical-recovery":
-        followup = (
+    if transition == "technical-recovery":
+        return (
             "use the existing technical recovery route; this is not a product"
             " review decision"
         )
-    elif transition == "amend-criterion":
-        followup = (
-            "record the criterion amendment, then re-accept the plan before any"
+    if transition == "amend-criterion":
+        return (
+            "record the criterion amendment, then apply the new wording and"
+            " re-accept the plan through the ordinary board route before any"
             " further implementation"
         )
-    else:
-        followup = (
-            "grant the next review with review-allow and resume; the chosen"
-            " approach applies to the repair turn"
+    if transition == "review":
+        return (
+            "grant the next review with review-allow and resume; the runner"
+            " repeats the observed scope, the pre-review floor and the review"
+            " on the unchanged payload"
         )
     return (
-        f"{reason}; operator chose {choice.get('option')} ({transition}): {followup}"
+        "grant the next review with review-allow and resume; the chosen"
+        " approach applies to the repair turn"
     )
 
 
 def automatic_route(d: Any, run_dir: Path, value: dict[str, Any]) -> str | None:
-    """Route the one class that is automatic, or return None.
+    """Prepare the existing technical recovery for an infrastructure stop.
 
-    Only an infrastructure stop is prepared without an operator. The existing
-    technical recovery keeps its own guards: an unproven or unsupported failure
-    is refused here and reported, not forced through. Applying the prepared
-    proposal remains an operator action.
+    Only an infrastructure class is prepared without an operator, and this
+    function only *prepares*. The class itself grants nothing: the authority is
+    ``technical_recovery.prepare``, which independently requires a retained
+    capacity failure and refuses an unproven or unsupported stop. A model claim
+    is therefore a bounded proposal - the recovery guard decides whether it is
+    even expressible, and applying the prepared proposal stays an operator
+    action.
     """
     if value.get("primary_class") != "infrastructure":
         return None
     from scripts.changerail import technical_recovery
 
+    source = "deterministic" if value.get("status") == "auto" else "proposed"
     try:
         proposal = technical_recovery.prepare(d, run_dir)
     except DeliveryError as refusal:
-        return f"refused: {refusal}"
-    return f"prepared: {proposal['proposal']}"
+        return f"{source}, refused: {refusal}"
+    return f"{source}, prepared: {proposal['proposal']}"
 
 
 def decision_state(d: Any, run_dir: Path) -> dict[str, Any]:
@@ -627,7 +704,9 @@ def recorded_choice(d: Any, run_dir: Path) -> dict[str, Any] | None:
     return value
 
 
-def _rethink_root(d: Any, run_dir: Path) -> Path:    return d.RUNTIME_ROOT / "rethink" / run_dir.name
+def _rethink_root(d: Any, run_dir: Path) -> Path:
+    """Where the diagnosis, choices and amendments of one run are retained."""
+    return d.RUNTIME_ROOT / "rethink" / run_dir.name
 
 
 def write_diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
@@ -662,6 +741,40 @@ def _operator() -> None:
     guard()
 
 
+def _author() -> dict[str, Any]:
+    """Audit identity of the separate operator that recorded a decision.
+
+    This is not authentication: the trust boundary is ``_operator``, which
+    refuses any worker context. Recording who ran the command keeps the
+    immutable record readable as history.
+    """
+    try:
+        user: str | None = getpass.getuser()
+    except (OSError, KeyError):
+        user = None
+    return {"user": user, "uid": os.getuid()}
+
+
+def _retained_run(d: Any, run_dir: Path, what: str) -> Path:
+    """Accept one exact retained run directory, without symlinks or aliases."""
+    resolved = Path(run_dir).absolute()
+    if (
+        resolved.parent != d.RUNTIME_ROOT / "runs"
+        or not NAME.fullmatch(resolved.name)
+        or resolved.resolve() != resolved
+    ):
+        raise DeliveryError(f"{what} requires an exact retained run directory")
+    metadata = d._check_json(resolved / "run.json")
+    if metadata.get("run_id") != resolved.name:
+        raise DeliveryError(f"{what} requires the run's own directory")
+    return resolved
+
+
+def _choice_records(d: Any, run_dir: Path) -> list[Path]:
+    directory = _rethink_root(d, run_dir) / "choices"
+    return sorted(directory.glob("choice-*.json")) if directory.is_dir() else []
+
+
 def _append(d: Any, directory: Path, prefix: str, value: dict[str, Any]) -> Path:
     from scripts.changerail import plan_restoration as retained
 
@@ -681,18 +794,38 @@ def choose(
     reason: str,
     authorize: str | None = None,
 ) -> dict[str, Any]:
-    """Preview or append one immutable operator choice for a diagnosis."""
+    """Preview or append the one immutable operator choice for a diagnosis.
+
+    A decision is exclusive and non-accumulating: one diagnosis supports exactly
+    one transition, so a second, different choice is refused instead of silently
+    replacing the first. Recording the same choice again is idempotent.
+    """
     _operator()
     if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 1000:
         raise DeliveryError("choice requires a reason of 1..1000 characters")
-    run_dir = Path(run_dir).resolve()
-    if not run_dir.is_relative_to(d.RUNTIME_ROOT / "runs"):
-        raise DeliveryError("choice requires an exact retained run directory")
+    run_dir = _retained_run(d, run_dir, "choice")
     with d.delivery_lock():
         value = load_diagnosis(d, run_dir)
         available = {item["id"] for item in value["options"]}
         if option_id not in available:
             raise DeliveryError(f"option is not available for this diagnosis: {option_id}")
+        for path in _choice_records(d, run_dir):
+            recorded = d.load_json(path)
+            if recorded.get("diagnosis_sha256") != value["diagnosis_sha256"]:
+                continue
+            if recorded.get("option") != option_id or recorded.get("reason") != reason.strip():
+                raise DeliveryError(
+                    "this diagnosis already carries the"
+                    f" `{recorded.get('option')}` decision; one decision per"
+                    " exhausted state, and the recorded one is immutable"
+                )
+            # The same decision recorded again is the same decision.
+            return {
+                "state": "chosen",
+                "choice": recorded,
+                "path": d.repo_relative(path),
+                "reused": True,
+            }
         proposal = {
             "schema": CHOICE_SCHEMA,
             "run": value["run"],
@@ -702,6 +835,8 @@ def choose(
             "transition": OPTION_SPECS[option_id]["transition"],
             "reviews": OPTION_SPECS[option_id]["reviews"],
             "reason": reason.strip(),
+            "author": _author(),
+            "observed_at": d.utc_now(),
         }
         proposal["choice_sha256"] = _digest(proposal)
         if authorize is None:
@@ -732,9 +867,7 @@ def amend_criterion(
         if not isinstance(text, str) or not 1 <= len(text.strip()) <= 2000:
             raise DeliveryError(f"criterion amendment {label} must be 1..2000 characters")
     name = condition_name(condition) or condition
-    run_dir = Path(run_dir).resolve()
-    if not run_dir.is_relative_to(d.RUNTIME_ROOT / "runs"):
-        raise DeliveryError("amendment requires an exact retained run directory")
+    run_dir = _retained_run(d, run_dir, "amendment")
     with d.delivery_lock():
         value = load_diagnosis(d, run_dir)
         # The class is advisory: a deterministic analysis cannot prove a
@@ -758,6 +891,8 @@ def amend_criterion(
             "before": before.strip(),
             "after": after.strip(),
             "reason": reason.strip(),
+            "author": _author(),
+            "observed_at": d.utc_now(),
         }
         proposal["amendment_sha256"] = _digest(proposal)
         if authorize is None:

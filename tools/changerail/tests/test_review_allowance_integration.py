@@ -51,7 +51,12 @@ def lineage(tmp_path, monkeypatch):
         if ordinal > 2:
             claim = delivery._check_json(selected / "recovery-context.json")
             assert claim["review_authorization"] == context["review_authorization"]
-            assert claim["current_fingerprint"] != delivery.payload_fingerprint()
+            decision = claim.get("operator_decision") or {}
+            if decision.get("transition") == "review":
+                # The operator ordered a re-review: the payload must be untouched.
+                assert claim["current_fingerprint"] == delivery.payload_fingerprint()
+            else:
+                assert claim["current_fingerprint"] != delivery.payload_fingerprint()
         launches.append((selected.name, context["cycle"], ordinal))
         session = selected / "sessions" / f"review-{context['cycle']:02d}"
         delivery.write_json(session / "session.json", {
@@ -160,8 +165,9 @@ def test_diagnosis_grants_no_slot_and_never_continues_delivery(lineage):
     assert (exhaustion["operator_granted_slots"], exhaustion["spent_reviews"], exhaustion["remaining"]) == (0, 2, 0)
     # The stop is a decision point that records why, not an error path.
     assert delivery.main(["resume", str(original)]) == 3
-    # This fixture keeps no per-cycle verdict history, so the analysis stays
-    # undetermined and offers the fallback operator menu.
+    # This fixture's retained verdicts carry no comparable conditions or
+    # findings, so the analysis stays undetermined and offers the fallback
+    # operator menu; real verdict shapes are proven in test_exhaustion_diagnosis.
     recorded = rethink.write_diagnosis(delivery, original)
     assert recorded["schema"] == "changerail.exhausted-review-diagnosis.v1"
     assert "systemic-repair" in [item["id"] for item in recorded["options"]]
@@ -187,6 +193,72 @@ def test_diagnosis_grants_no_slot_and_never_continues_delivery(lineage):
     assert snapshot(original) == run_before
     assert card.read_bytes() == card_before
     assert len(list((delivery.RUNTIME_ROOT / "rethink" / original.name / "choices").glob("*.json"))) == 1
+
+
+def _record_decision(exhausted, option, reason):
+    """The documented operator flow: inspect the diagnosis, then decide."""
+    from scripts.changerail import exhaustion_diagnosis as rethink
+
+    rethink.write_diagnosis(delivery, exhausted)
+    preview = rethink.choose(delivery, exhausted, option_id=option, reason=reason)
+    assert preview["state"] == "preview"
+    rethink.choose(
+        delivery, exhausted, option_id=option, reason=reason,
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+    return rethink.recorded_choice(delivery, exhausted)
+
+
+def test_recorded_decision_reaches_the_continuation(lineage):
+    """C4: the decision recorded on the exhausted run shapes the successor's work."""
+    _root, card, original, launches = lineage
+    assert delivery.main(["resume", str(original)]) == 3
+    reason = "the same approach twice did not move the condition"
+    choice = _record_decision(original, "systemic-repair", reason)
+
+    receipt = authorize(original, "grant the review for the chosen approach")
+    child = delivery.RUNTIME_ROOT / "runs" / receipt["proposal"]["successor_run_id"]
+    assert not child.exists()
+    assert delivery.main(["resume", str(original)]) == 3  # The single granted review NO-GOs.
+
+    context = delivery._check_json(child / "recovery-context.json")
+    carried = context["operator_decision"]
+    assert carried["option"] == "systemic-repair"
+    assert carried["reason"] == reason
+    assert carried["choice_sha256"] == choice["choice_sha256"]
+    assert "systemic-repair" in context["instruction"]
+    # The session that does the work is told the decision, not merely the menu.
+    assert "operator chose" in context["instruction"].lower()
+    # The granted slot is still exactly one, and the accounting is unchanged.
+    assert policy.allowance(delivery, child)["spent_reviews"] == 3
+
+
+def test_re_review_decision_skips_repair_and_reviews_the_unchanged_payload(lineage):
+    """C4: `re-review` spends the granted slot on a review, not on another repair."""
+    from scripts.changerail import exhaustion_diagnosis as rethink
+
+    _root, card, original, launches = lineage
+    assert delivery.main(["resume", str(original)]) == 3
+    # An unreproducible observation is what offers `re-review`; the class arrives
+    # through the one bounded diagnosis session.
+    delivery.write_json(original / rethink.MODEL_ARTIFACT, {
+        "schema": rethink.MODEL_SCHEMA,
+        "primary_class": "unreproducible",
+        "rationale": "model view: the reported observation does not reproduce",
+        "model": {"model": "fixture", "reasoning_effort": "high"},
+    })
+    _record_decision(original, "re-review", "the observation does not reproduce")
+
+    receipt = authorize(original, "grant the review on the unchanged payload")
+    child = delivery.RUNTIME_ROOT / "runs" / receipt["proposal"]["successor_run_id"]
+    payload_before = (delivery.REPO_ROOT / "tracked.txt").read_text()
+    assert delivery.main(["resume", str(original)]) == 3
+
+    # Exactly one more launch: the independent review. No repair was started.
+    assert launches[-1] == (child.name, 1, 3)
+    assert len(launches) == 3
+    assert not (child / "repair-contexts").exists()
+    assert (delivery.REPO_ROOT / "tracked.txt").read_text() == payload_before
 
 
 @pytest.mark.parametrize("boundary", ["mkdir", "context", "dispatch"])
@@ -414,3 +486,58 @@ def test_lost_authorize_response_reuses_the_published_record(lineage, monkeypatc
     assert policy.allowance(delivery, origin)["operator_granted_slots"] == 1
     assert not (delivery.RUNTIME_ROOT / "runs" / receipt["proposal"]["successor_run_id"]).exists()
     assert snapshot(origin) == before
+
+
+def test_separate_route_decision_stops_instead_of_repairing(lineage):
+    """C4: a transition that needs its own route must not become a silent repair."""
+    _root, card, original, launches = lineage
+    assert delivery.main(["resume", str(original)]) == 3
+    _record_decision(original, "revise-plan", "the accepted plan and the reviews conflict")
+
+    receipt = authorize(original, "grant the review for the replan")
+    child = delivery.RUNTIME_ROOT / "runs" / receipt["proposal"]["successor_run_id"]
+    assert delivery.main(["resume", str(original)]) == 3
+
+    # Neither the reviewer nor an implementation session was started...
+    assert launches == [(original.name, 1, 1), (original.name, 2, 2)]
+    assert not (child / "repair-contexts").exists()
+    # ...and no review of the product budget was spent by the separate route.
+    status = policy.allowance(delivery, child)
+    assert (status["spent_reviews"], status["remaining"]) == (2, 1)
+    stopped = delivery._check_json(child / "run.json")
+    assert stopped["stop_state"] == "awaiting-operator-decision"
+    assert "close this attempt" in stopped["terminal_reason"]
+    # The stop is visible through the ordinary status surface.
+    assert delivery.main(["status", str(child)]) == 0
+
+
+def test_status_surfaces_the_awaiting_decision(lineage, capsys):
+    _root, card, original, launches = lineage
+    assert delivery.main(["resume", str(original)]) == 3
+    receipt = authorize(original, "grant the review that will be spent")
+    child = delivery.RUNTIME_ROOT / "runs" / receipt["proposal"]["successor_run_id"]
+    assert delivery.main(["resume", str(original)]) == 3
+    capsys.readouterr()
+
+    assert delivery.main(["status", str(child)]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["stop_state"] == "awaiting-operator-decision"
+    assert payload["awaiting_decision"]["schema"] == "changerail.awaiting-operator-decision.v1"
+    assert payload["awaiting_decision"]["options"]
+
+
+def test_payload_change_makes_the_decision_and_diagnosis_stale(lineage):
+    """A diagnosis and its choice speak about exact bytes, not about a run name."""
+    from scripts.changerail import exhaustion_diagnosis as rethink
+
+    _root, card, original, launches = lineage
+    assert delivery.main(["resume", str(original)]) == 3
+    _record_decision(original, "systemic-repair", "repair the repeated condition")
+
+    delivery.REPO_ROOT.joinpath("tracked.txt").write_text("payload moved after the decision\n")
+
+    with pytest.raises(delivery.DeliveryError, match="stale"):
+        rethink.load_diagnosis(delivery, original)
+    with pytest.raises(delivery.DeliveryError, match="stale"):
+        rethink.recorded_choice(delivery, original)

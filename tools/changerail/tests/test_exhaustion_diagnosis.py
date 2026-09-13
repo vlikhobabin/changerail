@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -51,12 +53,12 @@ def _finding(number: int, paths: list[str]) -> dict:
     }
 
 
-def _run(tmp_path: Path, monkeypatch, cycles: list[dict]) -> Path:
+def _run(tmp_path: Path, monkeypatch, cycles: list[dict], name: str = "example-run") -> Path:
     monkeypatch.setattr(delivery, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(delivery, "RUNTIME_ROOT", tmp_path / ".runtime/changerail")
-    run = tmp_path / ".runtime/changerail/runs/example-run"
+    run = tmp_path / ".runtime/changerail/runs" / name
     (run / "reviews").mkdir(parents=True, exist_ok=True)
-    delivery.write_json(run / "run.json", {"run_id": "example-run"})
+    delivery.write_json(run / "run.json", {"run_id": name})
     for index, cycle in enumerate(cycles, start=1):
         delivery.write_json(run / "reviews" / f"cycle-{index:02d}.json", cycle)
     return run
@@ -569,9 +571,11 @@ def test_automatic_route_prepares_technical_recovery_for_infrastructure(
         lambda d, r: (seen.append(r), {"proposal": "/tmp/proposal.json"})[1],
     )
 
-    note = diagnosis.automatic_route(delivery, run, {"primary_class": "infrastructure"})
+    note = diagnosis.automatic_route(
+        delivery, run, {"primary_class": "infrastructure", "status": "auto"}
+    )
 
-    assert note == "prepared: /tmp/proposal.json"
+    assert note == "deterministic, prepared: /tmp/proposal.json"
     assert seen == [run]
 
 
@@ -585,9 +589,18 @@ def test_automatic_route_reports_a_refusal_from_recovery_guards(tmp_path, monkey
 
     monkeypatch.setattr(technical_recovery, "prepare", refuse)
 
-    note = diagnosis.automatic_route(delivery, run, {"primary_class": "infrastructure"})
+    note = diagnosis.automatic_route(
+        delivery, run, {"primary_class": "infrastructure", "status": "auto"}
+    )
 
-    assert note == "refused: not a proven capacity failure"
+    assert note == "deterministic, refused: not a proven capacity failure"
+
+    # A class the model merely proposed is reported as a proposal, and the
+    # recovery guard still decides whether it is expressible at all.
+    proposed = diagnosis.automatic_route(
+        delivery, run, {"primary_class": "infrastructure", "status": "operator_required"}
+    )
+    assert proposed == "proposed, refused: not a proven capacity failure"
 
 
 def test_automatic_route_ignores_every_other_class(tmp_path, monkeypatch):
@@ -597,3 +610,118 @@ def test_automatic_route_ignores_every_other_class(tmp_path, monkeypatch):
         is None
     )
     assert diagnosis.automatic_route(delivery, run, {"primary_class": None}) is None
+
+
+def test_options_carry_effect_price_and_preconditions(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+
+    value = diagnosis.diagnosis(delivery, run)
+
+    for item in value["options"]:
+        assert item["preconditions"].strip()
+        assert item["effect"].strip()
+    # C4 requires the price to be readable, not implicit in the option name.
+    assert {item["id"]: (item["reviews"], item["scope"], item["architecture"]) for item in value["options"]} == {
+        "systemic-repair": (1, "in-scope", False),
+        "revise-plan": (0, "new-plan", True),
+    }
+    assert value["recommendation"] == "systemic-repair"
+
+
+def test_recurrence_spans_the_recovery_lineage(tmp_path, monkeypatch):
+    """A successor's diagnosis must see the reviews that rejected the lineage."""
+    first = _verdict("no-go", [_condition("C1", "fail")], [_finding(1, ["src/a.py"])])
+    predecessor = _run(tmp_path, monkeypatch, [first], name="run-1")
+    second = _verdict("no-go", [_condition("C1", "fail")], [_finding(2, ["src/a.py"])])
+    successor = _run(tmp_path, monkeypatch, [second], name="run-2")
+
+    monkeypatch.setattr(
+        delivery, "recovery_ancestors", lambda run: [predecessor] if run == successor else []
+    )
+    report = diagnosis.recurrence(delivery, successor)
+
+    assert report["recurring_conditions"] == ["C1"]
+    assert [item["cycle"] for item in report["conditions"]["C1"]] == [1, 2]
+    assert [item["id"] for item in report["recurring_findings"]] == ["R2"]
+
+
+def test_inherited_verdict_copies_are_not_counted_twice(tmp_path, monkeypatch):
+    first = _verdict("no-go", [_condition("C1", "fail")], [])
+    predecessor = _run(tmp_path, monkeypatch, [first], name="run-3")
+    successor = _run(tmp_path, monkeypatch, [], name="run-4")
+    shutil.copy2(predecessor / "reviews" / "cycle-01.json", successor / "reviews" / "cycle-01.json")
+    monkeypatch.setattr(
+        delivery, "recovery_ancestors", lambda run: [predecessor] if run == successor else []
+    )
+
+    report = diagnosis.recurrence(delivery, successor)
+
+    assert report["cycle_count"] == 1
+
+
+def test_unsupported_class_on_an_unverified_base_is_rejected(tmp_path, monkeypatch):
+    """Nothing comparable in the history cannot support a claim about the plan."""
+    run = _undetermined_run(tmp_path, monkeypatch)
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("unsatisfiable"))
+
+    value = diagnosis.diagnosis(delivery, run)
+
+    assert value["primary_class"] is None
+    assert "model" not in value
+
+
+def test_observation_classes_survive_an_unverified_base(tmp_path, monkeypatch):
+    run = _undetermined_run(tmp_path, monkeypatch)
+    delivery.write_json(run / diagnosis.MODEL_ARTIFACT, _model_claim("unreproducible"))
+
+    value = diagnosis.diagnosis(delivery, run)
+
+    assert value["primary_class"] == "unreproducible"
+    # A model claim never makes a route automatic.
+    assert value["status"] == "operator_required"
+
+
+def test_one_decision_per_exhausted_state(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    first = diagnosis.choose(delivery, run, option_id="systemic-repair", reason="repair it")
+    chosen = diagnosis.choose(
+        delivery, run, option_id="systemic-repair", reason="repair it",
+        authorize=first["proposal"]["choice_sha256"],
+    )
+    assert chosen["state"] == "chosen" and "reused" not in chosen
+
+    # The same decision recorded again is the same decision, not a second record.
+    again = diagnosis.choose(delivery, run, option_id="systemic-repair", reason="repair it")
+    assert again["state"] == "chosen" and again["reused"] is True
+    assert again["choice"]["option"] == "systemic-repair"
+    records = list((diagnosis._rethink_root(delivery, run) / "choices").glob("*.json"))
+    assert len(records) == 1
+
+    # A different transition for the same exhausted state is refused outright.
+    for reason in ("replan instead", "repair it"):
+        with pytest.raises(delivery.DeliveryError, match="already carries"):
+            diagnosis.choose(delivery, run, option_id="revise-plan", reason=reason)
+    assert list((diagnosis._rethink_root(delivery, run) / "choices").glob("*.json")) == records
+
+
+def test_amendment_records_its_author(tmp_path, monkeypatch):
+    run = _undetermined_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    preview = diagnosis.amend_criterion(
+        delivery, run, condition="C1", before="old wording", after="new wording",
+        reason="the old wording is not expressible",
+    )
+    result = diagnosis.amend_criterion(
+        delivery, run, condition="C1", before="old wording", after="new wording",
+        reason="the old wording is not expressible",
+        authorize=preview["proposal"]["amendment_sha256"],
+    )
+
+    amendment = result["amendment"]
+    assert amendment["author"]["uid"] == os.getuid()
+    assert amendment["observed_at"]
+    assert amendment["before"] == "old wording"
+    assert amendment["after"] == "new wording"
