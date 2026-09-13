@@ -7634,6 +7634,18 @@ def build_repair_context(*, card: Path, run_dir: Path, reason: str) -> Path:
         "failed_verification_commands": failed_commands,
         "instruction": "Repair only the recorded root-cause findings or failed final-floor command. Do not repeat completed Change checkpoints or broad discovery. Refresh affected evidence, Result/Log, and finish with chrl handoff.",
     }
+    if reviews:
+        from scripts.changerail.exhaustion_diagnosis import recurrence
+
+        # The repair turn must see whether the same condition already failed
+        # before, instead of only the latest finding list.
+        payload["recurrence"] = recurrence(runner_module(), run_dir)
+        if payload["recurrence"]["observed_class"] == "repeat_defect":
+            payload["instruction"] += (
+                " The same condition already failed in an earlier review: a repeated"
+                " repair of the same shape is not sufficient. Change the approach and"
+                " state explicitly what is different this time."
+            )
     root = run_dir / "repair-contexts"
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"repair-{len(list(root.glob('repair-*.json'))) + 1:02d}.json"
