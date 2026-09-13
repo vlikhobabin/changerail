@@ -19,11 +19,12 @@ testpaths = ["tools/changerail/tests"]
 pythonpath = [".", "tools/changerail/tests"]
 # Heavy fixtures copy the pinned toolchain and build engine snapshots per test,
 # and /tmp here is a small RAM-backed tmpfs. pytest keeps the last three runs by
-# default, which multiplies that footprint and can fill the tmpfs - a full
-# copytree then fails with ENOSPC and the run reports a mass of unrelated
-# errors. Keep one generation, and only when something failed.
+# default, which multiplies that footprint. Keep one generation: the retention
+# policy stays "all" on purpose, because removing a passing test's tmp_path
+# during its own teardown races tests that patch os.scandir for the duration of
+# their teardown.
 tmp_path_retention_count = 1
-tmp_path_retention_policy = "failed"
+tmp_path_retention_policy = "all"
 
 [tool.ruff]
 target-version = "py311"
