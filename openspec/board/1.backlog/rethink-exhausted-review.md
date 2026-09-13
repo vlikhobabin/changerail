@@ -119,6 +119,14 @@ unassigned
 - `./.venv/bin/python -m ruff check scripts tools/changerail/tests distribution.py` — All checks passed.
 - `git diff --check` — clean.
 - `./.venv/bin/python scripts/public-surface-scan.py` — pass, 0 findings.
+- Регрессии проверены на осмысленность: те же тестовые файлы из `5a12c46`,
+  запущенные против прежнего кода `f399917` во временном worktree, падают
+  11 раз (`test_recorded_decision_reaches_the_continuation`,
+  `test_re_review_decision_skips_repair_and_reviews_the_unchanged_payload`,
+  `test_separate_route_decision_stops_instead_of_repairing`,
+  `test_payload_change_makes_the_decision_and_diagnosis_stale`, плюс семь тестов
+  диагностики), то есть они действительно доказывают исправления, а не
+  повторяют текущее поведение.
 - `./bin/test-changerail` не запускался: dev-лаунчер осознанно отказывает в
   checkout'е инструмента, полный набор принадлежит CI ChangeRail.
 
