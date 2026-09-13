@@ -394,7 +394,7 @@ successor с `recovery_of` на выбранную последнюю попыт
 
 ```sh
 chrl_tool=/opt/example-changerail-next
-chrl_archive=/opt/example-releases/changerail-2.0.0-rc.5-runtime.tar.gz
+chrl_archive=/opt/example-releases/changerail-2.0.0-rc.6-runtime.tar.gz
 "$chrl_tool/bin/chrl" --project "$chrl_project" plan-restore-prepare "$chrl_run" \
   --reason 'Восстановление Next с проверяемым переходом установленного runtime' \
   --runtime-archive "$chrl_archive"

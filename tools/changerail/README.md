@@ -1,6 +1,6 @@
 # Единый локальный runtime ChangeRail
 
-Этот комплект содержит общий native runtime. Версия кандидата `2.0.0-rc.5`
+Этот комплект содержит общий native runtime. Версия кандидата `2.0.0-rc.6`
 добавляет executor из отдельного релиза для будущих запусков и совокупные
 тестовые доказательства с поддержкой вызываемых helpers. Это предварительная версия
 для испытаний перед стабильным выпуском 2.0.0.
@@ -18,7 +18,7 @@ checkout через симлинки. В режиме разработки до�
 Применение и восстановление обновления выполняют внешним coordinator. Локальные
 настройки и сохранённая история остаются у проекта; переключение не создаёт
 successor и не расширяет право продолжать старые frozen runs. Порядок действий —
-в [runbook двух каталогов](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/working-checkout.md).
+в [runbook двух каталогов](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.6/docs/working-checkout.md).
 
 ## Тестовые доказательства
 
@@ -134,11 +134,11 @@ OpenSpec 1.3.1. Установка зависимостей OpenSpec выпол�
 Расширенные runbooks находятся в исходном репозитории; runtime-архив их не
 копирует в потребителя. Для этой версии используйте документы точного тега:
 
-- [Первая установка и доставка](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/quickstart.md).
-- [Эксплуатация и восстановление](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/operations.md).
-- [Общий исходник](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/docs/shared-source.md).
-- [Полномочия запуска](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.5/SECURITY.md).
-- [Архив, контрольные суммы и происхождение](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.5).
+- [Первая установка и доставка](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.6/docs/quickstart.md).
+- [Эксплуатация и восстановление](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.6/docs/operations.md).
+- [Общий исходник](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.6/docs/shared-source.md).
+- [Полномочия запуска](https://github.com/vlikhobabin/changerail/blob/v2.0.0-rc.6/SECURITY.md).
+- [Архив, контрольные суммы и происхождение](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.6).
 
 Runner требует `main` с upstream и при успешной доставке выполняет commit и
 push. `require_push=false` пропускает лишь проверку доступности remote в doctor.

@@ -1,6 +1,6 @@
 # Первый запуск ChangeRail
 
-Этот сценарий устанавливает runtime `v2.0.0-rc.5` в новый Git-проект на Linux
+Этот сценарий устанавливает runtime `v2.0.0-rc.6` в новый Git-проект на Linux
 после публикации тега и assets и проверки CI точного release commit.
 Для существующего проекта с прежним ChangeRail используйте
 [принятие и обновление](../DISTRIBUTION.md); для разработки общего исходника —
@@ -25,8 +25,8 @@ push в его `main`, Git identity (`user.name`, `user.email`) и зависи�
 переменные действуют в одной Bash-сессии.
 
 ```sh
-release_tag=v2.0.0-rc.5
-release_version=2.0.0-rc.5
+release_tag=v2.0.0-rc.6
+release_version=2.0.0-rc.6
 tool_root="$HOME/tools/changerail-$release_version"
 release_dir="$HOME/downloads/changerail-$release_version"
 project_root="$HOME/projects/example-project"
@@ -241,7 +241,7 @@ cp tools/changerail/templates/card-template.md \
 и проверки отсутствия неразрешённых записей. Assertions вызываемого helper
 можно оставить на месте с проверяемой ссылкой на вызов; общий wrapper не нужен.
 
-Эти расширения входят в `v2.0.0-rc.5` и требуют совместимого engine
+Эти расширения входят в `v2.0.0-rc.6` и требуют совместимого engine
 **до принятия плана**. Старый `v2.0.0-rc.4` не получает их от изменения
 документации: для него сохраняйте прежний singleton method без новых полей.
 Не редактируйте принятый Verify и старую историю для смены формата; корректные

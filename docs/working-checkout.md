@@ -30,9 +30,9 @@ chrl_coordinator=/srv/tools/changerail-dev
 chrl_dev=/srv/projects/example-dev
 chrl_release=/srv/tools/changerail-release
 chrl_assets=/srv/downloads/changerail-release
-chrl_tag=v2.0.0-rc.5
+chrl_tag=v2.0.0-rc.6
 chrl_update=/srv/private-receipts/changerail-first-acceptance
-chrl_archive="$chrl_assets/changerail-2.0.0-rc.5-runtime.tar.gz"
+chrl_archive="$chrl_assets/changerail-2.0.0-rc.6-runtime.tar.gz"
 chrl_provenance="$chrl_assets/release-provenance.json"
 chrl_node=$(command -v node)
 
@@ -146,7 +146,7 @@ prepare/apply` с новым proposal, без `--bootstrap`. Git tag уже до
 ```sh
 chrl_work=/srv/tools/changerail
 chrl_backup=/srv/private-backups/changerail-before-update
-chrl_tag=v2.0.0-rc.5
+chrl_tag=v2.0.0-rc.6
 umask 077
 mkdir -p "$chrl_backup"
 git -C "$chrl_work" status --short

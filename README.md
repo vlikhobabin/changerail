@@ -1,6 +1,6 @@
 # Единый локальный runtime ChangeRail
 
-Этот репозиторий — общий исходник native runtime. Кандидат `2.0.0-rc.5`
+Этот репозиторий — общий исходник native runtime. Кандидат `2.0.0-rc.6`
 добавляет executor из отдельного релиза для будущих запусков и совокупные
 тестовые доказательства с поддержкой вызываемых helpers. Это предварительная версия
 для испытаний перед стабильным выпуском 2.0.0.
@@ -20,9 +20,9 @@
 - [Разработка](CONTRIBUTING.md) и [выпуск релиза](docs/releasing.md).
 - [Полномочия запуска и безопасность](SECURITY.md).
 
-Изменения кандидата описаны в [release notes](docs/releases/2.0.0-rc.5.md).
+Изменения кандидата описаны в [release notes](docs/releases/2.0.0-rc.6.md).
 После проверки точного release commit на
-[странице выпуска v2.0.0-rc.5](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.5)
+[странице выпуска v2.0.0-rc.6](https://github.com/vlikhobabin/changerail/releases/tag/v2.0.0-rc.6)
 публикуются runtime-архив, `SHA256SUMS` и `release-provenance.json`.
 
 ## Исполнитель из отдельного релиза
