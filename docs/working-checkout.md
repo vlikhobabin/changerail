@@ -137,6 +137,41 @@ prepare/apply` с новым proposal, без `--bootstrap`. Git tag уже до
 Профиль, defaults/auth, board и retained history остаются локальными; обновление
 не расширяет review allowance и не восстанавливает право исполнения старых runs.
 
+## Уборка перед обновлением
+
+Обновление выполняют на checkout'е без мусора. Updater инвентаризирует
+protected-пути пофайлово, поэтому накопленные дымовые и CI-артефакты напрямую
+превращаются во время обновления и в размер receipt'а: на одном executor'е
+`.runtime` занимал 8.1 ГБ и 684 755 файлов, `release-update prepare` шёл 21 минуту
+и писал proposal на 727 МБ, тогда как сам ChangeRail — около 2 МБ.
+
+Удаляют две категории:
+
+- **старое и экспериментальное, не нужное для работы самого ChangeRail**:
+  дымовые и CI-прогоны, лабораторные и Windows-проверки, probe/drift/experiment
+  каталоги, завершённые миграции и разовые отчёты;
+- **то, что восстанавливается само или проявляется заново**: `__pycache__`,
+  `.pytest_cache`, `.ruff_cache`, `*.egg-info`, а также `.venv/` и
+  `tools/openspec/node_modules/` — их проявляет dependency inventory
+  (`requires_provisioning`), и после успешного обновления они должны собраться
+  заново из новых объявлений.
+
+Сохраняют: `.git/`, исходники, `openspec/` (board и specs), `.changerail/`
+(профиль, binding, launchers), сохранённую историю доставки и `.codex` без
+кэшей. `delivery.lock` не удаляют.
+
+```sh
+chrl_work=/srv/tools/changerail
+du -sh "$chrl_work"/.runtime/* "$chrl_work"/.runtime/changerail/* 2>/dev/null | sort -h
+git -C "$chrl_work" status --short > "$chrl_backup/status-before-cleanup.txt"
+# удалите явным списком только опознанное; затем сверьте status с сохранённым
+```
+
+Уборка — обязательный шаг обновления, но выполняет её оператор: `release-update`
+сохранённую историю потребителя не удаляет, потому что не может отличить его
+мусор от нужной истории. Критерий простой: если данные не нужны для работы
+ChangeRail или восстанавливаются сами — их удаляют до `prepare`.
+
 ## Инвентаризация и backup
 
 Выберите опубликованный tag и скачайте assets по [quickstart](quickstart.md).
