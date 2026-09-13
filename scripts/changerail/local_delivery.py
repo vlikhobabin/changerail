@@ -7748,7 +7748,27 @@ def orchestrate_delivery(
         emit_event("review", "waiting")
         review_code = run_review(str(card))
         if review_code == 3:
-            require_remaining(runner_module(), run_dir, after=" after NO-GO")
+            try:
+                require_remaining(runner_module(), run_dir, after=" after NO-GO")
+            except DeliveryError as exc:
+                # Exhaustion is a working state, not a dead end: record a bounded
+                # diagnosis of the whole review history so the operator decides
+                # among the transitions the situation actually supports.
+                from scripts.changerail import exhaustion_diagnosis
+
+                try:
+                    value = exhaustion_diagnosis.write_diagnosis(
+                        runner_module(), run_dir
+                    )
+                except DeliveryError:
+                    raise exc from None
+                emit_event("rethink", "awaiting-operator-decision")
+                options = ", ".join(item["id"] for item in value["options"])
+                raise DeliveryError(
+                    f"{exc}; diagnosis {value['primary_class'] or 'undetermined'}"
+                    f" (recommended: {value['recommendation'] or 'operator judgement'});"
+                    f" available: {options}"
+                ) from None
             repair_reason = "semantic_review"
             repair_thread_id = thread_id
             repair = build_repair_context(
@@ -8170,6 +8190,17 @@ def build_parser() -> argparse.ArgumentParser:
     allow_parser.add_argument("run_dir", type=Path)
     allow_parser.add_argument("--reason", required=True)
     allow_parser.add_argument("--authorize")
+    rethink_parser = subparsers.add_parser(
+        "rethink",
+        help="show the exhausted-review diagnosis and record an operator choice",
+    )
+    rethink_parser.add_argument("run_dir", type=Path)
+    rethink_parser.add_argument("--option")
+    rethink_parser.add_argument("--amend-criterion", dest="amend_condition")
+    rethink_parser.add_argument("--before")
+    rethink_parser.add_argument("--after")
+    rethink_parser.add_argument("--reason")
+    rethink_parser.add_argument("--authorize")
     doctor_parser = subparsers.add_parser("doctor")
     doctor_parser.add_argument("card")
     doctor_parser.add_argument("--no-remote", action="store_true")
@@ -8415,6 +8446,40 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             run_dir = args.run_dir if args.run_dir.is_absolute() else REPO_ROOT / args.run_dir
             result = review_allow(runner_module(), run_dir, reason=args.reason, authorize=args.authorize)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "rethink":
+            from scripts.changerail import exhaustion_diagnosis
+
+            run_dir = args.run_dir if args.run_dir.is_absolute() else REPO_ROOT / args.run_dir
+            if args.amend_condition:
+                if not args.reason or not args.before or not args.after:
+                    raise DeliveryError(
+                        "criterion amendment requires --before, --after and --reason"
+                    )
+                result = exhaustion_diagnosis.amend_criterion(
+                    runner_module(),
+                    run_dir,
+                    condition=args.amend_condition,
+                    before=args.before,
+                    after=args.after,
+                    reason=args.reason,
+                    authorize=args.authorize,
+                )
+            elif args.option:
+                if not args.reason:
+                    raise DeliveryError("choosing an option requires --reason")
+                result = exhaustion_diagnosis.choose(
+                    runner_module(),
+                    run_dir,
+                    option_id=args.option,
+                    reason=args.reason,
+                    authorize=args.authorize,
+                )
+            else:
+                result = exhaustion_diagnosis.write_diagnosis(
+                    runner_module(), run_dir
+                )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "status":

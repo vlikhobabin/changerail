@@ -211,3 +211,320 @@ def recurrence(d: Any, run_dir: Path) -> dict[str, Any]:
         "observed_class": observed,
         "recurrence_sha256": _digest(evidence),
     }
+
+
+DIAGNOSIS_SCHEMA = "changerail.exhausted-review-diagnosis.v1"
+CHOICE_SCHEMA = "changerail.exhausted-review-choice.v1"
+AMENDMENT_SCHEMA = "changerail.criterion-amendment.v1"
+
+# Closed class set: the class decides which transitions are offered, so an
+# unknown situation must fall back to an operator menu rather than to a guess.
+CLASSES = (
+    "repeat_defect",
+    "incomplete_work",
+    "plan_conflict",
+    "evidence_model_gap",
+    "unreproducible",
+    "infrastructure",
+    "unsatisfiable",
+)
+
+OPTION_SPECS: dict[str, dict[str, Any]] = {
+    "systemic-repair": {
+        "effect": "One in-scope repair that changes the approach, then one independent review.",
+        "reviews": 1,
+        "scope": "in-scope",
+        "architecture": False,
+        "transition": "repair",
+    },
+    "continue-repair": {
+        "effect": "Finish the remaining in-scope work, then one independent review.",
+        "reviews": 1,
+        "scope": "in-scope",
+        "architecture": False,
+        "transition": "repair",
+    },
+    "re-review": {
+        "effect": "Repeat the independent review on the unchanged payload.",
+        "reviews": 1,
+        "scope": "in-scope",
+        "architecture": False,
+        "transition": "review",
+    },
+    "revise-plan": {
+        "effect": "Close this attempt as unsuccessful and accept a separate new plan.",
+        "reviews": 0,
+        "scope": "new-plan",
+        "architecture": True,
+        "transition": "close-and-replan",
+    },
+    "extend-proof-model": {
+        "effect": "Change the tool so the required proof can be expressed, then replan.",
+        "reviews": 0,
+        "scope": "tool-change",
+        "architecture": True,
+        "transition": "close-and-replan",
+    },
+    "amend-criterion": {
+        "effect": "Restate an unachievable acceptance criterion as a separate operator decision.",
+        "reviews": 1,
+        "scope": "criterion",
+        "architecture": False,
+        "transition": "amend-criterion",
+    },
+    "technical-recovery": {
+        "effect": "Treat the stop as an infrastructure failure and use the existing recovery route.",
+        "reviews": 0,
+        "scope": "infrastructure",
+        "architecture": False,
+        "transition": "technical-recovery",
+    },
+    "close-attempt": {
+        "effect": "Close the attempt as unsuccessful without a new plan.",
+        "reviews": 0,
+        "scope": "terminal",
+        "architecture": False,
+        "transition": "close-attempt",
+    },
+}
+
+CLASS_OPTIONS: dict[str, tuple[str, ...]] = {
+    "repeat_defect": ("systemic-repair", "revise-plan"),
+    "incomplete_work": ("continue-repair", "revise-plan"),
+    "plan_conflict": ("revise-plan", "amend-criterion"),
+    "evidence_model_gap": ("extend-proof-model", "amend-criterion", "revise-plan"),
+    "unreproducible": ("re-review", "systemic-repair"),
+    "infrastructure": ("technical-recovery",),
+    "unsatisfiable": ("amend-criterion", "revise-plan"),
+}
+FALLBACK_OPTIONS = (
+    "systemic-repair",
+    "revise-plan",
+    "amend-criterion",
+    "technical-recovery",
+    "close-attempt",
+)
+
+RECOMMENDED = {
+    "repeat_defect": "systemic-repair",
+    "incomplete_work": "continue-repair",
+    "plan_conflict": "revise-plan",
+    "evidence_model_gap": "extend-proof-model",
+    "unreproducible": "re-review",
+    "infrastructure": "technical-recovery",
+    "unsatisfiable": "amend-criterion",
+}
+
+
+def options_for(primary_class: str | None) -> list[dict[str, Any]]:
+    """Transitions offered for one class; an unknown class offers the full menu."""
+    ids = CLASS_OPTIONS.get(primary_class or "", FALLBACK_OPTIONS)
+    return [{"id": name, **OPTION_SPECS[name]} for name in ids]
+
+
+def _rationale(primary: str | None, report: dict[str, Any]) -> str:
+    if primary == "repeat_defect":
+        parts = []
+        if report["recurring_conditions"]:
+            parts.append(
+                "conditions already failed earlier: "
+                + ", ".join(report["recurring_conditions"])
+            )
+        if report["recurring_findings"]:
+            parts.append(
+                "findings on paths reported earlier: "
+                + ", ".join(str(row.get("id")) for row in report["recurring_findings"])
+            )
+        return (
+            "The same work was rejected again ("
+            + "; ".join(parts)
+            + "). A repair of the same shape did not change the outcome."
+        )
+    if primary == "incomplete_work":
+        return (
+            "The latest review rejected conditions earlier reviews did not: "
+            + ", ".join(report["new_failures"])
+            + ". The remaining work looks incomplete rather than wrongly approached."
+        )
+    if primary == "infrastructure":
+        return "The stop is attributable to infrastructure, not to a product defect."
+    return (
+        "The retained verdicts show neither a repeated condition nor a newly failed"
+        " one, so the situation needs an explicit decision."
+    )
+
+
+def diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
+    """Build a bounded diagnosis for an exhausted review lineage.
+
+    The artifact is a proposal: it states the observed class, why, and which
+    already-supported transitions are available. It spends no review, grants no
+    slot and changes no criterion or plan.
+    """
+    report = recurrence(d, run_dir)
+    primary = report["observed_class"]
+    if primary is not None and primary not in CLASSES:
+        raise DeliveryError(f"unsupported diagnosis class: {primary}")
+    return {
+        "schema": DIAGNOSIS_SCHEMA,
+        "run": report["run"],
+        "primary_class": primary,
+        "status": "auto" if primary == "infrastructure" else "operator_required",
+        "rationale": _rationale(primary, report),
+        "options": options_for(primary),
+        "recommendation": RECOMMENDED.get(primary or ""),
+        "recurrence": report,
+        "diagnosis_sha256": _digest(
+            {
+                "run": report["run"],
+                "recurrence_sha256": report["recurrence_sha256"],
+                "primary_class": primary,
+            }
+        ),
+    }
+
+
+def _rethink_root(d: Any, run_dir: Path) -> Path:
+    return d.RUNTIME_ROOT / "rethink" / run_dir.name
+
+
+def write_diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
+    """Write the diagnosis for the current state, reusing an unchanged one."""
+    root = _rethink_root(d, run_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "diagnosis.json"
+    if path.is_file():
+        current = d.load_json(path)
+        fresh = diagnosis(d, run_dir)
+        if current.get("diagnosis_sha256") == fresh["diagnosis_sha256"]:
+            return current
+    value = diagnosis(d, run_dir)
+    d.write_json(path, value)
+    return value
+
+
+def load_diagnosis(d: Any, run_dir: Path) -> dict[str, Any]:
+    """Load a diagnosis and refuse a stale one for changed lineage state."""
+    path = _rethink_root(d, run_dir) / "diagnosis.json"
+    if not path.is_file():
+        raise DeliveryError("no exhausted-review diagnosis for this run")
+    value = d.load_json(path)
+    if value.get("diagnosis_sha256") != diagnosis(d, run_dir)["diagnosis_sha256"]:
+        raise DeliveryError("diagnosis is stale for the current review history")
+    return value
+
+
+def _operator() -> None:
+    from scripts.changerail.review_allowance import _operator as guard
+
+    guard()
+
+
+def _append(d: Any, directory: Path, prefix: str, value: dict[str, Any]) -> Path:
+    from scripts.changerail import plan_restoration as retained
+
+    directory.mkdir(parents=True, exist_ok=True)
+    retained._sync(directory.parent)
+    path = directory / f"{len(list(directory.glob(f'{prefix}-*.json'))) + 1:04d}.json"
+    retained._write(path, value)
+    return path
+
+
+def choose(
+    d: Any,
+    run_dir: Path,
+    *,
+    option_id: str,
+    reason: str,
+    authorize: str | None = None,
+) -> dict[str, Any]:
+    """Preview or append one immutable operator choice for a diagnosis."""
+    _operator()
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 1000:
+        raise DeliveryError("choice requires a reason of 1..1000 characters")
+    run_dir = Path(run_dir).resolve()
+    if not run_dir.is_relative_to(d.RUNTIME_ROOT / "runs"):
+        raise DeliveryError("choice requires an exact retained run directory")
+    with d.delivery_lock():
+        value = load_diagnosis(d, run_dir)
+        available = {item["id"] for item in value["options"]}
+        if option_id not in available:
+            raise DeliveryError(f"option is not available for this diagnosis: {option_id}")
+        proposal = {
+            "schema": CHOICE_SCHEMA,
+            "run": value["run"],
+            "diagnosis_sha256": value["diagnosis_sha256"],
+            "primary_class": value["primary_class"],
+            "option": option_id,
+            "transition": OPTION_SPECS[option_id]["transition"],
+            "reviews": OPTION_SPECS[option_id]["reviews"],
+            "reason": reason.strip(),
+        }
+        proposal["choice_sha256"] = _digest(proposal)
+        if authorize is None:
+            return {"state": "preview", "proposal": proposal}
+        if authorize != proposal["choice_sha256"]:
+            raise DeliveryError("stale choice digest; preview the current diagnosis")
+        path = _append(d, _rethink_root(d, run_dir) / "choices", "choice", proposal)
+        return {"state": "chosen", "choice": proposal, "path": d.repo_relative(path)}
+
+
+def amend_criterion(
+    d: Any,
+    run_dir: Path,
+    *,
+    condition: str,
+    before: str,
+    after: str,
+    reason: str,
+    authorize: str | None = None,
+) -> dict[str, Any]:
+    """Preview or append one immutable operator criterion amendment.
+
+    The previous wording stays in the record, so history is preserved and the
+    amendment cannot rewrite what earlier reviews judged.
+    """
+    _operator()
+    for label, text in (("before", before), ("after", after), ("reason", reason)):
+        if not isinstance(text, str) or not 1 <= len(text.strip()) <= 2000:
+            raise DeliveryError(f"criterion amendment {label} must be 1..2000 characters")
+    name = condition_name(condition) or condition
+    run_dir = Path(run_dir).resolve()
+    if not run_dir.is_relative_to(d.RUNTIME_ROOT / "runs"):
+        raise DeliveryError("amendment requires an exact retained run directory")
+    with d.delivery_lock():
+        value = load_diagnosis(d, run_dir)
+        # The class is advisory: a deterministic analysis cannot prove a
+        # criterion unexpressible, so an undetermined situation still lets the
+        # operator restate it explicitly. A repeated defect does not.
+        if value["primary_class"] not in {
+            None,
+            "unsatisfiable",
+            "evidence_model_gap",
+            "plan_conflict",
+        }:
+            raise DeliveryError(
+                "criterion amendment requires an undetermined, unachievable or "
+                "unexpressible criterion diagnosis"
+            )
+        proposal = {
+            "schema": AMENDMENT_SCHEMA,
+            "run": value["run"],
+            "diagnosis_sha256": value["diagnosis_sha256"],
+            "condition": name,
+            "before": before.strip(),
+            "after": after.strip(),
+            "reason": reason.strip(),
+        }
+        proposal["amendment_sha256"] = _digest(proposal)
+        if authorize is None:
+            return {"state": "preview", "proposal": proposal}
+        if authorize != proposal["amendment_sha256"]:
+            raise DeliveryError("stale amendment digest; preview the current diagnosis")
+        path = _append(
+            d,
+            _rethink_root(d, run_dir) / "criterion-amendments",
+            "amendment",
+            proposal,
+        )
+        return {"state": "amended", "amendment": proposal, "path": d.repo_relative(path)}

@@ -204,3 +204,166 @@ def test_repair_context_carries_the_recurrence(tmp_path, monkeypatch):
     payload = json.loads(context.read_text(encoding="utf-8"))
     assert payload["recurrence"]["observed_class"] == "repeat_defect"
     assert "Change the approach" in payload["instruction"]
+
+
+def _repeat_run(tmp_path, monkeypatch):
+    first = _verdict("no-go", [_condition("C1", "fail")], [_finding(1, ["src/a.py"])])
+    second = _verdict("no-go", [_condition("C1", "fail")], [_finding(1, ["src/a.py"])])
+    return _run(tmp_path, monkeypatch, [first, second])
+
+
+def _undetermined_run(tmp_path, monkeypatch):
+    first = _verdict("no-go", [_condition("C1", "fail")], [])
+    second = _verdict("no-go", [], [_finding(1, ["src/x.py"])])
+    return _run(tmp_path, monkeypatch, [first, second])
+
+
+def test_diagnosis_for_repeat_offers_repair_and_replan(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+
+    value = diagnosis.diagnosis(delivery, run)
+
+    assert value["schema"] == "changerail.exhausted-review-diagnosis.v1"
+    assert value["primary_class"] == "repeat_defect"
+    assert value["status"] == "operator_required"
+    assert value["recommendation"] == "systemic-repair"
+    assert [item["id"] for item in value["options"]] == [
+        "systemic-repair",
+        "revise-plan",
+    ]
+    assert "already failed earlier: C1" in value["rationale"]
+    # A diagnosis must not spend or grant review allowance.
+    assert all(item["reviews"] in (0, 1) for item in value["options"])
+
+
+def test_infrastructure_class_is_automatic(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    original = diagnosis.recurrence
+    monkeypatch.setattr(
+        diagnosis,
+        "recurrence",
+        lambda d, r: {**original(d, r), "observed_class": "infrastructure"},
+    )
+    value = diagnosis.diagnosis(delivery, run)
+    assert value["status"] == "auto"
+    assert [item["id"] for item in value["options"]] == ["technical-recovery"]
+
+
+def test_diagnosis_is_reused_and_refreshed(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+
+    first = diagnosis.write_diagnosis(delivery, run)
+    second = diagnosis.write_diagnosis(delivery, run)
+    assert first["diagnosis_sha256"] == second["diagnosis_sha256"]
+
+    changed = _verdict("go", [_condition("C1", "pass")], [])
+    delivery.write_json(run / "reviews" / "cycle-02.json", changed)
+    with pytest.raises(delivery.DeliveryError, match="stale"):
+        diagnosis.load_diagnosis(delivery, run)
+    third = diagnosis.write_diagnosis(delivery, run)
+    assert third["diagnosis_sha256"] != first["diagnosis_sha256"]
+
+
+def test_choice_preview_then_authorize_appends_one_record(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    preview = diagnosis.choose(
+        delivery, run, option_id="systemic-repair", reason="same approach failed twice"
+    )
+    assert preview["state"] == "preview"
+    digest = preview["proposal"]["choice_sha256"]
+    assert preview["proposal"]["transition"] == "repair"
+
+    with pytest.raises(delivery.DeliveryError, match="stale choice digest"):
+        diagnosis.choose(
+            delivery,
+            run,
+            option_id="systemic-repair",
+            reason="same approach failed twice",
+            authorize="0" * 64,
+        )
+
+    chosen = diagnosis.choose(
+        delivery,
+        run,
+        option_id="systemic-repair",
+        reason="same approach failed twice",
+        authorize=digest,
+    )
+    assert chosen["state"] == "chosen"
+    records = sorted((run.parent.parent / "rethink" / run.name / "choices").glob("*.json"))
+    assert len(records) == 1
+    assert json.loads(records[0].read_text())["option"] == "systemic-repair"
+
+
+def test_choice_rejects_an_option_outside_the_diagnosis(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    with pytest.raises(delivery.DeliveryError, match="not available"):
+        diagnosis.choose(
+            delivery, run, option_id="amend-criterion", reason="not offered here"
+        )
+
+
+def test_choice_and_amendment_require_an_operator_context(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+    monkeypatch.setenv("CHRL_RUN_DIR", str(run))
+
+    with pytest.raises(delivery.DeliveryError, match="outside worker context"):
+        diagnosis.choose(delivery, run, option_id="systemic-repair", reason="worker")
+    with pytest.raises(delivery.DeliveryError, match="outside worker context"):
+        diagnosis.amend_criterion(
+            delivery,
+            run,
+            condition="C1",
+            before="before",
+            after="after",
+            reason="worker",
+        )
+
+
+def test_criterion_amendment_preserves_the_previous_wording(tmp_path, monkeypatch):
+    run = _undetermined_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    preview = diagnosis.amend_criterion(
+        delivery,
+        run,
+        condition="C1",
+        before="the old, unachievable wording",
+        after="the restated wording",
+        reason="the criterion cannot be evidenced as written",
+    )
+    assert preview["state"] == "preview"
+    amended = diagnosis.amend_criterion(
+        delivery,
+        run,
+        condition="C1",
+        before="the old, unachievable wording",
+        after="the restated wording",
+        reason="the criterion cannot be evidenced as written",
+        authorize=preview["proposal"]["amendment_sha256"],
+    )
+    assert amended["state"] == "amended"
+    record = json.loads((tmp_path / amended["path"]).read_text())
+    assert record["before"] == "the old, unachievable wording"
+    assert record["after"] == "the restated wording"
+    assert record["condition"] == "C1"
+
+
+def test_criterion_amendment_is_refused_for_a_repeated_defect(tmp_path, monkeypatch):
+    run = _repeat_run(tmp_path, monkeypatch)
+    diagnosis.write_diagnosis(delivery, run)
+
+    with pytest.raises(delivery.DeliveryError, match="criterion amendment requires"):
+        diagnosis.amend_criterion(
+            delivery,
+            run,
+            condition="C1",
+            before="a",
+            after="b",
+            reason="not a criterion problem",
+        )
