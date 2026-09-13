@@ -150,11 +150,14 @@ protected-пути пофайлово, поэтому накопленные д�
 - **старое и экспериментальное, не нужное для работы самого ChangeRail**:
   дымовые и CI-прогоны, лабораторные и Windows-проверки, probe/drift/experiment
   каталоги, завершённые миграции и разовые отчёты;
-- **то, что восстанавливается само или проявляется заново**: `__pycache__`,
-  `.pytest_cache`, `.ruff_cache`, `*.egg-info`, а также `.venv/` и
-  `tools/openspec/node_modules/` — их проявляет dependency inventory
-  (`requires_provisioning`), и после успешного обновления они должны собраться
-  заново из новых объявлений.
+- **то, что восстанавливается само**: `__pycache__`, `.pytest_cache`,
+  `.ruff_cache`, `*.egg-info`.
+
+Зависимости (`/.venv`, `tools/openspec/node_modules`) перед `prepare` **не
+удаляют**: updater сверяет принятый dependency inventory на месте и заменяет их
+только на шаге `provision-lease` после `apply`. Удалённые заранее `.venv` или
+`node_modules` делают принятый receipt неудовлетворимым, и executor перестаёт
+запускаться, потому что каждый запуск проверяет их пофайлово, включая `.pyc`.
 
 Сохраняют: `.git/`, исходники, `openspec/` (board и specs), `.changerail/`
 (профиль, binding, launchers), сохранённую историю доставки и `.codex` без
