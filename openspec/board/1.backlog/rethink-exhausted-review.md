@@ -49,11 +49,15 @@ unassigned
 - [C4] Когда системного пути нет, доставка останавливается штатным состоянием `awaiting-operator-decision` с сохранением истории, accounting и frozen identity, и оператор получает варианты с эффектом, ценой, предусловиями и рекомендацией. Выбор фиксируется неизменяемой записью и продолжает работу по той же карточке: системный ремонт с обычным независимым ревью, либо закрытие неуспешной попытки и отдельное принятие нового плана, либо маршрут технического восстановления. Автоматического продолжения без решения оператора нет; недопустимый выбор отклоняется до запуска writer.
 
 ## Scope
-- `scripts/changerail/exhaustion_diagnosis.py` (новый модуль), `native_workflow.py`, `local_delivery.py`, `review_allowance.py`: разбор повторяемости, стадия диагностики, состояние ожидания, запись выбора, маршруты продолжения.
-- `tools/changerail/schemas/exhausted-review-diagnosis.schema.json`: схема разбора.
-- `tools/changerail/skills/chrl-exhaustion-diagnosis/SKILL.md`: навык сессии диагностики; затронутые навыки deliver/review.
-- `tools/changerail/tests/test_exhaustion_diagnosis.py` и затронутые execution-contract тесты: синтетические регрессии C1–C4, включая реальный случай двух NO-GO.
-- `docs/operations.md`, `templates/profile.toml`, `tools/changerail/templates/profile.toml`: инструкция и роль диагностики.
+Фактический объём (сверен с реализацией 2026-09-12; плановая оценка называла
+отдельный файл схемы и отдельный skill — по design.md диагностика является
+режимом сессии доставки, а схема живёт константой в модуле):
+- `scripts/changerail/exhaustion_diagnosis.py` (новый модуль): разбор повторяемости, классы, варианты, артефакт диагностики, запись выбора и амендмента, автоматический маршрут инфраструктуры, состояние решения.
+- `scripts/changerail/local_delivery.py`, `review_allowance.py`, `contracts.py`: `ReviewExhausted`/`AwaitingDecision`, состояние `awaiting-operator-decision`, продолжение по записанному выбору, CLI `rethink`.
+- `scripts/changerail/native_workflow.py`: `stop_state` и `awaiting_decision` в `status`.
+- `tools/changerail/skills/chrl-native-deliver/SKILL.md`: правило `CHRL_DIAGNOSIS_CONTEXT` (диагностика — не ревью и не полномочие).
+- `tools/changerail/tests/test_exhaustion_diagnosis.py`, `test_review_allowance_integration.py`: регрессии C1–C4, включая форму реального случая двух NO-GO и отсутствие полномочий на реальном resume-маршруте.
+- `docs/operations.md`, `templates/profile.toml`, `tools/changerail/templates/profile.toml`: инструкция и необязательный route `[models.diagnosis]`.
 
 ## Non-Goals
 - Автоматическое третье ревью без слота и отмена лимита двух автономных ревью.
@@ -95,7 +99,7 @@ unassigned
   "conditions": [
     {"condition": "C1", "seam": "recurrence across verdicts", "precondition": "Synthetic lineage with two NO-GO verdicts where one condition closes and others repeat", "action": "Build the recurrence digest and inspect it", "expected": "Repeated and closed findings are labelled; verdicts, plan and card are byte-identical", "method": {"kind": "test", "target": "tools/changerail/tests/test_exhaustion_diagnosis.py"}, "stage": "implementation"},
     {"condition": "C2", "seam": "bounded idempotent diagnosis", "precondition": "Exhausted lineage state", "action": "Run diagnosis twice on unchanged state, then change the payload and re-run", "expected": "One diagnosis per state; the stale one becomes inapplicable; class is cross-checked against observations", "method": {"kind": "test", "target": "tools/changerail/tests/test_exhaustion_diagnosis.py"}, "stage": "implementation"},
-    {"condition": "C3", "seam": "no authority from diagnosis", "precondition": "A diagnosis proposing an in-scope systemic repair with no granted slot", "action": "Attempt to continue delivery and to change Acceptance from the diagnosis", "expected": "Writer does not start, criteria and scope stay unchanged, refusal is explicit", "method": {"kind": "test", "target": "tools/changerail/tests/test_native_execution_contract.py"}, "stage": "implementation"},
+    {"condition": "C3", "seam": "no authority from diagnosis", "precondition": "A diagnosis proposing an in-scope systemic repair with no granted slot", "action": "Record the choice, then attempt to continue delivery and to change Acceptance from the diagnosis", "expected": "Writer does not start, allowance, criteria and scope stay unchanged, refusal is explicit", "method": {"kind": "test", "target": "tools/changerail/tests/test_review_allowance_integration.py::test_diagnosis_grants_no_slot_and_never_continues_delivery"}, "stage": "implementation"},
     {"condition": "C4", "seam": "operator choice and continuation", "precondition": "No supported automatic path", "action": "Observe the awaiting state, record each option, and exercise in-scope repair, plan revision and technical recovery routes", "expected": "Stop is a normal state with preserved history; each choice continues on the same card or closes and replans separately; invalid choices are rejected before any writer", "method": {"kind": "test", "target": "tools/changerail/tests/test_exhaustion_diagnosis.py"}, "stage": "final"}
   ],
   "risks": [
@@ -107,10 +111,15 @@ unassigned
   ]
 }
 ```
-- `./.changerail/openspec validate rethink-exhausted-review --strict --no-interactive`
-- `./bin/test-changerail`
-- `./.venv/bin/python -m ruff check scripts tools/changerail/tests distribution.py`
-- `git diff --check`
+Выполнено 2026-09-12 для решения `4fe6645` (проверки воспроизводимы на этом
+коммите):
+- `./.changerail/openspec validate rethink-exhausted-review --strict --no-interactive` — valid.
+- `./.venv/bin/python -m pytest -q tools/changerail/tests/test_exhaustion_diagnosis.py tools/changerail/tests/test_review_allowance_integration.py tools/changerail/tests/test_native_execution_contract.py tools/changerail/tests/test_native_openspec_integration.py` — 99 passed.
+- `./.venv/bin/python -m pytest -n 16 tools/changerail/tests -q` — 1266 passed за 5:21.
+- `./.venv/bin/python -m ruff check scripts tools/changerail/tests distribution.py` — All checks passed.
+- `git diff --check` — clean.
+- `./bin/test-changerail` не запускался: dev-лаунчер осознанно отказывает в
+  checkout'е инструмента, полный набор принадлежит CI ChangeRail.
 
 ## Related
 - `openspec/changes/rethink-exhausted-review/proposal.md`
@@ -122,7 +131,7 @@ unassigned
 - `.runtime/changerail/runs/20260912T091333Z-restore-accepted-task-wording` — реальный случай двух NO-GO
 
 ## Result
-Реализовано 17 из 20 задач. После каждого NO-GO строится разбор повторяемости и
+Реализовано 20 из 21 задачи. После каждого NO-GO строится разбор повторяемости и
 попадает в контекст ремонта; при исчерпании появляется диагностика с закрытым
 набором классов, обоснованием и вариантами, а неопределённая ситуация
 уточняется одной ограниченной сессией, если в профиле задан route
@@ -132,18 +141,31 @@ unassigned
 конкретное продолжение: повторное ревью, ремонт с изменённым подходом, закрытие
 попытки и новый план либо маршрут технического восстановления.
 
-Проверено: 26 тестов диагностики (включая форму реального случая
-`restore-accepted-task-wording` и кросс-проверку модельного класса), 147 тестов
-потребителей пути исчерпания, полный набор.
+Исчерпание остатка больше не является ошибкой: run останавливается штатным
+состоянием `awaiting-operator-decision` (код 3) с сохранением истории,
+accounting и frozen identity, `status` отдаёт `stop_state` и
+`awaiting_decision`, а повторный `resume` уже исчерпанного run возвращает ту же
+точку решения, читая сохранённый разбор предшественника и не переписывая его.
+Инфраструктурный класс автоматически готовит существующее техническое
+восстановление под его собственными гейтами; отказ гейта сообщается, а не
+продавливается.
 
-Осталось: 3.1 — оформить остановку отдельным состоянием run вместо пути ошибки;
-4.3 — вызывать техническое восстановление, а не только указывать на него;
-5.3 — внешний независимый review и архивация change.
+Проверено: 31 тест диагностики (включая форму реального случая
+`restore-accepted-task-wording`, кросс-проверку модельного класса и
+автоматический маршрут инфраструктуры), 11 тестов реального resume-маршрута
+учёта слотов (включая C3 — диагностика и записанный выбор не дают слота и не
+продолжают доставку), 49 тестов execution contract, полный набор 1266 тестов.
+
+Осталось: 5.4 — передать proofs внешнему независимому ревью и архивировать
+change после вердикта. Это операторское действие: worker не выдаёт себе ревью.
 
 ## Next
-- Закрыть 3.1, 4.3 и 5.3; затем передать свежие proofs внешнему review.
+- Передать коммит `4fe6645` внешнему независимому ревью вместе с C1–C4.
+- После вердикта применить delta-спеку и архивировать change.
 
 ## Log
 - 2026-09-12T18:30:00Z карточка создана по поручению оператора; change и план подготовлены, код не менялся.
 - 2026-09-12T19:30:00Z реализованы группы 1, 2.1-2.2, 2.5, 3.2-3.4: разбор повторяемости, артефакт диагностики с классами и вариантами, операторские записи выбора и амендмента, CLI `chrl rethink`; разбор выводится в точке исчерпания. Оператор подтвердил: отдельная модель роли в профиле, изменение критерия — отдельным решением.
 - 2026-09-12T20:30:00Z добавлены модельная диагностика (route `[models.diagnosis]`, контекст, артефакт, кросс-проверка класса, правило навыка), продолжение по записанному выбору и операторская документация. 17/20 задач.
+- 2026-09-12T22:10:00Z закрыты 3.1 и 4.3: исчерпание стало штатным состоянием `awaiting-operator-decision` вместо пути ошибки (`ReviewExhausted`, `AwaitingDecision`, код 3, `stop_state`/`awaiting_decision` в `status`), инфраструктурный класс автоматически готовит техническое восстановление под его гейтами. Коммит `4fe6645`.
+- 2026-09-12T22:40:00Z закрыт разрыв в доказательствах C3: объявленный target `test_native_execution_contract.py` не содержал ни одной проверки диагностики. Регрессия перенесена на реальный маршрут resume/учёта слотов (`test_diagnosis_grants_no_slot_and_never_continues_delivery`) и проверяет, что разбор и записанный выбор не расходуют и не выдают слот, не создают writer, не меняют карточку, scope и байты frozen run. Объявленный Scope карточки сверен с реализацией: отдельный файл схемы и отдельный skill заменены на константу в модуле и правило в навыке доставки (по design.md). 5.3 выполнено, 5.4 — внешний review.

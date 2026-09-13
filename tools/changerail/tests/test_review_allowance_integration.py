@@ -134,8 +134,7 @@ def test_public_resume_grants_third_then_fourth_without_reset_or_history_edits(l
         assert decision["recommendation"] is None
         assert "amend-criterion" in decision["options"]
         assert (delivery.REPO_ROOT / decision["diagnosis"]).is_file()
-
-        assert "amend-criterion" in stopped["awaiting_decision"]["options"]
+        assert "amend-criterion" in decision["options"]
         assert stopped["exit_code"] == 3
         status = policy.allowance(delivery, child)
         assert (status["operator_granted_slots"], status["spent_reviews"], status["remaining"]) == (ordinal - 2, ordinal, 0)
@@ -150,6 +149,44 @@ def test_public_resume_grants_third_then_fourth_without_reset_or_history_edits(l
     assert len(list((delivery.RUNTIME_ROOT / "review-authorizations" / original.name).glob("*.json"))) == 2
     assert delivery.main(["status", str(child)]) == 0
     assert card.exists()
+
+
+def test_diagnosis_grants_no_slot_and_never_continues_delivery(lineage):
+    """C3: a diagnosis and the choice it supports are proposals, not permissions."""
+    from scripts.changerail import exhaustion_diagnosis as rethink
+
+    _root, card, original, launches = lineage
+    exhaustion = policy.allowance(delivery, original)
+    assert (exhaustion["operator_granted_slots"], exhaustion["spent_reviews"], exhaustion["remaining"]) == (0, 2, 0)
+    # The stop is a decision point that records why, not an error path.
+    assert delivery.main(["resume", str(original)]) == 3
+    # This fixture keeps no per-cycle verdict history, so the analysis stays
+    # undetermined and offers the fallback operator menu.
+    recorded = rethink.write_diagnosis(delivery, original)
+    assert recorded["schema"] == "changerail.exhausted-review-diagnosis.v1"
+    assert "systemic-repair" in [item["id"] for item in recorded["options"]]
+
+    run_before = snapshot(original)
+    card_before = card.read_bytes()
+    reason = "repair the repeated defect inside the accepted scope"
+    preview = rethink.choose(delivery, original, option_id="systemic-repair", reason=reason)
+    assert preview["state"] == "preview"
+    rethink.choose(
+        delivery, original, option_id="systemic-repair", reason=reason,
+        authorize=preview["proposal"]["choice_sha256"],
+    )
+
+    # No slot is spent or granted by the diagnosis or by the recorded choice.
+    assert policy.allowance(delivery, original) == exhaustion
+    assert not (delivery.RUNTIME_ROOT / "review-authorizations" / original.name).exists()
+    # Nothing continues on its own: resume stops at the same decision point.
+    assert delivery.main(["resume", str(original)]) == 3
+    assert launches == [(original.name, 1, 1), (original.name, 2, 2)]
+    # Acceptance, scope and the frozen run are byte-identical; only the
+    # immutable decision record exists, and it lives outside the run.
+    assert snapshot(original) == run_before
+    assert card.read_bytes() == card_before
+    assert len(list((delivery.RUNTIME_ROOT / "rethink" / original.name / "choices").glob("*.json"))) == 1
 
 
 @pytest.mark.parametrize("boundary", ["mkdir", "context", "dispatch"])
